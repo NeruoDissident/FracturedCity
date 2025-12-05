@@ -7,18 +7,18 @@ simulation systems and rendering can share a single source of truth.
 # --- GRID / SCREEN ------------------------------------------------------------
 
 TILE_SIZE = 32
-GRID_W = 25
-GRID_H = 25
-GRID_Z = 10  # Number of Z-levels (0 = ground, 1+ = upper floors/rooftops)
+# Grid dimensions (tiles) - LARGE MAP
+GRID_W = 200
+GRID_H = 200
+GRID_Z = 3  # Number of Z-levels (0 = ground, 1 = first floor, 2 = second floor)
 
-SCREEN_W = TILE_SIZE * GRID_W
-SCREEN_H = TILE_SIZE * GRID_H
+# Screen dimensions - LARGER WINDOW
+SCREEN_W = 1600
+SCREEN_H = 900
 
 # --- SIMULATION ---------------------------------------------------------------
 
 COLONIST_COUNT = 10
-
-# --- COLORS -------------------------------------------------------------------
 
 COLOR_BG_NORMAL = (20, 20, 20)
 COLOR_BG_ETHER = (15, 0, 25)
@@ -29,6 +29,13 @@ COLOR_TILE_BUILDING = (200, 180, 60)
 COLOR_TILE_FINISHED_BUILDING = (170, 150, 40)
 COLOR_TILE_WALL = (100, 100, 110)           # planned wall (under construction)
 COLOR_TILE_FINISHED_WALL = (80, 80, 90)     # completed wall
+COLOR_TILE_STREET = (45, 45, 50)            # dark gray for city streets
+COLOR_TILE_SIDEWALK = (55, 55, 60)          # slightly lighter gray for sidewalks
+COLOR_TILE_DEBRIS = (65, 60, 55)            # brownish gray for debris/rubble
+COLOR_TILE_WEEDS = (35, 45, 30)             # dark greenish for overgrowth
+COLOR_TILE_PROP_BARREL = (70, 50, 40)       # rusty barrel
+COLOR_TILE_PROP_SIGN = (60, 65, 70)         # broken sign post
+COLOR_TILE_PROP_SCRAP = (75, 70, 65)        # scrap heap
 COLOR_DRAG_PREVIEW = (100, 150, 255, 100)   # semi-transparent blue for drag rectangle
 
 # Color used for small progress indicators on construction tiles.

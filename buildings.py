@@ -471,6 +471,8 @@ def can_place_fire_escape(grid: Grid, x: int, y: int, z: int = 0) -> Tuple[bool,
     
     Returns (can_place, platform_direction) where platform_direction is (dx, dy)
     pointing to where the external platform would be.
+    
+    The platform MUST be placed on the EXTERIOR side (opposite from interior floor).
     """
     import rooms
     
@@ -479,25 +481,41 @@ def can_place_fire_escape(grid: Grid, x: int, y: int, z: int = 0) -> Tuple[bool,
     if tile not in ("finished_wall", "finished_wall_advanced"):
         return False, None
     
-    # Find an adjacent tile for the platform that is EXTERIOR (not inside the room)
-    # Interior tiles are: finished_floor, roof_access, roof_floor, floor
-    # We want the platform on the OPPOSITE side from interior
+    # Interior tiles (inside the building)
     interior_tiles = {"finished_floor", "roof_access", "roof_floor", "floor"}
-    
-    # Check each direction - find one where the platform tile is NOT interior
-    # and is placeable (empty or roof)
+    # Placeable exterior tiles (outside the building)
     placeable_tiles = {"empty", "roof"}
     
+    # Check all four directions
+    # Priority: Find a direction where ONE side is interior and the OTHER side is exterior
+    # This ensures the window_tile replaces the wall and platform goes outside
+    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+        # One side of the wall
+        side_a_x, side_a_y = x + dx, y + dy
+        # Opposite side of the wall
+        side_b_x, side_b_y = x - dx, y - dy
+        
+        if not grid.in_bounds(side_a_x, side_a_y, z) or not grid.in_bounds(side_b_x, side_b_y, z):
+            continue
+        
+        tile_a = grid.get_tile(side_a_x, side_a_y, z)
+        tile_b = grid.get_tile(side_b_x, side_b_y, z)
+        
+        # Case 1: Side A is interior, Side B is exterior (platform goes to B)
+        if tile_a in interior_tiles and tile_b in placeable_tiles:
+            return True, (-dx, -dy)  # Platform direction is AWAY from interior
+        
+        # Case 2: Side B is interior, Side A is exterior (platform goes to A)
+        if tile_b in interior_tiles and tile_a in placeable_tiles:
+            return True, (dx, dy)  # Platform direction is AWAY from interior
+    
+    # Fallback: If no clear interior/exterior distinction, find any placeable exterior
     for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
         px, py = x + dx, y + dy
         if not grid.in_bounds(px, py, z):
             continue
         
         platform_tile = grid.get_tile(px, py, z)
-        
-        # Skip if this is an interior tile
-        if platform_tile in interior_tiles:
-            continue
         
         # Platform must be placeable (empty ground or roof)
         if platform_tile in placeable_tiles:
@@ -1023,12 +1041,19 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
             continue
         
         # Create crafting job at workstation location
+        # Determine job category based on workstation type
+        workstation_type = ws.get("type", "")
+        if workstation_type == "stove":
+            job_category = "cooking"
+        else:
+            job_category = "crafting"
+        
         work_time = recipe.get("work_time", 60)
         jobs_module.add_job(
             "crafting",
             x, y,
             required=work_time,
-            category="crafting",
+            category=job_category,
             z=z,
         )
         mark_crafting_job_created(x, y, z)

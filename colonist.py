@@ -48,6 +48,7 @@ class ColonistState(Enum):
 
 
 # Default capabilities - all job categories a colonist can potentially do
+# Legacy categories (kept for compatibility)
 DEFAULT_CAPABILITIES = {
     "wall": True,
     "harvest": True,
@@ -55,6 +56,16 @@ DEFAULT_CAPABILITIES = {
     "haul": True,
     "crafting": True,
     "salvage": True,
+}
+
+# Job tags - user-facing toggles for job assignment
+# These map to multiple job categories for easier management
+DEFAULT_JOB_TAGS = {
+    "can_build": True,      # Construction, walls, floors, doors, etc.
+    "can_cook": True,       # Cooking at stove
+    "can_craft": True,      # Crafting at workbenches (salvager's bench, etc.)
+    "can_haul": True,       # Hauling resources to stockpiles and construction sites
+    "can_scavenge": True,   # Salvaging and harvesting resources
 }
 
 
@@ -109,6 +120,9 @@ class Colonist:
         # All True by default; future systems can disable specific capabilities
         self.capabilities: dict[str, bool] = DEFAULT_CAPABILITIES.copy()
         
+        # Job tags - user-facing toggles for job assignment
+        self.job_tags: dict[str, bool] = DEFAULT_JOB_TAGS.copy()
+        
         # Carrying state for haul jobs
         self.carrying: dict | None = None  # {"type": "wood", "amount": 1}
         
@@ -120,7 +134,213 @@ class Colonist:
         self.health: float = 100.0  # 0 = dead
         self.starving_damage: float = 0.05  # Damage per tick when hunger >= 100 (slower death)
         self.is_dead: bool = False
+        
+        # Visual properties for sprite-people rendering
+        self.skin_tone = self._generate_random_skin_tone()
+        self.clothing_color = self._generate_random_clothing_color()
+        self.facing_direction = "south"  # north, south, east, west
+        self.last_x = x
+        self.last_y = y
+        self.idle_fidget_timer = 0
+        self.fidget_offset = 0  # Vertical bobbing offset
+        
+        # Environment sampling - stores recent environmental context
+        self.recent_context: list[dict] = []  # Last 10 environment samples
+        self.max_context_samples = 10
+        
+        # Affinity system - preferences that drift based on experienced environments
+        # Values range from -1.0 (strong dislike) to +1.0 (strong preference)
+        self.affinity_interference: float = 0.0
+        self.affinity_echo: float = 0.0
+        self.affinity_pressure: float = 0.0
+        self.affinity_integrity: float = 0.0
+        self.affinity_outside: float = 0.0
+        self.affinity_crowding: float = 0.0
+    
+    def _generate_random_skin_tone(self) -> tuple[int, int, int]:
+        """Generate a random skin tone for visual variety."""
+        tones = [
+            (255, 220, 177),  # Light
+            (241, 194, 125),  # Medium-light
+            (224, 172, 105),  # Medium
+            (198, 134, 66),   # Medium-dark
+            (141, 85, 36),    # Dark
+        ]
+        return random.choice(tones)
+    
+    def _generate_random_clothing_color(self) -> tuple[int, int, int]:
+        """Generate a random clothing color for visual variety."""
+        colors = [
+            (70, 130, 180),   # Steel blue
+            (139, 69, 19),    # Saddle brown
+            (85, 107, 47),    # Dark olive green
+            (128, 0, 0),      # Maroon
+            (75, 75, 75),     # Dark gray
+            (184, 134, 11),   # Dark goldenrod
+            (47, 79, 79),     # Dark slate gray
+        ]
+        return random.choice(colors)
 
+    # --- Environment Sampling System -----------------------------------------------------
+    
+    def sample_environment(self, grid: Grid, all_colonists: list = None, game_tick: int = 0) -> None:
+        """Sample the current environment and store it in recent_context.
+        
+        Captures:
+        - Tile environmental parameters (interference, pressure, echo, integrity, is_outside, exit_count)
+        - Room ID from tile data
+        - Number of nearby colonists (radius 2)
+        - Game tick (time-of-day proxy)
+        
+        Also updates colonist affinities based on experienced environment.
+        """
+        # Get environmental data from current tile
+        env_data = grid.get_env_data(self.x, self.y, self.z).copy()
+        
+        # Count nearby colonists (radius 2)
+        nearby_count = self._count_nearby_colonists(all_colonists or [])
+        
+        # Create sample
+        sample = {
+            "tick": game_tick,
+            "x": self.x,
+            "y": self.y,
+            "z": self.z,
+            "interference": env_data.get("interference", 0.0),
+            "pressure": env_data.get("pressure", 0.0),
+            "echo": env_data.get("echo", 0.0),
+            "integrity": env_data.get("integrity", 1.0),
+            "is_outside": env_data.get("is_outside", True),
+            "room_id": env_data.get("room_id"),
+            "exit_count": env_data.get("exit_count", 0),
+            "nearby_colonists": nearby_count,
+        }
+        
+        # Add to recent context (keep last 10)
+        self.recent_context.append(sample)
+        if len(self.recent_context) > self.max_context_samples:
+            self.recent_context.pop(0)
+        
+        # Add to global statistics
+        from environment_stats import add_environment_sample
+        add_environment_sample(sample)
+        
+        # Update affinities based on this sample
+        self._update_affinities(sample)
+    
+    def _count_nearby_colonists(self, all_colonists: list) -> int:
+        """Count colonists within radius 2 of this colonist."""
+        count = 0
+        for other in all_colonists:
+            if other is self or other.is_dead:
+                continue
+            if other.z != self.z:
+                continue
+            
+            dx = abs(other.x - self.x)
+            dy = abs(other.y - self.y)
+            distance = max(dx, dy)  # Chebyshev distance
+            
+            if distance <= 2:
+                count += 1
+        
+        return count
+    
+    def _update_affinities(self, sample: dict) -> None:
+        """Update colonist affinities based on environment sample.
+        
+        Compares sampled values to global averages and drifts affinities accordingly.
+        If a value is above average, affinity drifts positive (preference).
+        If below average, affinity drifts negative (dislike).
+        
+        Args:
+            sample: Environment sample dictionary
+        """
+        from environment_stats import get_global_averages
+        
+        # Get global averages for comparison
+        averages = get_global_averages()
+        
+        # Affinity drift rate (small increments)
+        drift_rate = 0.01
+        
+        # Update each affinity based on comparison to global average
+        # Interference
+        if sample.get('interference', 0.0) > averages.get('interference', 0.0):
+            self.affinity_interference = self._clamp_affinity(self.affinity_interference + drift_rate)
+        else:
+            self.affinity_interference = self._clamp_affinity(self.affinity_interference - drift_rate)
+        
+        # Echo
+        if sample.get('echo', 0.0) > averages.get('echo', 0.0):
+            self.affinity_echo = self._clamp_affinity(self.affinity_echo + drift_rate)
+        else:
+            self.affinity_echo = self._clamp_affinity(self.affinity_echo - drift_rate)
+        
+        # Pressure
+        if sample.get('pressure', 0.0) > averages.get('pressure', 0.0):
+            self.affinity_pressure = self._clamp_affinity(self.affinity_pressure + drift_rate)
+        else:
+            self.affinity_pressure = self._clamp_affinity(self.affinity_pressure - drift_rate)
+        
+        # Integrity
+        if sample.get('integrity', 1.0) > averages.get('integrity', 1.0):
+            self.affinity_integrity = self._clamp_affinity(self.affinity_integrity + drift_rate)
+        else:
+            self.affinity_integrity = self._clamp_affinity(self.affinity_integrity - drift_rate)
+        
+        # Outside (convert boolean to float for comparison)
+        sample_outside = 1.0 if sample.get('is_outside', True) else 0.0
+        if sample_outside > averages.get('outside', 0.5):
+            self.affinity_outside = self._clamp_affinity(self.affinity_outside + drift_rate)
+        else:
+            self.affinity_outside = self._clamp_affinity(self.affinity_outside - drift_rate)
+        
+        # Crowding (based on nearby colonists)
+        sample_crowding = float(sample.get('nearby_colonists', 0))
+        if sample_crowding > averages.get('crowding', 0.0):
+            self.affinity_crowding = self._clamp_affinity(self.affinity_crowding + drift_rate)
+        else:
+            self.affinity_crowding = self._clamp_affinity(self.affinity_crowding - drift_rate)
+    
+    def _clamp_affinity(self, value: float) -> float:
+        """Clamp affinity value to [-1.0, 1.0] range."""
+        return max(-1.0, min(1.0, value))
+    
+    # --- Job Tag System -----------------------------------------------------
+    
+    def can_perform_job_category(self, category: str) -> bool:
+        """Check if colonist can perform a job based on job tags.
+        
+        Maps job categories to job tags:
+        - construction, wall, fire_escape → can_build
+        - haul, supply → can_haul
+        - crafting → can_craft
+        - cooking → can_cook
+        - salvage, harvest → can_scavenge
+        """
+        # Map job categories to job tags
+        category_to_tag = {
+            "construction": "can_build",
+            "wall": "can_build",
+            "fire_escape": "can_build",
+            "haul": "can_haul",
+            "supply": "can_haul",
+            "crafting": "can_craft",
+            "cooking": "can_cook",
+            "salvage": "can_scavenge",
+            "harvest": "can_scavenge",
+        }
+        
+        # Get the corresponding tag
+        tag = category_to_tag.get(category)
+        if tag is None:
+            # Unknown category - allow by default for compatibility
+            return True
+        
+        # Check if colonist has this tag enabled
+        return self.job_tags.get(tag, True)
+    
     # --- Core behavior -----------------------------------------------------
 
     def _maybe_wander_when_idle(self, grid: Grid) -> None:
@@ -142,10 +362,21 @@ class Colonist:
                 self.y = new_y
 
     def _try_take_job(self) -> None:
-        """Claim a job from the global queue if available."""
+        """Claim a job from the global queue if available.
+        
+        Filters jobs based on colonist's job tags (can_build, can_haul, etc.)
+        """
         # Skip construction jobs that don't have materials delivered yet
         job = get_next_available_job(skip_types=[], skip_unready_construction=True)
+        
+        # Check if colonist can perform this job based on job tags
         if job is not None:
+            # Filter by job category using job tags
+            if not self.can_perform_job_category(job.category):
+                # This colonist can't do this job - skip it
+                # Don't assign it, let another colonist try
+                return
+            
             job.assigned = True
             self.current_job = job
             self.current_path = []  # Will be calculated on first move
@@ -367,11 +598,16 @@ class Colonist:
         
         job.progress += 1
         
+        # Sample environment on every job tick
+        self.sample_environment(grid, self._all_colonists, self._game_tick)
+        
         # For gathering jobs, harvest resources incrementally
         if job.type == "gathering":
             harvest_tick(job.x, job.y, job.progress, job.required)
 
         if job.progress >= job.required:
+            # Sample environment on job completion
+            self.sample_environment(grid, self._all_colonists, self._game_tick)
             # Dispatch completion based on job type.
             if job.type == "construction":
                 # Check what type of construction this was
@@ -1060,12 +1296,40 @@ class Colonist:
             # Path blocked - recalculate
             self.current_path = []
 
-    def update(self, grid: Grid) -> None:
+    def update(self, grid: Grid, all_colonists: list = None, game_tick: int = 0) -> None:
         """Advance colonist behavior for one simulation tick."""
         
         # Skip dead colonists
         if self.is_dead:
             return
+        
+        # Store for environment sampling
+        self._all_colonists = all_colonists or []
+        self._game_tick = game_tick
+        
+        # Update facing direction based on movement
+        if self.x != self.last_x or self.y != self.last_y:
+            if self.x > self.last_x:
+                self.facing_direction = "east"
+            elif self.x < self.last_x:
+                self.facing_direction = "west"
+            elif self.y > self.last_y:
+                self.facing_direction = "south"
+            elif self.y < self.last_y:
+                self.facing_direction = "north"
+            self.last_x = self.x
+            self.last_y = self.y
+        
+        # Update idle fidget animation
+        if self.state == "idle":
+            self.idle_fidget_timer += 1
+            if self.idle_fidget_timer > 120:  # Every ~2 seconds at 60 FPS
+                self.idle_fidget_timer = 0
+            # Small sine wave bobbing
+            import math
+            self.fidget_offset = int(math.sin(self.idle_fidget_timer / 20.0) * 2)
+        else:
+            self.fidget_offset = 0
         
         # Update hunger system
         self._update_hunger(grid)
@@ -1118,14 +1382,85 @@ class Colonist:
         else:
             print(f"ERROR: Colonist in unknown state: {self.state}")
 
-    def draw(self, surface: pygame.Surface, ether_mode: bool = False) -> None:
-        """Render the colonist as a circle on the grid."""
-
-        cx = self.x * TILE_SIZE + TILE_SIZE // 2
-        cy = self.y * TILE_SIZE + TILE_SIZE // 2
-
-        color = COLOR_COLONIST_ETHER if ether_mode else self.color
-        pygame.draw.circle(surface, color, (cx, cy), TILE_SIZE // 3)
+    def draw(self, surface: pygame.Surface, ether_mode: bool = False, camera_x: int = 0, camera_y: int = 0) -> None:
+        """Render the colonist as a sprite-person with job state indicator.
+        
+        Args:
+            surface: Pygame surface to draw on
+            ether_mode: If True, use ether color
+            camera_x, camera_y: Camera offset for viewport rendering
+        """
+        # World position in pixels
+        world_cx = self.x * TILE_SIZE + TILE_SIZE // 2
+        world_cy = self.y * TILE_SIZE + TILE_SIZE // 2 + self.fidget_offset
+        
+        # Screen position (apply camera offset)
+        screen_cx = world_cx - camera_x
+        screen_cy = world_cy - camera_y
+        
+        # Use ether mode colors if enabled
+        if ether_mode:
+            clothing = COLOR_COLONIST_ETHER
+            skin = COLOR_COLONIST_ETHER
+        else:
+            clothing = self.clothing_color
+            skin = self.skin_tone
+        
+        # Draw sprite-person (simple geometric shapes)
+        # Legs (2 small rectangles)
+        leg_width = 3
+        leg_height = 5
+        leg_spacing = 2
+        legs_y = screen_cy + 3
+        
+        # Left leg
+        pygame.draw.rect(surface, clothing, 
+                        (screen_cx - leg_spacing - leg_width, legs_y, leg_width, leg_height))
+        # Right leg
+        pygame.draw.rect(surface, clothing,
+                        (screen_cx + leg_spacing, legs_y, leg_width, leg_height))
+        
+        # Torso (rectangle)
+        torso_width = 10
+        torso_height = 8
+        torso_rect = pygame.Rect(screen_cx - torso_width // 2, screen_cy - 2, torso_width, torso_height)
+        pygame.draw.rect(surface, clothing, torso_rect)
+        
+        # Head (circle)
+        head_radius = 4
+        head_y = screen_cy - 6
+        pygame.draw.circle(surface, skin, (screen_cx, head_y), head_radius)
+        
+        # Simple facing indicator (small dot for eyes/face direction)
+        face_offset_x = 0
+        face_offset_y = 0
+        if self.facing_direction == "north":
+            face_offset_y = -2
+        elif self.facing_direction == "south":
+            face_offset_y = 1
+        elif self.facing_direction == "east":
+            face_offset_x = 2
+        elif self.facing_direction == "west":
+            face_offset_x = -2
+        
+        # Draw tiny face dot
+        pygame.draw.circle(surface, (50, 50, 50), 
+                          (screen_cx + face_offset_x, head_y + face_offset_y), 1)
+        
+        # Job state ring around colonist
+        ring_color = None
+        if self.state == "idle":
+            ring_color = (100, 150, 255)  # Blue
+        elif self.state in ("hauling", "moving_to_haul"):
+            ring_color = (255, 220, 100)  # Yellow
+        elif self.state in ("building", "moving_to_build", "salvaging", "moving_to_salvage", "harvesting", "moving_to_harvest"):
+            ring_color = (100, 255, 150)  # Green
+        elif self.stuck_timer > 15:
+            ring_color = (255, 100, 100)  # Red (stuck)
+        
+        if ring_color:
+            # Draw thin ring around colonist
+            pygame.draw.circle(surface, ring_color, (screen_cx, screen_cy), 12, 1)
         
         # Draw carrying indicator if hauling
         if self.carrying is not None:
@@ -1139,10 +1474,12 @@ class Colonist:
                 carry_color = (180, 180, 200)
             elif carry_type == "mineral":
                 carry_color = (80, 200, 200)
+            elif carry_type == "raw_food":
+                carry_color = (180, 220, 100)
             else:
                 carry_color = (200, 200, 200)
             
-            carry_rect = pygame.Rect(cx - 4, cy - TILE_SIZE // 3 - 6, 8, 6)
+            carry_rect = pygame.Rect(screen_cx - 4, screen_cy - 14, 8, 6)
             pygame.draw.rect(surface, carry_color, carry_rect)
             pygame.draw.rect(surface, (255, 255, 255), carry_rect, 1)
 
@@ -1150,34 +1487,59 @@ class Colonist:
 # --- Module-level helpers -----------------------------------------------------
 
 
-def create_colonists(count: int) -> list[Colonist]:
-    """Construct an initial list of colonists in random positions."""
-
+def create_colonists(count: int, spawn_x: int = None, spawn_y: int = None) -> list[Colonist]:
+    """Construct an initial list of colonists clustered at spawn location.
+    
+    Args:
+        count: Number of colonists to create
+        spawn_x, spawn_y: Optional spawn location (defaults to map center)
+    
+    Colonists spawn in a small group for easier camera positioning.
+    """
     colonists: list[Colonist] = []
+    
+    # Use provided spawn or default to center
+    if spawn_x is None or spawn_y is None:
+        spawn_x = GRID_W // 2
+        spawn_y = GRID_H // 2
+    
+    cluster_radius = 3  # Spawn within 3 tiles of spawn point
+    
     for _ in range(count):
+        # Random offset from spawn
+        dx = random.randint(-cluster_radius, cluster_radius)
+        dy = random.randint(-cluster_radius, cluster_radius)
         colonists.append(
             Colonist(
-                x=random.randint(0, GRID_W - 1),
-                y=random.randint(0, GRID_H - 1),
+                x=spawn_x + dx,
+                y=spawn_y + dy,
             )
         )
     return colonists
 
 
-def update_colonists(colonists: Iterable[Colonist], grid: Grid) -> None:
+def update_colonists(colonists: Iterable[Colonist], grid: Grid, game_tick: int = 0) -> None:
     """Advance all colonists one simulation step."""
 
-    for c in colonists:
-        c.update(grid)
+    colonist_list = list(colonists)  # Convert to list for environment sampling
+    for c in colonist_list:
+        c.update(grid, colonist_list, game_tick)
 
 
 def draw_colonists(
-    surface: pygame.Surface, colonists: Iterable[Colonist], ether_mode: bool = False, current_z: int = 0
+    surface: pygame.Surface, colonists: Iterable[Colonist], ether_mode: bool = False, current_z: int = 0, camera_x: int = 0, camera_y: int = 0
 ) -> None:
     """Draw all colonists to the given surface.
     
     Only draws colonists that are on the current z-level.
+    
+    Args:
+        surface: Pygame surface to draw on
+        colonists: Iterable of colonist objects
+        ether_mode: If True, use ether color
+        current_z: Current Z-level to render
+        camera_x, camera_y: Camera offset for viewport rendering
     """
     for c in colonists:
         if c.z == current_z:
-            c.draw(surface, ether_mode=ether_mode)
+            c.draw(surface, ether_mode=ether_mode, camera_x=camera_x, camera_y=camera_y)

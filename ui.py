@@ -351,7 +351,7 @@ class ActionBar:
             width=button_width,
             height=BUTTON_HEIGHT,
             text="Salvage",
-            keybind="S",
+            keybind="",  # No keybind - conflicts with WASD camera
         )
         
         # Harvest button
@@ -456,18 +456,14 @@ class ActionBar:
             return True
         
         if key == pygame.K_z:
-            if self.active_menu == "zone":
+            if self.current_tool == "zone":
                 self.cancel_tool()
             else:
                 self._open_menu("zone")
             return True
         
-        if key == pygame.K_s:
-            if self.current_tool == "salvage":
-                self.cancel_tool()
-            else:
-                self._open_menu("salvage")
-            return True
+        # K_s keybinding removed - conflicts with camera movement (WASD)
+        # Use UI button to access salvage tool
         
         if key == pygame.K_h:
             if self.current_tool == "harvest":
@@ -772,6 +768,206 @@ def get_stockpile_filter_panel() -> StockpileFilterPanel:
     return _stockpile_filter_panel
 
 
+# ============================================================================
+# Colonist Job Tags Panel
+# ============================================================================
+
+class ColonistJobTagsPanel:
+    """UI panel for toggling colonist job tags."""
+    
+    JOB_TAGS = [
+        ("can_build", "Build", "Construction, walls, floors"),
+        ("can_haul", "Haul", "Move resources to stockpiles"),
+        ("can_craft", "Craft", "Work at crafting benches"),
+        ("can_cook", "Cook", "Prepare meals at stove"),
+        ("can_scavenge", "Scavenge", "Salvage and harvest"),
+    ]
+    
+    def __init__(self):
+        self.visible = False
+        self.colonist = None
+        self.panel_rect = pygame.Rect(0, 0, 300, 550)  # Larger to fit environment data + affinities
+        self.toggle_rects: Dict[str, pygame.Rect] = {}
+        self.font: Optional[pygame.font.Font] = None
+        self.show_env_data = True  # Toggle for environment data display
+    
+    def init_font(self) -> None:
+        self.font = pygame.font.Font(None, 20)
+    
+    def open(self, colonist, screen_x: int, screen_y: int) -> None:
+        """Open the panel for a colonist at screen position."""
+        self.colonist = colonist
+        self.visible = True
+        
+        # Position panel near click but keep on screen
+        self.panel_rect.x = min(screen_x, SCREEN_W - self.panel_rect.width - 10)
+        self.panel_rect.y = min(screen_y, SCREEN_H - self.panel_rect.height - 60)
+        
+        # Build toggle rects
+        padding = 8
+        item_height = 32
+        for i, (tag_id, _, _) in enumerate(self.JOB_TAGS):
+            rect = pygame.Rect(
+                self.panel_rect.x + padding,
+                self.panel_rect.y + 30 + i * item_height,
+                self.panel_rect.width - padding * 2,
+                item_height - 4
+            )
+            self.toggle_rects[tag_id] = rect
+    
+    def close(self) -> None:
+        """Close the panel."""
+        self.visible = False
+        self.colonist = None
+    
+    def handle_click(self, mouse_pos: tuple[int, int]) -> bool:
+        """Handle mouse click. Returns True if consumed."""
+        if not self.visible or self.colonist is None:
+            return False
+        
+        # Check if click is in panel
+        if not self.panel_rect.collidepoint(mouse_pos):
+            self.close()
+            return False
+        
+        # Check toggle clicks
+        for tag_id, rect in self.toggle_rects.items():
+            if rect.collidepoint(mouse_pos):
+                # Toggle the tag
+                current = self.colonist.job_tags.get(tag_id, True)
+                self.colonist.job_tags[tag_id] = not current
+                return True
+        
+        return True  # Consume click even if not on a toggle
+    
+    def draw(self, surface: pygame.Surface) -> None:
+        """Draw the panel."""
+        if not self.visible or self.colonist is None:
+            return
+        
+        if self.font is None:
+            self.init_font()
+        
+        # Panel background with shadow
+        shadow_rect = self.panel_rect.copy()
+        shadow_rect.x += 3
+        shadow_rect.y += 3
+        pygame.draw.rect(surface, (20, 20, 25), shadow_rect, border_radius=8)
+        
+        # Main panel
+        pygame.draw.rect(surface, COLOR_UI_PANEL, self.panel_rect, border_radius=8)
+        pygame.draw.rect(surface, (100, 100, 110), self.panel_rect, 1, border_radius=8)
+        
+        # Title
+        title_text = self.font.render("Job Tags", True, (220, 220, 230))
+        title_rect = title_text.get_rect(centerx=self.panel_rect.centerx, y=self.panel_rect.y + 8)
+        surface.blit(title_text, title_rect)
+        
+        # Draw toggles
+        for tag_id, tag_name, tag_desc in self.JOB_TAGS:
+            rect = self.toggle_rects[tag_id]
+            enabled = self.colonist.job_tags.get(tag_id, True)
+            
+            # Toggle background
+            bg_color = (60, 120, 80) if enabled else (80, 60, 60)
+            pygame.draw.rect(surface, bg_color, rect, border_radius=4)
+            pygame.draw.rect(surface, (100, 100, 110), rect, 1, border_radius=4)
+            
+            # Checkbox
+            checkbox_size = 16
+            checkbox_rect = pygame.Rect(rect.x + 6, rect.centery - checkbox_size // 2, checkbox_size, checkbox_size)
+            pygame.draw.rect(surface, (40, 40, 45), checkbox_rect, border_radius=2)
+            pygame.draw.rect(surface, (120, 120, 130), checkbox_rect, 1, border_radius=2)
+            
+            if enabled:
+                # Checkmark
+                pygame.draw.line(surface, (150, 255, 150), 
+                               (checkbox_rect.x + 3, checkbox_rect.centery),
+                               (checkbox_rect.centerx, checkbox_rect.bottom - 4), 2)
+                pygame.draw.line(surface, (150, 255, 150),
+                               (checkbox_rect.centerx, checkbox_rect.bottom - 4),
+                               (checkbox_rect.right - 3, checkbox_rect.y + 3), 2)
+            
+            # Label
+            label_text = self.font.render(tag_name, True, (220, 220, 230))
+            label_rect = label_text.get_rect(left=checkbox_rect.right + 8, centery=rect.centery - 4)
+            surface.blit(label_text, label_rect)
+            
+            # Description (smaller)
+            font_small = pygame.font.Font(None, 16)
+            desc_text = font_small.render(tag_desc, True, (150, 150, 160))
+            desc_rect = desc_text.get_rect(left=checkbox_rect.right + 8, top=label_rect.bottom + 2)
+            surface.blit(desc_text, desc_rect)
+        
+        # Draw environment data section if enabled
+        if self.show_env_data and hasattr(self.colonist, 'recent_context') and len(self.colonist.recent_context) > 0:
+            env_y = self.panel_rect.y + 190  # Start below job tags
+            
+            # Section title
+            env_title = self.font.render("Environment Data", True, (200, 200, 255))
+            surface.blit(env_title, (self.panel_rect.x + 10, env_y))
+            env_y += 25
+            
+            # Get most recent sample
+            recent = self.colonist.recent_context[-1]
+            font_tiny = pygame.font.Font(None, 16)
+            
+            # Display key environment parameters
+            env_params = [
+                f"Tick: {recent.get('tick', 0)}",
+                f"Pos: ({recent.get('x', 0)}, {recent.get('y', 0)}, {recent.get('z', 0)})",
+                f"Interference: {recent.get('interference', 0.0):.2f}",
+                f"Pressure: {recent.get('pressure', 0.0):.2f}",
+                f"Echo: {recent.get('echo', 0.0):.2f}",
+                f"Integrity: {recent.get('integrity', 1.0):.2f}",
+                f"Outside: {recent.get('is_outside', True)}",
+                f"Room: {recent.get('room_id', 'None')}",
+                f"Exits: {recent.get('exit_count', 0)}",
+                f"Nearby: {recent.get('nearby_colonists', 0)}",
+            ]
+            
+            for param in env_params:
+                param_text = font_tiny.render(param, True, (180, 180, 190))
+                surface.blit(param_text, (self.panel_rect.x + 15, env_y))
+                env_y += 18
+            
+            # Show sample count
+            sample_count_text = font_tiny.render(f"Samples: {len(self.colonist.recent_context)}/10", True, (150, 150, 160))
+            surface.blit(sample_count_text, (self.panel_rect.x + 15, env_y))
+            env_y += 25
+            
+            # Draw affinity section
+            affinity_title = self.font.render("Affinities", True, (255, 200, 100))
+            surface.blit(affinity_title, (self.panel_rect.x + 10, env_y))
+            env_y += 20
+            
+            # Display affinity values with color coding
+            # Positive = green, Negative = red, Neutral = gray
+            affinities = [
+                ("Interference", self.colonist.affinity_interference),
+                ("Echo", self.colonist.affinity_echo),
+                ("Pressure", self.colonist.affinity_pressure),
+                ("Integrity", self.colonist.affinity_integrity),
+                ("Outside", self.colonist.affinity_outside),
+                ("Crowding", self.colonist.affinity_crowding),
+            ]
+            
+            for name, value in affinities:
+                # Color based on value
+                if value > 0.1:
+                    color = (100, 255, 100)  # Green for positive
+                elif value < -0.1:
+                    color = (255, 100, 100)  # Red for negative
+                else:
+                    color = (180, 180, 180)  # Gray for neutral
+                
+                # Format with sign
+                sign = "+" if value >= 0 else ""
+                affinity_text = font_tiny.render(f"{name}: {sign}{value:.2f}", True, color)
+                surface.blit(affinity_text, (self.panel_rect.x + 15, env_y))
+                env_y += 16
+
+
 # Compatibility layer for existing code
 class ConstructionUI:
     """Wrapper for backward compatibility with existing code."""
@@ -801,8 +997,9 @@ class ConstructionUI:
         self.action_bar.draw(surface)
 
 
-# Global UI instance
+# Global UI instances
 _construction_ui: Optional[ConstructionUI] = None
+_colonist_panel: Optional[ColonistJobTagsPanel] = None
 
 
 def get_construction_ui() -> ConstructionUI:
@@ -811,3 +1008,11 @@ def get_construction_ui() -> ConstructionUI:
     if _construction_ui is None:
         _construction_ui = ConstructionUI()
     return _construction_ui
+
+
+def get_colonist_panel() -> ColonistJobTagsPanel:
+    """Get or create the global colonist panel instance."""
+    global _colonist_panel
+    if _colonist_panel is None:
+        _colonist_panel = ColonistJobTagsPanel()
+    return _colonist_panel

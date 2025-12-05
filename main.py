@@ -85,14 +85,20 @@ def get_drag_rect(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[in
     return tiles
 
 
-def handle_mouse_down(grid: Grid, event: pygame.event.Event) -> None:
+def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) -> None:
     """Handle mouse button press."""
     global _drag_start, _drag_mode
     
     mx, my = pygame.mouse.get_pos()
     ui = get_construction_ui()
     
-    # Check stockpile filter panel first
+    # Check colonist panel first
+    from ui import get_colonist_panel
+    colonist_panel = get_colonist_panel()
+    if colonist_panel.handle_click((mx, my)):
+        return
+    
+    # Check stockpile filter panel
     from ui import get_stockpile_filter_panel
     filter_panel = get_stockpile_filter_panel()
     if filter_panel.handle_click((mx, my)):
@@ -102,8 +108,8 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event) -> None:
     if ui.handle_click((mx, my), event.button):
         return
     
-    gx = mx // TILE_SIZE
-    gy = my // TILE_SIZE
+    # Convert screen coordinates to world tile coordinates
+    gx, gy = grid.screen_to_world(mx, my)
     
     if not (0 <= gx < GRID_W and 0 <= gy < GRID_H):
         return
@@ -184,13 +190,29 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event) -> None:
             _drag_start = (gx, gy)
             _drag_mode = "salvage"
         elif build_mode is None:
-            # No tool selected - check if clicking on stockpile zone for filter UI
-            from ui import get_stockpile_filter_panel
-            zone_id = zones_module.get_zone_id_at(gx, gy, current_z)
-            if zone_id is not None:
-                panel = get_stockpile_filter_panel()
-                panel.open(zone_id, mx, my)
-            pass
+            # No tool selected - check for colonist click or stockpile zone
+            # Check if clicking on a colonist (within 1 tile radius)
+            clicked_colonist = None
+            for colonist in colonists:
+                if colonist.z == current_z:  # Same Z-level
+                    dx = abs(colonist.x - gx)
+                    dy = abs(colonist.y - gy)
+                    if dx <= 0 and dy <= 0:  # Exact tile
+                        clicked_colonist = colonist
+                        break
+            
+            if clicked_colonist is not None:
+                # Open colonist job tags panel
+                from ui import get_colonist_panel
+                panel = get_colonist_panel()
+                panel.open(clicked_colonist, mx, my)
+            else:
+                # Check if clicking on stockpile zone for filter UI
+                from ui import get_stockpile_filter_panel
+                zone_id = zones_module.get_zone_id_at(gx, gy, current_z)
+                if zone_id is not None:
+                    panel = get_stockpile_filter_panel()
+                    panel.open(zone_id, mx, my)
 
 
 def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
@@ -202,8 +224,8 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
     if event.button == 1:  # left release
         if _drag_start is not None:
             mx, my = pygame.mouse.get_pos()
-            gx = mx // TILE_SIZE
-            gy = my // TILE_SIZE
+            # Convert screen coordinates to world tile coordinates
+            gx, gy = grid.screen_to_world(mx, my)
             gx = max(0, min(GRID_W - 1, gx))
             gy = max(0, min(GRID_H - 1, gy))
             current_z = grid.current_z
@@ -359,22 +381,29 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
             _drag_mode = None
 
 
-def get_hovered_tile() -> tuple[int, int] | None:
-    """Return grid coords of tile under mouse, or None if out of bounds."""
+def get_hovered_tile(grid: Grid) -> tuple[int, int] | None:
+    """Return grid coords of tile under mouse, or None if out of bounds.
+    
+    Args:
+        grid: Grid object for screen-to-world coordinate conversion
+    """
     mx, my = pygame.mouse.get_pos()
-    gx = mx // TILE_SIZE
-    gy = my // TILE_SIZE
+    gx, gy = grid.screen_to_world(mx, my)
     if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
         return (gx, gy)
     return None
 
 
-def get_drag_preview_tiles() -> list[tuple[int, int]]:
-    """Return list of tiles in current drag selection, or empty if not dragging."""
+def get_drag_preview_tiles(grid: Grid) -> list[tuple[int, int]]:
+    """Return list of tiles in current drag selection, or empty if not dragging.
+    
+    Args:
+        grid: Grid object for screen-to-world coordinate conversion
+    """
     if _drag_start is None:
         return []
     
-    hovered = get_hovered_tile()
+    hovered = get_hovered_tile(grid)
     if hovered is None:
         return [_drag_start]
     
@@ -385,15 +414,29 @@ def get_drag_preview_tiles() -> list[tuple[int, int]]:
         return get_drag_rect(_drag_start, hovered)
 
 
-def draw_drag_preview(surface: pygame.Surface) -> None:
-    """Draw semi-transparent preview of drag selection."""
-    tiles = get_drag_preview_tiles()
+def draw_drag_preview(surface: pygame.Surface, grid: Grid, camera_x: int = 0, camera_y: int = 0) -> None:
+    """Draw semi-transparent preview of drag selection.
+    
+    Args:
+        surface: Pygame surface to draw on
+        grid: Grid object for coordinate conversion
+        camera_x, camera_y: Camera offset for viewport rendering
+    """
+    tiles = get_drag_preview_tiles(grid)
     if not tiles:
         return
     
     # Create a semi-transparent surface for the preview
     for tx, ty in tiles:
-        rect = pygame.Rect(tx * TILE_SIZE, ty * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        # World position in pixels
+        world_x = tx * TILE_SIZE
+        world_y = ty * TILE_SIZE
+        
+        # Screen position (apply camera offset)
+        screen_x = world_x - camera_x
+        screen_y = world_y - camera_y
+        
+        rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
         # Draw filled rectangle with alpha
         preview_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
         preview_surface.fill(COLOR_DRAG_PREVIEW)
@@ -449,9 +492,20 @@ def main() -> None:
     clock = pygame.time.Clock()
 
     grid = Grid()
-    # Spawn a small number of initial resource nodes on empty tiles.
-    spawn_resource_nodes(grid)
-    colonists = create_colonists(COLONIST_COUNT)
+    # Generate world (streets, lots, ruins) and get colonist spawn location
+    spawn_x, spawn_y = spawn_resource_nodes(grid)
+    
+    # Create colonists at the spawn location
+    colonists = create_colonists(COLONIST_COUNT, spawn_x, spawn_y)
+    
+    # Center camera on colonist spawn location
+    spawn_center_x = spawn_x * TILE_SIZE
+    spawn_center_y = spawn_y * TILE_SIZE
+    grid.camera_x = spawn_center_x - SCREEN_W // 2
+    grid.camera_y = spawn_center_y - SCREEN_H // 2
+    # Clamp to valid range
+    grid.pan_camera(0, 0)  # This will apply bounds clamping
+    
     ether_mode = False
     paused = False
     tick_count = 0
@@ -501,22 +555,36 @@ def main() -> None:
                     script_path = os.path.abspath(__file__)
                     subprocess.Popen([sys.executable, script_path])
                     sys.exit(0)
-                elif event.key == pygame.K_ESCAPE:
-                    # ESC to quit anytime
-                    running = False
+                # ESC keybinding removed - use window close button to quit
 
             if event.type == pygame.MOUSEBUTTONDOWN:
-                handle_mouse_down(grid, event)
+                handle_mouse_down(grid, event, colonists)
             
             if event.type == pygame.MOUSEBUTTONUP:
                 handle_mouse_up(grid, event)
+        
+        # Camera controls (WASD or Arrow keys)
+        keys = pygame.key.get_pressed()
+        camera_speed = 20  # pixels per frame
+        if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
+            camera_speed = 40  # Faster with Shift
+        
+        if keys[pygame.K_w] or keys[pygame.K_UP]:
+            grid.pan_camera(0, -camera_speed)
+        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
+            grid.pan_camera(0, camera_speed)
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            grid.pan_camera(-camera_speed, 0)
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            grid.pan_camera(camera_speed, 0)
 
         # Only update simulation when not paused
         if not paused:
-            update_colonists(colonists, grid)
+            update_colonists(colonists, grid, tick_count)
             update_resource_nodes(grid)
             update_doors()  # Auto-close doors after delay
             update_windows()  # Auto-close windows after delay
+            tick_count += 1  # Increment game tick
             update_rooms(grid)  # Detect enclosed rooms
             jobs_module.update_job_timers()  # Tick down job wait timers
             
@@ -549,9 +617,9 @@ def main() -> None:
         
         # Draw drag preview on top of grid (left-click drag in build mode)
         if _drag_start is not None and pygame.mouse.get_pressed()[0]:
-            draw_drag_preview(screen)
+            draw_drag_preview(screen, grid, camera_x=grid.camera_x, camera_y=grid.camera_y)
         
-        draw_colonists(screen, colonists, ether_mode=ether_mode, current_z=grid.current_z)
+        draw_colonists(screen, colonists, ether_mode=ether_mode, current_z=grid.current_z, camera_x=grid.camera_x, camera_y=grid.camera_y)
         
         # Draw UI overlay
         draw_stockpile_ui(screen)
@@ -570,6 +638,11 @@ def main() -> None:
         from ui import get_stockpile_filter_panel
         filter_panel = get_stockpile_filter_panel()
         filter_panel.draw(screen)
+        
+        # Draw colonist job tags panel (if open)
+        from ui import get_colonist_panel
+        colonist_panel = get_colonist_panel()
+        colonist_panel.draw(screen)
         
         # Draw debug overlay (toggle with 'I' key)
         draw_debug(screen, grid, colonists, jobs_module, resources_module, zones_module, buildings_module, rooms_module)

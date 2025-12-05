@@ -16,12 +16,21 @@ from config import (
     GRID_W,
     GRID_H,
     GRID_Z,
+    SCREEN_W,
+    SCREEN_H,
     COLOR_GRID_LINES,
     COLOR_TILE_SELECTED,
     COLOR_TILE_BUILDING,
     COLOR_TILE_FINISHED_BUILDING,
     COLOR_TILE_WALL,
     COLOR_TILE_FINISHED_WALL,
+    COLOR_TILE_STREET,
+    COLOR_TILE_SIDEWALK,
+    COLOR_TILE_DEBRIS,
+    COLOR_TILE_WEEDS,
+    COLOR_TILE_PROP_BARREL,
+    COLOR_TILE_PROP_SIGN,
+    COLOR_TILE_PROP_SCRAP,
     COLOR_CONSTRUCTION_PROGRESS,
     COLOR_RESOURCE_NODE_WOOD,
     COLOR_RESOURCE_NODE_SCRAP,
@@ -89,8 +98,59 @@ class Grid:
                 # Upper levels - all tiles blocked by default until allowed
                 self.walkable.append([[False for _ in range(self.width)] for _ in range(self.height)])
         
+        # Environmental parameters for each tile: env_data[z][y][x]
+        # Each tile has: interference, pressure, echo, integrity, is_outside, room_id, exit_count
+        self.env_data: list[list[list[dict]]] = [
+            [[self._default_env_data() for _ in range(self.width)] for _ in range(self.height)]
+            for _ in range(self.depth)
+        ]
+        
         # Current view level (for rendering)
         self.current_z = 0
+        
+        # Camera system for viewport (world coordinates in pixels)
+        self.camera_x = 0
+        self.camera_y = 0
+
+    def _default_env_data(self) -> dict:
+        """Create default environmental data for a tile."""
+        return {
+            "interference": 0.0,
+            "pressure": 0.0,
+            "echo": 0.0,
+            "integrity": 1.0,
+            "is_outside": True,
+            "room_id": None,
+            "exit_count": 0,
+        }
+    
+    def get_env_data(self, x: int, y: int, z: int = 0) -> dict:
+        """Get environmental data for a tile."""
+        if not self.in_bounds(x, y, z):
+            return self._default_env_data()
+        return self.env_data[z][y][x]
+    
+    def set_env_param(self, x: int, y: int, z: int, param: str, value) -> None:
+        """Set a specific environmental parameter for a tile."""
+        if not self.in_bounds(x, y, z):
+            return
+        self.env_data[z][y][x][param] = value
+    
+    def update_env_data(self, x: int, y: int, z: int, **kwargs) -> None:
+        """Update multiple environmental parameters for a tile."""
+        if not self.in_bounds(x, y, z):
+            return
+        for key, value in kwargs.items():
+            self.env_data[z][y][x][key] = value
+    
+    def calculate_exit_count(self, x: int, y: int, z: int) -> int:
+        """Calculate number of adjacent walkable tiles."""
+        count = 0
+        for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+            nx, ny = x + dx, y + dy
+            if self.in_bounds(nx, ny, z) and self.is_walkable(nx, ny, z):
+                count += 1
+        return count
 
     def in_bounds(self, x: int, y: int, z: int = 0) -> bool:
         """Return True if (x, y, z) lies inside the grid."""
@@ -99,7 +159,7 @@ class Grid:
     def set_tile(self, x: int, y: int, value: str, z: int = 0) -> None:
         """Set the logical value of a tile if coordinates are valid.
         
-        Automatically updates walkability for building tiles.
+        Automatically updates walkability for building tiles and initializes environmental parameters.
         """
         if self.in_bounds(x, y, z):
             self.tiles[z][y][x] = value
@@ -112,13 +172,56 @@ class Grid:
             elif value == "finished_window":
                 # Windows are passable (like doors) - colonists can climb through
                 self.walkable[z][y][x] = True
-            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove"):
+            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove", "street", "sidewalk", "debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap"):
                 # window_tile: passable wall with fire escape window
                 # fire_escape_platform: external platform for fire escape
                 # roof_access: walkable/buildable rooftop tile (player-allowed)
                 # roof_floor: legacy walkable roof (kept for compatibility)
                 # bridge/finished_bridge: walkable connections between buildings
+                # street: walkable city streets
+                # sidewalk/debris/weeds/props: decorative, walkable
                 self.walkable[z][y][x] = True
+            
+            # Initialize environmental parameters based on tile type
+            self._init_env_params_for_tile(x, y, z, value)
+    
+    def _init_env_params_for_tile(self, x: int, y: int, z: int, tile_type: str) -> None:
+        """Initialize environmental parameters based on tile type."""
+        # Ruins have degraded environmental values
+        if tile_type in ("debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap"):
+            self.update_env_data(x, y, z,
+                echo=0.3,
+                integrity=0.4,
+                interference=0.1,
+                is_outside=True
+            )
+        # New construction has clean values
+        elif tile_type in ("building", "wall", "wall_advanced", "floor", "door", "window",
+                          "salvagers_bench", "generator", "stove", "bridge", "fire_escape"):
+            self.update_env_data(x, y, z,
+                echo=0.0,
+                integrity=1.0,
+                interference=0.0,
+                is_outside=False  # Construction is typically inside
+            )
+        # Finished construction maintains clean values
+        elif tile_type in ("finished_building", "finished_wall", "finished_wall_advanced",
+                          "finished_floor", "finished_window", "finished_bridge",
+                          "finished_salvagers_bench", "finished_generator", "finished_stove"):
+            self.update_env_data(x, y, z,
+                echo=0.0,
+                integrity=1.0,
+                interference=0.0,
+                is_outside=False  # Finished buildings are inside
+            )
+        # Outside tiles keep defaults
+        else:
+            # Already has default values, but ensure is_outside is True
+            self.set_env_param(x, y, z, "is_outside", True)
+        
+        # Update exit count
+        exit_count = self.calculate_exit_count(x, y, z)
+        self.set_env_param(x, y, z, "exit_count", exit_count)
 
     def get_tile(self, x: int, y: int, z: int = 0) -> str | None:
         """Get the tile value or None if out of bounds."""
@@ -140,26 +243,186 @@ class Grid:
     def get_current_z(self) -> int:
         """Get the current view Z-level."""
         return self.current_z
+    
+    # --- Camera System ---
+    
+    def pan_camera(self, dx: int, dy: int) -> None:
+        """Pan the camera by (dx, dy) pixels. Clamps to world bounds."""
+        # Calculate world size in pixels
+        world_width_px = self.width * TILE_SIZE
+        world_height_px = self.height * TILE_SIZE
+        
+        # Update camera position
+        self.camera_x += dx
+        self.camera_y += dy
+        
+        # Clamp to world bounds (allow camera to show from 0 to world_size - screen_size)
+        max_camera_x = max(0, world_width_px - SCREEN_W)
+        max_camera_y = max(0, world_height_px - SCREEN_H)
+        
+        self.camera_x = max(0, min(self.camera_x, max_camera_x))
+        self.camera_y = max(0, min(self.camera_y, max_camera_y))
+    
+    def screen_to_world(self, screen_x: int, screen_y: int) -> tuple[int, int]:
+        """Convert screen coordinates to world tile coordinates.
+        
+        Returns (tile_x, tile_y) in world space.
+        """
+        world_x = screen_x + self.camera_x
+        world_y = screen_y + self.camera_y
+        tile_x = world_x // TILE_SIZE
+        tile_y = world_y // TILE_SIZE
+        return (tile_x, tile_y)
+    
+    # --- Visual Helpers ---
+    
+    def _get_tile_seed(self, x: int, y: int, z: int) -> int:
+        """Get a consistent seed for a tile position for visual variations.
+        
+        This ensures tiles always have the same visual variation.
+        """
+        return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791)
+    
+    def _get_tile_color_variation(self, base_color: tuple[int, int, int], x: int, y: int, z: int, variation: int = 10) -> tuple[int, int, int]:
+        """Add subtle random color variation to a base color.
+        
+        Args:
+            base_color: RGB tuple
+            x, y, z: Tile position
+            variation: Max variation amount (default 10)
+        
+        Returns:
+            Modified RGB tuple with subtle variation
+        """
+        import random
+        seed = self._get_tile_seed(x, y, z)
+        rng = random.Random(seed)
+        
+        r = max(0, min(255, base_color[0] + rng.randint(-variation, variation)))
+        g = max(0, min(255, base_color[1] + rng.randint(-variation, variation)))
+        b = max(0, min(255, base_color[2] + rng.randint(-variation, variation)))
+        
+        return (r, g, b)
+    
+    def _get_floor_variant(self, x: int, y: int, z: int) -> int:
+        """Get floor pattern variant (0-2) for this tile position."""
+        import random
+        seed = self._get_tile_seed(x, y, z)
+        rng = random.Random(seed)
+        return rng.randint(0, 2)
+    
+    # --- Interior Lighting System ---
+    
+    def is_interior_tile(self, x: int, y: int, z: int) -> bool:
+        """Check if a tile is considered interior (enclosed by walls).
+        
+        A tile is interior if:
+        - It is a floor tile (finished_floor or floor), AND
+        - All four cardinal directions have solid blocking tiles
+        
+        This is used for visual tinting only, not game mechanics.
+        Ruined buildings with missing walls will not be considered interior.
+        """
+        tile = self.get_tile(x, y, z)
+        
+        # Only floor tiles can be interior
+        if tile not in ["finished_floor", "floor"]:
+            return False
+        
+        # Check all four cardinal directions for solid tiles
+        # Solid tiles include: walls, doors, windows, finished buildings
+        solid_tiles = {
+            "finished_wall", "finished_wall_advanced", "wall", "wall_advanced",
+            "finished_building", "door", "window", "finished_window",
+            "finished_salvagers_bench", "finished_generator", "finished_stove"
+        }
+        
+        # North
+        north = self.get_tile(x, y - 1, z)
+        if north not in solid_tiles:
+            return False
+        
+        # South
+        south = self.get_tile(x, y + 1, z)
+        if south not in solid_tiles:
+            return False
+        
+        # East
+        east = self.get_tile(x + 1, y, z)
+        if east not in solid_tiles:
+            return False
+        
+        # West
+        west = self.get_tile(x - 1, y, z)
+        if west not in solid_tiles:
+            return False
+        
+        return True
+    
+    def world_to_screen(self, world_x: int, world_y: int) -> tuple[int, int]:
+        """Convert world pixel coordinates to screen coordinates.
+        
+        Returns (screen_x, screen_y).
+        """
+        screen_x = world_x - self.camera_x
+        screen_y = world_y - self.camera_y
+        return (screen_x, screen_y)
 
     def draw(self, surface: pygame.Surface, hovered_tile: tuple[int, int] | None = None) -> None:
         """Render the grid and its tiles to the given surface.
         
         If hovered_tile is provided, that tile will be highlighted momentarily.
         Only draws tiles from the current Z-level.
+        Uses camera offset to render only visible portion of the world.
         """
         z = self.current_z
         is_ground_level = (z == 0)
+        
+        # Calculate visible tile range based on camera position
+        start_tile_x = max(0, self.camera_x // TILE_SIZE)
+        start_tile_y = max(0, self.camera_y // TILE_SIZE)
+        end_tile_x = min(self.width, (self.camera_x + SCREEN_W) // TILE_SIZE + 1)
+        end_tile_y = min(self.height, (self.camera_y + SCREEN_H) // TILE_SIZE + 1)
 
-        for y in range(self.height):
-            for x in range(self.width):
+        for y in range(start_tile_y, end_tile_y):
+            for x in range(start_tile_x, end_tile_x):
+                # World position in pixels
+                world_x = x * TILE_SIZE
+                world_y = y * TILE_SIZE
+                
+                # Screen position (apply camera offset)
+                screen_x = world_x - self.camera_x
+                screen_y = world_y - self.camera_y
+                
                 rect = pygame.Rect(
-                    x * TILE_SIZE,
-                    y * TILE_SIZE,
+                    screen_x,
+                    screen_y,
                     TILE_SIZE,
                     TILE_SIZE,
                 )
 
                 tile = self.tiles[z][y][x]
+
+                # Draw decorative tiles first (beneath everything else)
+                # All decorative tiles get subtle color variation
+                if tile == "sidewalk":
+                    color = self._get_tile_color_variation(COLOR_TILE_SIDEWALK, x, y, z, 8)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "debris":
+                    color = self._get_tile_color_variation(COLOR_TILE_DEBRIS, x, y, z, 12)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "weeds":
+                    color = self._get_tile_color_variation(COLOR_TILE_WEEDS, x, y, z, 10)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "prop_barrel":
+                    color = self._get_tile_color_variation(COLOR_TILE_PROP_BARREL, x, y, z, 15)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "prop_sign":
+                    color = self._get_tile_color_variation(COLOR_TILE_PROP_SIGN, x, y, z, 12)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "prop_scrap":
+                    color = self._get_tile_color_variation(COLOR_TILE_PROP_SCRAP, x, y, z, 15)
+                    pygame.draw.rect(surface, color, rect)
 
                 # Draw stockpile zone background (on current Z level)
                 # Resource stacks are drawn later, after floor tiles
@@ -231,6 +494,10 @@ class Grid:
                             pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_wall":
                     pygame.draw.rect(surface, COLOR_TILE_FINISHED_WALL, rect)
+                elif tile == "street":
+                    # Street tiles - distinct dark gray with subtle variation
+                    color = self._get_tile_color_variation(COLOR_TILE_STREET, x, y, z, 6)
+                    pygame.draw.rect(surface, color, rect)
                 elif tile == "wall_advanced":
                     # Reinforced wall under construction - darker gray
                     pygame.draw.rect(surface, (60, 60, 70), rect)
@@ -434,13 +701,45 @@ class Grid:
                             )
                             if bar_width > 0:
                                 pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
+                    
+                    # Interior lighting tint - darken enclosed floor tiles (even under construction)
+                    if self.is_interior_tile(x, y, z):
+                        # ADJUSTABLE: Same darkness level as finished floors
+                        interior_darkness = 50
+                        tint_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                        tint_surface.fill((0, 0, 0, interior_darkness))
+                        surface.blit(tint_surface, rect.topleft)
                 elif tile == "finished_floor":
-                    # Finished floor - warm wood color with subtle plank pattern
-                    pygame.draw.rect(surface, (160, 130, 90), rect)
-                    # Draw subtle plank lines
-                    plank_color = (140, 110, 70)
-                    pygame.draw.line(surface, plank_color, (rect.left, rect.top + 8), (rect.right, rect.top + 8), 1)
-                    pygame.draw.line(surface, plank_color, (rect.left, rect.bottom - 8), (rect.right, rect.bottom - 8), 1)
+                    # Finished floor - warm wood color with subtle variation and pattern variants
+                    base_color = (160, 130, 90)
+                    floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                    pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw floor pattern based on variant
+                    variant = self._get_floor_variant(x, y, z)
+                    plank_color = (max(0, floor_color[0] - 20), max(0, floor_color[1] - 20), max(0, floor_color[2] - 20))
+                    
+                    if variant == 0:
+                        # Horizontal planks
+                        pygame.draw.line(surface, plank_color, (rect.left, rect.top + 8), (rect.right, rect.top + 8), 1)
+                        pygame.draw.line(surface, plank_color, (rect.left, rect.bottom - 8), (rect.right, rect.bottom - 8), 1)
+                    elif variant == 1:
+                        # Vertical planks
+                        pygame.draw.line(surface, plank_color, (rect.left + 8, rect.top), (rect.left + 8, rect.bottom), 1)
+                        pygame.draw.line(surface, plank_color, (rect.right - 8, rect.top), (rect.right - 8, rect.bottom), 1)
+                    else:
+                        # Diagonal pattern (concrete/stone)
+                        pygame.draw.line(surface, plank_color, (rect.left, rect.top), (rect.right, rect.bottom), 1)
+                    
+                    # Interior lighting tint - darken enclosed floor tiles
+                    if self.is_interior_tile(x, y, z):
+                        # ADJUSTABLE: Interior darkness level (0-255, higher = darker)
+                        # Current: 50 = ~20% darker, subtle but noticeable
+                        # Increase to 70-80 for stronger effect, decrease to 30-40 for lighter
+                        interior_darkness = 50
+                        tint_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                        tint_surface.fill((0, 0, 0, interior_darkness))
+                        surface.blit(tint_surface, rect.topleft)
                 elif tile == "salvagers_bench":
                     # Salvager's bench under construction - rusty orange
                     pygame.draw.rect(surface, (140, 90, 50), rect)
@@ -956,8 +1255,15 @@ class Grid:
                                        (max(rect.left, start_x), max(rect.top, start_y + (start_x - max(rect.left, start_x)))),
                                        (max(rect.left, end_x + TILE_SIZE), min(rect.bottom, end_y)), 1)
 
-                # Grid lines are always drawn on top of tile background.
+                # Grid lines - faint standard lines, thicker every 10 tiles
+                # Standard 1px grid
                 pygame.draw.rect(surface, COLOR_GRID_LINES, rect, 1)
+                
+                # Thicker lines every 10 tiles for better readability
+                if x % 10 == 0:
+                    pygame.draw.line(surface, (80, 80, 80), (rect.left, rect.top), (rect.left, rect.bottom), 2)
+                if y % 10 == 0:
+                    pygame.draw.line(surface, (80, 80, 80), (rect.left, rect.top), (rect.right, rect.top), 2)
                 
                 # Job category debug border - only for tiles with active jobs (ground level only)
                 if is_ground_level:

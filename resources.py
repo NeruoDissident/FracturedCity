@@ -456,7 +456,8 @@ def _place_node(grid, x: int, y: int, node_type: str) -> bool:
     instead of creating a harvestable node.
     """
     tile = grid.get_tile(x, y)
-    if tile != "empty":
+    # Allow placement on empty tiles, finished floors, and decorative tiles
+    if tile not in ["empty", "finished_floor", "weeds", "sidewalk", "debris"]:
         return False
     
     node_def = NODE_TYPES[node_type]
@@ -521,37 +522,715 @@ def _spawn_cluster(grid, center_x: int, center_y: int, node_type: str, cluster_s
     return placed
 
 
-def _spawn_ruined_buildings(grid) -> int:
-    """Spawn 1-2 ruined buildings made of salvage objects.
+def _generate_street_grid(grid) -> tuple[list[tuple[int, int]], list[dict]]:
+    """Generate a grid of streets across the map.
     
-    Each ruin is a rectangular building outline (walls only, no floor)
-    that players can dismantle for scrap.
-    
-    Returns total salvage tiles placed.
+    Creates horizontal and vertical streets (2-3 tiles wide) at regular intervals.
+    Returns (street_tiles, street_segments) where street_segments contain metadata.
     """
-    total_placed = 0
-    num_ruins = random.randint(1, 2)
+    streets = []
+    street_segments = []  # List of {type: 'horizontal'/'vertical', x, y, length}
+    street_width = 3  # Streets are 3 tiles wide
+    block_size = 40   # Blocks are ~40 tiles apart
+    
+    # Horizontal streets (running east-west)
+    for y in range(20, GRID_H, block_size):
+        for x in range(GRID_W):
+            for dy in range(street_width):
+                street_y = y + dy
+                if 0 <= street_y < GRID_H:
+                    grid.set_tile(x, street_y, "street", z=0)
+                    streets.append((x, street_y))
+        
+        # Record this street segment
+        street_segments.append({
+            "type": "horizontal",
+            "y": y,
+            "x_start": 0,
+            "x_end": GRID_W,
+            "width": street_width
+        })
+    
+    # Vertical streets (running north-south)
+    for x in range(20, GRID_W, block_size):
+        for y in range(GRID_H):
+            for dx in range(street_width):
+                street_x = x + dx
+                if 0 <= street_x < GRID_W:
+                    grid.set_tile(street_x, y, "street", z=0)
+                    streets.append((street_x, y))
+        
+        # Record this street segment
+        street_segments.append({
+            "type": "vertical",
+            "x": x,
+            "y_start": 0,
+            "y_end": GRID_H,
+            "width": street_width
+        })
+    
+    return streets, street_segments
+
+
+def _identify_lots(grid, streets: list[tuple[int, int]]) -> list[dict]:
+    """Identify rectangular lots between streets.
+    
+    Returns list of lot dictionaries with keys: x, y, width, height.
+    """
+    lots = []
+    
+    # Simple approach: calculate lots based on block_size
+    street_width = 3
+    block_size = 40
+    
+    # Generate lots between streets
+    for y_start in range(20, GRID_H - block_size, block_size):
+        for x_start in range(20, GRID_W - block_size, block_size):
+            lot_x = x_start + street_width
+            lot_y = y_start + street_width
+            lot_width = block_size - street_width
+            lot_height = block_size - street_width
+            
+            if lot_width > 10 and lot_height > 10:
+                lots.append({
+                    "x": lot_x,
+                    "y": lot_y,
+                    "width": lot_width,
+                    "height": lot_height
+                })
+    
+    return lots
+
+
+def _find_colonist_spawn_location(streets: list[tuple[int, int]]) -> tuple[int, int]:
+    """Find a good spawn location near a street intersection in the center.
+    
+    Returns (x, y) coordinates.
+    """
+    center_x = GRID_W // 2
+    center_y = GRID_H // 2
+    
+    # Find nearest street intersection to center
+    best_dist = float('inf')
+    best_pos = (center_x, center_y)
+    
+    # Look for street tiles near center
+    for x, y in streets:
+        dx = x - center_x
+        dy = y - center_y
+        dist = dx * dx + dy * dy
+        if dist < best_dist:
+            best_dist = dist
+            best_pos = (x, y)
+    
+    return best_pos
+
+
+def _spawn_ruins_in_lots(grid, lots: list[dict], colonist_spawn: tuple[int, int]) -> tuple[int, int, int]:
+    """Spawn 3-7 ruined buildings in available lots with food inside.
+    
+    Returns (ruins_count, salvage_count, food_count).
+    """
+    ruins_count = 0
+    salvage_count = 0
+    food_count = 0
+    num_ruins = random.randint(3, 7)
+    
+    # Shuffle lots for random placement
+    available_lots = lots.copy()
+    random.shuffle(available_lots)
+    
+    for lot in available_lots:
+        if ruins_count >= num_ruins:
+            break
+        
+        # Check distance from colonist spawn
+        lot_center_x = lot["x"] + lot["width"] // 2
+        lot_center_y = lot["y"] + lot["height"] // 2
+        dx = lot_center_x - colonist_spawn[0]
+        dy = lot_center_y - colonist_spawn[1]
+        dist = (dx * dx + dy * dy) ** 0.5
+        
+        if dist < 20:  # Too close to spawn
+            continue
+        
+        # Random building size within lot (leave margins)
+        max_width = min(lot["width"] - 4, 16)
+        max_height = min(lot["height"] - 4, 16)
+        
+        if max_width < 6 or max_height < 6:
+            continue  # Lot too small
+        
+        width = random.randint(6, max_width)
+        height = random.randint(6, max_height)
+        
+        # Center building in lot
+        x = lot["x"] + (lot["width"] - width) // 2
+        y = lot["y"] + (lot["height"] - height) // 2
+        
+        # Place floor tiles
+        for dx in range(1, width - 1):
+            for dy in range(1, height - 1):
+                grid.set_tile(x + dx, y + dy, "finished_floor", z=0)
+        
+        # Place broken walls with entrance
+        entrance_side = random.choice(["north", "south", "east", "west"])
+        entrance_pos = random.randint(2, max(2, min(width, height) - 3))
+        
+        for dx in range(width):
+            for dy in range(height):
+                is_edge = (dx == 0 or dx == width - 1 or dy == 0 or dy == height - 1)
+                if not is_edge:
+                    continue
+                
+                # Create entrance
+                if entrance_side == "north" and dy == 0 and dx == entrance_pos:
+                    continue
+                if entrance_side == "south" and dy == height - 1 and dx == entrance_pos:
+                    continue
+                if entrance_side == "east" and dx == width - 1 and dy == entrance_pos:
+                    continue
+                if entrance_side == "west" and dx == 0 and dy == entrance_pos:
+                    continue
+                
+                # Random gaps for ruined look
+                if random.random() < 0.25:
+                    continue
+                
+                px, py = x + dx, y + dy
+                salvage_type = random.choice(["ruined_wall", "ruined_wall", "salvage_pile"])
+                if spawn_salvage_object(px, py, salvage_type):
+                    grid.set_tile(px, py, "salvage_object", z=0)
+                    salvage_count += 1
+        
+        # Place food nodes inside (2-5 per building)
+        num_food = random.randint(2, 5)
+        for _ in range(num_food):
+            for attempt in range(30):
+                fx = x + random.randint(1, width - 2)
+                fy = y + random.randint(1, height - 2)
+                
+                tile = grid.get_tile(fx, fy, 0)
+                if tile == "finished_floor" and (fx, fy) not in _RESOURCE_NODES:
+                    if _place_node(grid, fx, fy, "food_plant"):
+                        food_count += 1
+                        break
+        
+        # Place scrap piles inside (2-5 per building) - increased density
+        num_scrap = random.randint(2, 5)
+        for _ in range(num_scrap):
+            for attempt in range(20):
+                sx = x + random.randint(1, width - 2)
+                sy = y + random.randint(1, height - 2)
+                
+                tile = grid.get_tile(sx, sy, 0)
+                if tile == "finished_floor" and (sx, sy) not in _RESOURCE_NODES:
+                    if spawn_salvage_object(sx, sy, "salvage_pile"):
+                        grid.set_tile(sx, sy, "salvage_object", z=0)
+                        salvage_count += 1
+                        break
+        
+        ruins_count += 1
+    
+    return ruins_count, salvage_count, food_count
+
+
+def _generate_buildings_along_streets(grid, street_segments: list[dict], colonist_spawn: tuple[int, int]) -> tuple[int, int, int]:
+    """Generate buildings along both sides of streets.
+    
+    Buildings can be intact, partially collapsed, or completely ruined.
+    Returns (buildings_count, food_count, scrap_count).
+    """
+    buildings_count = 0
+    food_count = 0
+    scrap_count = 0
+    
+    for segment in street_segments:
+        if segment["type"] == "horizontal":
+            # Buildings on north and south sides
+            y = segment["y"]
+            street_width = segment["width"]
+            
+            # North side buildings (above street)
+            if y > 10:
+                bldg, food, scrap = _place_building_row(grid, segment["x_start"], y - 1, 
+                                                         segment["x_end"] - segment["x_start"], 
+                                                         "north", colonist_spawn)
+                buildings_count += bldg
+                food_count += food
+                scrap_count += scrap
+            
+            # South side buildings (below street)
+            if y + street_width < GRID_H - 10:
+                bldg, food, scrap = _place_building_row(grid, segment["x_start"], y + street_width, 
+                                                         segment["x_end"] - segment["x_start"], 
+                                                         "south", colonist_spawn)
+                buildings_count += bldg
+                food_count += food
+                scrap_count += scrap
+        
+        elif segment["type"] == "vertical":
+            # Buildings on east and west sides
+            x = segment["x"]
+            street_width = segment["width"]
+            
+            # West side buildings (left of street)
+            if x > 10:
+                bldg, food, scrap = _place_building_row(grid, x - 1, segment["y_start"], 
+                                                         segment["y_end"] - segment["y_start"], 
+                                                         "west", colonist_spawn)
+                buildings_count += bldg
+                food_count += food
+                scrap_count += scrap
+            
+            # East side buildings (right of street)
+            if x + street_width < GRID_W - 10:
+                bldg, food, scrap = _place_building_row(grid, x + street_width, segment["y_start"], 
+                                                         segment["y_end"] - segment["y_start"], 
+                                                         "east", colonist_spawn)
+                buildings_count += bldg
+                food_count += food
+                scrap_count += scrap
+    
+    return buildings_count, food_count, scrap_count
+
+
+def _place_building_row(grid, x: int, y: int, length: int, direction: str, colonist_spawn: tuple[int, int]) -> tuple[int, int, int]:
+    """Place a row of buildings along a street edge.
+    
+    Returns (buildings_placed, food_placed, scrap_placed).
+    """
+    buildings = 0
+    food = 0
+    scrap = 0
+    
+    if direction in ["north", "south"]:
+        # Horizontal row of buildings
+        pos = 0
+        while pos < length - 5:
+            # Random building width (6-12 tiles)
+            width = random.randint(6, 12)
+            depth = random.randint(6, 10)  # Building depth into lot
+            
+            # Check distance from colonist spawn
+            bldg_center_x = x + pos + width // 2
+            bldg_center_y = y if direction == "north" else y + depth // 2
+            dx = bldg_center_x - colonist_spawn[0]
+            dy = bldg_center_y - colonist_spawn[1]
+            dist = (dx * dx + dy * dy) ** 0.5
+            
+            if dist > 15:  # Not too close to spawn
+                # Place building
+                bldg_x = x + pos
+                bldg_y = y - depth if direction == "north" else y
+                
+                f, s = _place_single_building(grid, bldg_x, bldg_y, width, depth)
+                if f > 0 or s > 0:  # Building was placed
+                    buildings += 1
+                    food += f
+                    scrap += s
+            
+            pos += width + random.randint(1, 3)  # Gap between buildings
+    
+    else:  # "east" or "west"
+        # Vertical row of buildings
+        pos = 0
+        while pos < length - 5:
+            # Random building dimensions
+            height = random.randint(6, 12)
+            depth = random.randint(6, 10)
+            
+            # Check distance from colonist spawn
+            bldg_center_x = x if direction == "west" else x + depth // 2
+            bldg_center_y = y + pos + height // 2
+            dx = bldg_center_x - colonist_spawn[0]
+            dy = bldg_center_y - colonist_spawn[1]
+            dist = (dx * dx + dy * dy) ** 0.5
+            
+            if dist > 15:
+                bldg_x = x - depth if direction == "west" else x
+                bldg_y = y + pos
+                
+                f, s = _place_single_building(grid, bldg_x, bldg_y, depth, height)
+                if f > 0 or s > 0:
+                    buildings += 1
+                    food += f
+                    scrap += s
+            
+            pos += height + random.randint(1, 3)
+    
+    return buildings, food, scrap
+
+
+def _place_single_building(grid, x: int, y: int, width: int, height: int) -> tuple[int, int]:
+    """Place a single building (intact, partial, or ruined).
+    
+    Returns (food_placed, scrap_placed).
+    """
+    # Check if area is clear
+    for dx in range(width):
+        for dy in range(height):
+            if not grid.in_bounds(x + dx, y + dy, 0):
+                return 0, 0
+            tile = grid.get_tile(x + dx, y + dy, 0)
+            if tile not in ["empty", "weeds", "sidewalk"]:
+                return 0, 0
+    
+    # Determine building condition
+    condition = random.choices(
+        ["intact", "partial", "ruined"],
+        weights=[0.2, 0.4, 0.4]  # 20% intact, 40% partial, 40% ruined
+    )[0]
+    
+    food_placed = 0
+    scrap_placed = 0
+    
+    # Place floor
+    for dx in range(1, width - 1):
+        for dy in range(1, height - 1):
+            grid.set_tile(x + dx, y + dy, "finished_floor", z=0)
+    
+    # Place walls based on condition
+    if condition == "intact":
+        # Full walls with one entrance
+        entrance_side = random.choice(["north", "south", "east", "west"])
+        entrance_pos = random.randint(2, max(2, min(width, height) - 3))
+        
+        for dx in range(width):
+            for dy in range(height):
+                is_edge = (dx == 0 or dx == width - 1 or dy == 0 or dy == height - 1)
+                if not is_edge:
+                    continue
+                
+                # Skip entrance
+                if entrance_side == "north" and dy == 0 and dx == entrance_pos:
+                    continue
+                if entrance_side == "south" and dy == height - 1 and dx == entrance_pos:
+                    continue
+                if entrance_side == "east" and dx == width - 1 and dy == entrance_pos:
+                    continue
+                if entrance_side == "west" and dx == 0 and dy == entrance_pos:
+                    continue
+                
+                grid.set_tile(x + dx, y + dy, "finished_wall", z=0)
+    
+    elif condition == "partial":
+        # Partial walls (50% coverage, salvageable)
+        for dx in range(width):
+            for dy in range(height):
+                is_edge = (dx == 0 or dx == width - 1 or dy == 0 or dy == height - 1)
+                if is_edge and random.random() < 0.5:
+                    if spawn_salvage_object(x + dx, y + dy, "ruined_wall"):
+                        grid.set_tile(x + dx, y + dy, "salvage_object", z=0)
+    
+    else:  # ruined
+        # Minimal walls (20% coverage, mostly debris)
+        for dx in range(width):
+            for dy in range(height):
+                is_edge = (dx == 0 or dx == width - 1 or dy == 0 or dy == height - 1)
+                if is_edge and random.random() < 0.2:
+                    if spawn_salvage_object(x + dx, y + dy, "ruined_wall"):
+                        grid.set_tile(x + dx, y + dy, "salvage_object", z=0)
+    
+    # Place food inside (2-6 nodes per building)
+    num_food = random.randint(2, 6)
+    for _ in range(num_food):
+        for attempt in range(30):
+            fx = x + random.randint(1, width - 2)
+            fy = y + random.randint(1, height - 2)
+            
+            tile = grid.get_tile(fx, fy, 0)
+            if tile == "finished_floor" and (fx, fy) not in _RESOURCE_NODES:
+                if _place_node(grid, fx, fy, "food_plant"):
+                    food_placed += 1
+                    break
+    
+    # Place scrap inside (3-8 piles per building)
+    num_scrap = random.randint(3, 8)
+    for _ in range(num_scrap):
+        for attempt in range(20):
+            sx = x + random.randint(1, width - 2)
+            sy = y + random.randint(1, height - 2)
+            
+            tile = grid.get_tile(sx, sy, 0)
+            if tile == "finished_floor" and (sx, sy) not in _RESOURCE_NODES:
+                if spawn_salvage_object(sx, sy, "salvage_pile"):
+                    grid.set_tile(sx, sy, "salvage_object", z=0)
+                    scrap_placed += 1
+                    break
+    
+    return food_placed, scrap_placed
+
+
+def _generate_back_lots(grid, street_segments: list[dict]) -> list[dict]:
+    """Identify back lots behind buildings for resource spawning.
+    
+    Returns list of lot dictionaries.
+    """
+    lots = []
+    block_size = 40
+    
+    # Generate lots in the spaces between streets
+    for y_start in range(20, GRID_H - block_size, block_size):
+        for x_start in range(20, GRID_W - block_size, block_size):
+            # Create a lot in the center of each block
+            lot_x = x_start + 12  # Offset for buildings
+            lot_y = y_start + 12
+            lot_width = block_size - 24
+            lot_height = block_size - 24
+            
+            if lot_width > 5 and lot_height > 5:
+                lots.append({
+                    "x": lot_x,
+                    "y": lot_y,
+                    "width": lot_width,
+                    "height": lot_height
+                })
+    
+    return lots
+
+
+def _generate_sidewalks(grid, streets: list[tuple[int, int]]) -> int:
+    """Generate sidewalk tiles along the edges of streets.
+    
+    Returns count of sidewalk tiles placed.
+    """
+    sidewalk_count = 0
+    street_set = set(streets)
+    
+    # For each street tile, check adjacent tiles
+    for sx, sy in streets:
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = sx + dx, sy + dy
+            
+            # If adjacent tile is not a street and is empty, make it a sidewalk
+            if (nx, ny) not in street_set and grid.in_bounds(nx, ny, 0):
+                tile = grid.get_tile(nx, ny, 0)
+                if tile == "empty":
+                    grid.set_tile(nx, ny, "sidewalk", z=0)
+                    sidewalk_count += 1
+    
+    return sidewalk_count
+
+
+def _spawn_debris(grid, lots: list[dict]) -> int:
+    """Spawn debris tiles randomly in ruins and near walls.
+    
+    Returns count of debris tiles placed.
+    """
+    debris_count = 0
+    
+    # Spawn debris on sidewalks and in lots
+    for y in range(GRID_H):
+        for x in range(GRID_W):
+            tile = grid.get_tile(x, y, 0)
+            
+            # 3% chance on sidewalks
+            if tile == "sidewalk" and random.random() < 0.03:
+                grid.set_tile(x, y, "debris", z=0)
+                debris_count += 1
+            # 5% chance on finished floors (inside ruins)
+            elif tile == "finished_floor" and random.random() < 0.05:
+                # Check if not occupied by resource node
+                if (x, y) not in _RESOURCE_NODES:
+                    grid.set_tile(x, y, "debris", z=0)
+                    debris_count += 1
+    
+    return debris_count
+
+
+def _spawn_weeds(grid, lots: list[dict]) -> int:
+    """Spawn weed tiles in empty lots and near edges.
+    
+    Returns count of weed tiles placed.
+    """
+    weeds_count = 0
+    
+    # Spawn weeds in empty spaces
+    for lot in lots:
+        # Sparse weeds in each lot (2-8 per lot)
+        num_weeds = random.randint(2, 8)
+        for _ in range(num_weeds):
+            wx = lot["x"] + random.randint(0, lot["width"] - 1)
+            wy = lot["y"] + random.randint(0, lot["height"] - 1)
+            
+            if grid.in_bounds(wx, wy, 0):
+                tile = grid.get_tile(wx, wy, 0)
+                if tile == "empty" and (wx, wy) not in _RESOURCE_NODES:
+                    grid.set_tile(wx, wy, "weeds", z=0)
+                    weeds_count += 1
+    
+    # Add weeds near map edges
+    for x in range(GRID_W):
+        for y in [0, 1, GRID_H - 2, GRID_H - 1]:
+            if random.random() < 0.15:
+                tile = grid.get_tile(x, y, 0)
+                if tile == "empty":
+                    grid.set_tile(x, y, "weeds", z=0)
+                    weeds_count += 1
+    
+    for y in range(GRID_H):
+        for x in [0, 1, GRID_W - 2, GRID_W - 1]:
+            if random.random() < 0.15:
+                tile = grid.get_tile(x, y, 0)
+                if tile == "empty":
+                    grid.set_tile(x, y, "weeds", z=0)
+                    weeds_count += 1
+    
+    return weeds_count
+
+
+def _spawn_props(grid, streets: list[tuple[int, int]], lots: list[dict]) -> int:
+    """Spawn prop tiles (barrels, signs, scrap heaps) sparsely.
+    
+    Returns count of prop tiles placed.
+    """
+    props_count = 0
+    prop_types = ["prop_barrel", "prop_sign", "prop_scrap"]
+    
+    # Sparse props along streets (1 per 50 street tiles)
+    street_sample = random.sample(streets, min(len(streets) // 50, 20))
+    for sx, sy in street_sample:
+        prop_type = random.choice(prop_types)
+        grid.set_tile(sx, sy, prop_type, z=0)
+        props_count += 1
+    
+    # Props inside ruins (on floors)
+    for y in range(GRID_H):
+        for x in range(GRID_W):
+            tile = grid.get_tile(x, y, 0)
+            if tile == "finished_floor" and random.random() < 0.02:
+                # Check not occupied
+                if (x, y) not in _RESOURCE_NODES:
+                    prop_type = random.choice(prop_types)
+                    grid.set_tile(x, y, prop_type, z=0)
+                    props_count += 1
+    
+    return props_count
+
+
+def _spawn_wood_clusters(grid, lots: list[dict], colonist_spawn: tuple[int, int]) -> int:
+    """Spawn wood clusters in back lots (2x density).
+    
+    Returns total wood nodes placed.
+    """
+    wood_count = 0
+    num_clusters = random.randint(30, 40)  # 2x increase
+    
+    for _ in range(num_clusters):
+        # Pick a random lot
+        if not lots:
+            break
+        lot = random.choice(lots)
+        
+        # Random position in lot
+        center_x = lot["x"] + random.randint(2, min(lot["width"] - 3, lot["width"] - 1))
+        center_y = lot["y"] + random.randint(2, min(lot["height"] - 3, lot["height"] - 1))
+        
+        cluster_size = random.randint(8, 16)  # Larger clusters
+        wood_count += _spawn_cluster(grid, center_x, center_y, "tree", cluster_size)
+    
+    return wood_count
+
+
+def _spawn_mineral_clusters(grid, lots: list[dict], colonist_spawn: tuple[int, int]) -> int:
+    """Spawn mineral clusters in back lots (2x density).
+    
+    Returns total mineral nodes placed.
+    """
+    mineral_count = 0
+    num_clusters = random.randint(24, 32)  # 2x increase
+    
+    for _ in range(num_clusters):
+        # Pick a random lot
+        if not lots:
+            break
+        lot = random.choice(lots)
+        
+        # Random position in lot
+        center_x = lot["x"] + random.randint(2, min(lot["width"] - 3, lot["width"] - 1))
+        center_y = lot["y"] + random.randint(2, min(lot["height"] - 3, lot["height"] - 1))
+        
+        cluster_size = random.randint(8, 14)  # Larger clusters
+        mineral_count += _spawn_cluster(grid, center_x, center_y, "mineral_node", cluster_size)
+    
+    return mineral_count
+
+
+def _spawn_exterior_scrap(grid, lots: list[dict]) -> int:
+    """Spawn loose scrap piles in back lots.
+    
+    Returns total scrap piles placed.
+    """
+    scrap_count = 0
+    
+    for lot in lots:
+        # 2-4 scrap piles per lot
+        num_scrap = random.randint(2, 4)
+        for _ in range(num_scrap):
+            for attempt in range(20):
+                sx = lot["x"] + random.randint(0, lot["width"] - 1)
+                sy = lot["y"] + random.randint(0, lot["height"] - 1)
+                
+                if grid.in_bounds(sx, sy, 0):
+                    tile = grid.get_tile(sx, sy, 0)
+                    if tile == "empty" and (sx, sy) not in _RESOURCE_NODES:
+                        if spawn_salvage_object(sx, sy, "salvage_pile"):
+                            grid.set_tile(sx, sy, "salvage_object", z=0)
+                            scrap_count += 1
+                            break
+    
+    return scrap_count
+
+
+def _spawn_ruined_buildings(grid, colonist_center_x: int, colonist_center_y: int, safe_radius: int) -> tuple[int, int]:
+    """Spawn 4-6 ruined buildings with floors, walls, scrap, and food.
+    
+    Each ruin is a complete building structure:
+    - Floor tiles (finished_floor) inside
+    - Partial/broken walls around the perimeter (salvage objects)
+    - Scrap piles inside (salvage objects)
+    - Food plants inside (resource nodes)
+    
+    Returns (total_salvage_tiles, num_ruins_placed).
+    """
+    total_salvage = 0
+    ruins_placed = 0
+    num_ruins = random.randint(4, 6)  # More ruins for larger map
     
     for _ in range(num_ruins):
-        # Random building size (small to medium)
-        width = random.randint(4, 7)
-        height = random.randint(4, 7)
+        # Random building size (medium to large)
+        width = random.randint(6, 14)
+        height = random.randint(6, 14)
         
-        # Find a valid location (needs enough empty space)
-        for attempt in range(30):
+        # Find a valid location (needs enough empty space, away from colonists)
+        for attempt in range(50):
             # Leave margin from edges
-            x = random.randint(2, GRID_W - width - 2)
-            y = random.randint(2, GRID_H - height - 2)
+            x = random.randint(10, GRID_W - width - 10)
+            y = random.randint(10, GRID_H - height - 10)
             
-            # Check if area is clear
+            # Check distance from colonist spawn
+            center_dx = (x + width // 2) - colonist_center_x
+            center_dy = (y + height // 2) - colonist_center_y
+            dist = (center_dx * center_dx + center_dy * center_dy) ** 0.5
+            
+            if dist < safe_radius + 10:  # Extra buffer for ruins
+                continue
+            
+            # Check if area is clear (including 2-tile buffer around building)
             area_clear = True
-            for dx in range(width):
-                for dy in range(height):
-                    tile = grid.get_tile(x + dx, y + dy, 0)
+            for dx in range(-2, width + 2):
+                for dy in range(-2, height + 2):
+                    check_x = x + dx
+                    check_y = y + dy
+                    if not grid.in_bounds(check_x, check_y, 0):
+                        area_clear = False
+                        break
+                    tile = grid.get_tile(check_x, check_y, 0)
                     if tile != "empty":
                         area_clear = False
                         break
-                    if (x + dx, y + dy) in _RESOURCE_NODES:
+                    if (check_x, check_y) in _RESOURCE_NODES:
                         area_clear = False
                         break
                 if not area_clear:
@@ -560,8 +1239,16 @@ def _spawn_ruined_buildings(grid) -> int:
             if not area_clear:
                 continue
             
-            # Place the ruined building (walls only - rectangular outline)
-            placed = 0
+            # Place the ruined building
+            salvage_count = 0
+            
+            # 1. Place floor tiles inside
+            for dx in range(1, width - 1):
+                for dy in range(1, height - 1):
+                    px, py = x + dx, y + dy
+                    grid.set_tile(px, py, "finished_floor", z=0)
+            
+            # 2. Place broken walls around perimeter (with gaps for ruined look)
             for dx in range(width):
                 for dy in range(height):
                     # Only place on edges (walls)
@@ -569,55 +1256,125 @@ def _spawn_ruined_buildings(grid) -> int:
                     if not is_wall:
                         continue
                     
-                    # Random chance to have gaps (ruined look)
-                    if random.random() < 0.15:
+                    # Random gaps (30% chance) for ruined appearance
+                    if random.random() < 0.30:
                         continue
                     
                     px, py = x + dx, y + dy
-                    salvage_type = random.choice(["ruined_wall", "salvage_pile"])
+                    salvage_type = random.choice(["ruined_wall", "ruined_wall", "salvage_pile"])
                     if spawn_salvage_object(px, py, salvage_type):
                         grid.set_tile(px, py, "salvage_object", z=0)
-                        placed += 1
+                        salvage_count += 1
             
-            total_placed += placed
+            # 3. Place scrap piles inside (2-5 piles)
+            num_scrap = random.randint(2, 5)
+            for _ in range(num_scrap):
+                for scrap_attempt in range(20):
+                    sx = x + random.randint(1, width - 2)
+                    sy = y + random.randint(1, height - 2)
+                    
+                    # Check if tile is floor and empty
+                    if grid.get_tile(sx, sy, 0) == "finished_floor" and (sx, sy) not in _RESOURCE_NODES:
+                        if spawn_salvage_object(sx, sy, "salvage_pile"):
+                            grid.set_tile(sx, sy, "salvage_object", z=0)
+                            salvage_count += 1
+                            break
+            
+            # 4. Place food plants inside (1-3 plants)
+            num_food = random.randint(1, 3)
+            for _ in range(num_food):
+                for food_attempt in range(20):
+                    fx = x + random.randint(1, width - 2)
+                    fy = y + random.randint(1, height - 2)
+                    
+                    # Check if tile is floor and empty
+                    tile = grid.get_tile(fx, fy, 0)
+                    if tile == "finished_floor" and (fx, fy) not in _RESOURCE_NODES:
+                        # Don't place on salvage objects
+                        if tile != "salvage_object":
+                            _place_node(grid, fx, fy, "food_plant")
+                            break
+            
+            total_salvage += salvage_count
+            ruins_placed += 1
             break  # Successfully placed this ruin
     
-    return total_placed
+    return total_salvage, ruins_placed
 
 
-def spawn_resource_nodes(grid, count: int = 40) -> None:
-    """Spawn resource nodes in natural-looking clusters.
+# Global variable to store colonist spawn location
+_COLONIST_SPAWN_LOCATION: tuple[int, int] = (100, 100)  # Default center
+
+
+def get_colonist_spawn_location() -> tuple[int, int]:
+    """Get the colonist spawn location determined during world generation.
     
-    Creates grouped formations:
-    - Trees spawn in forest clusters (3-6 trees each)
-    - Minerals spawn in rock formations (2-4 nodes each)
-    - Scrap spawns in small piles (1-2 each)
+    Returns (x, y) coordinates.
     """
-    placed = 0
+    return _COLONIST_SPAWN_LOCATION
+
+
+def spawn_resource_nodes(grid, count: int = 40) -> tuple[int, int]:
+    """Generate a dense ruined city with buildings along streets and back lots.
     
-    # Cluster configurations: (node_type, num_clusters, min_size, max_size)
-    cluster_configs = [
-        ("tree", 6, 4, 8),           # 6 forest clusters, 4-8 trees each
-        ("mineral_node", 4, 3, 5),   # 4 rock formations, 3-5 nodes each
-        ("scrap_pile", 3, 2, 3),     # 3 scrap areas, 2-3 piles each
-        ("food_plant", 3, 2, 4),     # 3 food patches, 2-4 plants each
-    ]
+    Creates a believable abandoned city:
+    - Street grid with sidewalks
+    - Buildings along both sides of streets (intact/partial/ruined)
+    - Back lots behind buildings with resource clusters
+    - Food only spawns inside buildings
+    - Scrap spawns inside buildings and in exterior piles
+    - Decorative environment tiles
     
-    for node_type, num_clusters, min_size, max_size in cluster_configs:
-        for _ in range(num_clusters):
-            # Random center point for this cluster
-            center_x = random.randint(2, GRID_W - 3)
-            center_y = random.randint(2, GRID_H - 3)
-            
-            cluster_size = random.randint(min_size, max_size)
-            nodes_placed = _spawn_cluster(grid, center_x, center_y, node_type, cluster_size)
-            placed += nodes_placed
+    Returns (spawn_x, spawn_y) for colonist placement.
+    """
+    global _COLONIST_SPAWN_LOCATION
     
-    # Spawn salvage objects in building-shaped ruins
-    salvage_placed = _spawn_ruined_buildings(grid)
+    # Step 1: Generate street grid
+    streets, street_segments = _generate_street_grid(grid)
     
-    print(f"[Resources] Spawned {placed} resource nodes in clusters")
-    print(f"[Resources] Spawned {salvage_placed} salvage tiles in ruined buildings")
+    # Step 2: Find colonist spawn near center street intersection
+    colonist_spawn = _find_colonist_spawn_location(streets)
+    _COLONIST_SPAWN_LOCATION = colonist_spawn
+    
+    # Step 3: Generate buildings along both sides of streets
+    buildings_count, food_count, scrap_in_buildings = _generate_buildings_along_streets(grid, street_segments, colonist_spawn)
+    
+    # Step 4: Generate sidewalks along streets
+    sidewalk_count = _generate_sidewalks(grid, streets)
+    
+    # Step 5: Identify back lots behind buildings
+    lots = _generate_back_lots(grid, street_segments)
+    
+    # Step 6: Spawn resource clusters in back lots (2x density)
+    wood_count = _spawn_wood_clusters(grid, lots, colonist_spawn)
+    mineral_count = _spawn_mineral_clusters(grid, lots, colonist_spawn)
+    scrap_exterior = _spawn_exterior_scrap(grid, lots)
+    
+    # Step 7: Add decorative environment tiles
+    debris_count = _spawn_debris(grid, lots)
+    weeds_count = _spawn_weeds(grid, lots)
+    props_count = _spawn_props(grid, streets, lots)
+    
+    total_scrap = scrap_in_buildings + scrap_exterior
+    
+    print(f"[WorldGen] ═══════════════════════════════════════")
+    print(f"[WorldGen] DENSE CITY GENERATION COMPLETE")
+    print(f"[WorldGen] ═══════════════════════════════════════")
+    print(f"[WorldGen] Streets: {len(street_segments)} segments, {len(streets)} tiles")
+    print(f"[WorldGen] Sidewalks: {sidewalk_count} tiles")
+    print(f"[WorldGen] Buildings: {buildings_count} structures along streets")
+    print(f"[WorldGen] Back Lots: {len(lots)} resource zones")
+    print(f"[WorldGen] ───────────────────────────────────────")
+    print(f"[WorldGen] FOOD: {food_count} nodes (inside buildings only)")
+    print(f"[WorldGen] SCRAP: {total_scrap} piles ({scrap_in_buildings} interior, {scrap_exterior} exterior)")
+    print(f"[WorldGen] WOOD: {wood_count} nodes in back lots")
+    print(f"[WorldGen] MINERALS: {mineral_count} nodes in back lots")
+    print(f"[WorldGen] ───────────────────────────────────────")
+    print(f"[WorldGen] Decorative: {debris_count} debris, {weeds_count} weeds, {props_count} props")
+    print(f"[WorldGen] Colonist spawn: ({colonist_spawn[0]}, {colonist_spawn[1]})")
+    print(f"[WorldGen] ═══════════════════════════════════════")
+    
+    return colonist_spawn
 
 
 def is_resource_node(tile_value: Optional[str]) -> bool:
