@@ -92,7 +92,13 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
     mx, my = pygame.mouse.get_pos()
     ui = get_construction_ui()
     
-    # Check colonist panel first
+    # Check colonist management panel first (highest priority)
+    from ui import get_colonist_management_panel
+    mgmt_panel = get_colonist_management_panel()
+    if mgmt_panel.handle_click((mx, my)):
+        return
+    
+    # Check colonist panel
     from ui import get_colonist_panel
     colonist_panel = get_colonist_panel()
     if colonist_panel.handle_click((mx, my)):
@@ -102,6 +108,12 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
     from ui import get_stockpile_filter_panel
     filter_panel = get_stockpile_filter_panel()
     if filter_panel.handle_click((mx, my)):
+        return
+    
+    # Check workstation panel
+    from ui import get_workstation_panel
+    ws_panel = get_workstation_panel()
+    if ws_panel.handle_click((mx, my)):
         return
     
     # Let UI handle click first
@@ -171,6 +183,44 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
                 print(f"[Build] Stove placed at ({gx}, {gy})")
             else:
                 print(f"[Build] Cannot place Stove at ({gx}, {gy}) - needs floor inside room")
+        elif build_mode == "gutter_forge":
+            # Gutter Forge - single click placement on floor inside room
+            from buildings import place_gutter_forge
+            if place_gutter_forge(grid, gx, gy, current_z):
+                print(f"[Build] Gutter Forge placed at ({gx}, {gy})")
+            else:
+                print(f"[Build] Cannot place Gutter Forge at ({gx}, {gy}) - needs floor inside room")
+        elif build_mode == "skinshop_loom":
+            # Skinshop Loom - single click placement on floor inside room
+            from buildings import place_skinshop_loom
+            if place_skinshop_loom(grid, gx, gy, current_z):
+                print(f"[Build] Skinshop Loom placed at ({gx}, {gy})")
+            else:
+                print(f"[Build] Cannot place Skinshop Loom at ({gx}, {gy}) - needs floor inside room")
+        elif build_mode == "cortex_spindle":
+            # Cortex Spindle - single click placement on floor inside room
+            from buildings import place_cortex_spindle
+            if place_cortex_spindle(grid, gx, gy, current_z):
+                print(f"[Build] Cortex Spindle placed at ({gx}, {gy})")
+            else:
+                print(f"[Build] Cannot place Cortex Spindle at ({gx}, {gy}) - needs floor inside room")
+        elif build_mode in buildings_module.BUILDING_TYPES and buildings_module.BUILDING_TYPES[build_mode].get("workstation"):
+            # Generic workstation placement using shared rules (floor + roofed room)
+            from buildings import place_workstation_generic
+            ws_def = buildings_module.BUILDING_TYPES[build_mode]
+            ws_name = ws_def.get("name", build_mode).replace("_", " ")
+            if place_workstation_generic(grid, gx, gy, build_mode, current_z):
+                print(f"[Build] {ws_name} placed at ({gx}, {gy})")
+            else:
+                print(f"[Build] Cannot place {ws_name} at ({gx}, {gy}) - needs floor inside room")
+        elif build_mode and build_mode.startswith("furn_"):
+            # Generic furniture placement - install crafted furniture from stockpiles
+            from buildings import request_furniture_install
+            item_id = build_mode[len("furn_"):]
+            if request_furniture_install(grid, gx, gy, current_z, item_id):
+                print(f"[Build] Furniture install requested: {item_id} at ({gx}, {gy}, z={current_z})")
+            else:
+                print(f"[Build] Cannot install {item_id} at ({gx}, {gy}, z={current_z})")
         elif build_mode == "stockpile":
             # Start drag for stockpile zone (rectangle) - works on both Z levels
             _drag_start = (gx, gy)
@@ -202,17 +252,34 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
                         break
             
             if clicked_colonist is not None:
-                # Open colonist job tags panel
-                from ui import get_colonist_panel
-                panel = get_colonist_panel()
-                panel.open(clicked_colonist, mx, my)
+                # Open colonist management panel (includes job tags)
+                from ui import get_colonist_management_panel
+                mgmt_panel = get_colonist_management_panel()
+                mgmt_panel.open_for_colonist(colonists, clicked_colonist)
             else:
-                # Check if clicking on stockpile zone for filter UI
-                from ui import get_stockpile_filter_panel
-                zone_id = zones_module.get_zone_id_at(gx, gy, current_z)
-                if zone_id is not None:
-                    panel = get_stockpile_filter_panel()
-                    panel.open(zone_id, mx, my)
+                # Check if clicking on a workstation (open recipe panel)
+                tile = grid.get_tile(gx, gy, current_z)
+                if tile and tile.startswith("finished_"):
+                    ws = buildings_module.get_workstation(gx, gy, current_z)
+                    if ws is not None:
+                        # Open workstation panel
+                        from ui import get_workstation_panel
+                        ws_panel = get_workstation_panel()
+                        ws_panel.open(gx, gy, current_z, mx, my)
+                    else:
+                        # Check if clicking on stockpile zone for filter UI
+                        from ui import get_stockpile_filter_panel
+                        zone_id = zones_module.get_zone_id_at(gx, gy, current_z)
+                        if zone_id is not None:
+                            panel = get_stockpile_filter_panel()
+                            panel.open(zone_id, mx, my)
+                else:
+                    # Check if clicking on stockpile zone for filter UI
+                    from ui import get_stockpile_filter_panel
+                    zone_id = zones_module.get_zone_id_at(gx, gy, current_z)
+                    if zone_id is not None:
+                        panel = get_stockpile_filter_panel()
+                        panel.open(zone_id, mx, my)
 
 
 def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
@@ -289,7 +356,9 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                 tiles = get_drag_rect(_drag_start, (gx, gy))
                 
                 # Create gathering jobs for all resource nodes in selection
+                # Also add designations for persistent highlighting
                 jobs_created = 0
+                streets_designated = 0
                 items_marked = 0
                 resource_items = get_all_resource_items()
                 
@@ -299,15 +368,31 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                     if current_z == 0 and tile == "resource_node":
                         if create_gathering_job_for_node(jobs_module, grid, tx, ty):
                             jobs_created += 1
+                            # Add designation for persistent highlighting
+                            jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
+                    # Harvest streets (converts to scorched, yields mineral)
+                    elif current_z == 0 and tile == "street":
+                        if resources_module.designate_street_for_harvest(grid, tx, ty, jobs_module):
+                            streets_designated += 1
+                            jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
+                    # Harvest sidewalks (converts to scorched, yields mineral)
+                    elif current_z == 0 and tile == "sidewalk":
+                        if resources_module.designate_sidewalk_for_harvest(grid, tx, ty, jobs_module):
+                            streets_designated += 1  # Count with streets
+                            jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
                     # Also mark any loose items for hauling (on current Z level)
                     if (tx, ty, current_z) in resource_items:
                         if mark_item_for_hauling(tx, ty, current_z):
                             items_marked += 1
+                            # Add designation for persistent highlighting
+                            jobs_module.add_designation(tx, ty, current_z, "haul", "haul")
                 
-                if jobs_created > 0 or items_marked > 0:
+                if jobs_created > 0 or streets_designated > 0 or items_marked > 0:
                     parts = []
                     if jobs_created > 0:
                         parts.append(f"{jobs_created} resource(s) for harvesting")
+                    if streets_designated > 0:
+                        parts.append(f"{streets_designated} street(s) for mining")
                     if items_marked > 0:
                         parts.append(f"{items_marked} item(s) for hauling")
                     print(f"Designated {' and '.join(parts)}")
@@ -372,6 +457,8 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                                 category="salvage",
                                 z=0,
                             )
+                            # Add designation for persistent highlighting
+                            jobs_module.add_designation(tx, ty, 0, "salvage", "salvage")
                             designated_count += 1
                 
                 if designated_count > 0:
@@ -518,9 +605,13 @@ def main() -> None:
                 running = False
 
             if event.type == pygame.KEYDOWN:
-                # Let UI handle keybinds first
-                ui = get_construction_ui()
-                if ui.handle_key(event.key):
+                # Let management panel handle keys first (for arrow navigation)
+                from ui import get_colonist_management_panel
+                mgmt_panel = get_colonist_management_panel()
+                if mgmt_panel.handle_key(event.key):
+                    pass  # Management panel consumed the key
+                # Let UI handle keybinds
+                elif get_construction_ui().handle_key(event.key):
                     pass  # UI consumed the key
                 elif event.key == pygame.K_e:
                     ether_mode = not ether_mode
@@ -555,6 +646,64 @@ def main() -> None:
                     script_path = os.path.abspath(__file__)
                     subprocess.Popen([sys.executable, script_path])
                     sys.exit(0)
+                elif event.key == pygame.K_F7:
+                    # Debug: Equip procedurally generated items on all colonists
+                    from item_generator import generate_item, generated_item_to_dict
+                    for c in colonists:
+                        # Generate items for random slots
+                        slots = ["head", "body", "hands", "feet", "implant", "charm"]
+                        import random
+                        for slot in random.sample(slots, min(3, len(slots))):
+                            item = generate_item(slot=slot, min_components=2, max_components=3)
+                            c.equipment[slot] = generated_item_to_dict(item)
+                            print(f"[Debug] {c.name} equipped: {item.name} ({item.rarity})")
+                    print(f"[Debug] Equipped procedural items on {len(colonists)} colonists")
+                    # Show first colonist's equipment stats
+                    if colonists:
+                        c = colonists[0]
+                        stats = c.get_equipment_stats()
+                        print(f"[Debug] {c.name}'s equipment stats:")
+                        print(f"  Speed bonus: {stats['speed_bonus']:+.0%}")
+                        print(f"  Work bonus: {stats['work_bonus']:+.0%}")
+                        print(f"  Comfort: {stats['comfort']:+.2f}")
+                        print(f"  Hazard resist: {stats['hazard_resist']:+.0%}")
+                elif event.key == pygame.K_F8:
+                    # Debug: Print construction site status
+                    from buildings import get_all_construction_sites, get_missing_materials
+                    sites = get_all_construction_sites()
+                    print(f"[Debug] Construction sites: {len(sites)}")
+                    for (x, y, z), site in sites.items():
+                        missing = get_missing_materials(x, y, z)
+                        print(f"  ({x},{y},z={z}) type={site.get('type')} needed={site.get('materials_needed')} delivered={site.get('materials_delivered')} missing={missing}")
+                    # Also print stockpile contents
+                    print("[Debug] Stockpile contents:")
+                    for res_type in ["wood", "scrap", "metal", "mineral", "power"]:
+                        total = zones_module.get_total_stored(res_type)
+                        print(f"  {res_type}: {total}")
+                elif event.key == pygame.K_F10:
+                    # Debug: Spawn test item at first colonist's location
+                    from items import spawn_world_item, get_all_world_items
+                    if colonists:
+                        c = colonists[0]
+                        spawn_world_item(c.x, c.y, c.z, "work_gloves")
+                        print(f"[Debug] Spawned work_gloves at ({c.x},{c.y},z={c.z})")
+                        print(f"[Debug] World items: {get_all_world_items()}")
+                elif event.key == pygame.K_F11:
+                    # Debug: Print workstation status
+                    from buildings import _WORKSTATIONS, get_workstation_recipe
+                    print(f"[Debug] Registered workstations: {len(_WORKSTATIONS)}")
+                    for (x, y, z), ws in _WORKSTATIONS.items():
+                        recipe = get_workstation_recipe(x, y, z)
+                        recipe_name = recipe.get("name", "?") if recipe else "None"
+                        print(f"  ({x},{y},z={z}) type={ws.get('type')} recipe={recipe_name} reserved={ws.get('reserved')} working={ws.get('working')}")
+                elif event.key == pygame.K_TAB:
+                    # Toggle colonist management panel
+                    from ui import get_colonist_management_panel
+                    mgmt_panel = get_colonist_management_panel()
+                    if mgmt_panel.visible:
+                        mgmt_panel.close()
+                    else:
+                        mgmt_panel.open(colonists)
                 # ESC keybinding removed - use window close button to quit
 
             if event.type == pygame.MOUSEBUTTONDOWN:
@@ -598,6 +747,13 @@ def main() -> None:
             from buildings import process_crafting_jobs
             process_crafting_jobs(jobs_module, zones_module)
             
+            # Process equipment haul jobs (crafted items on ground)
+            from items import process_equipment_haul_jobs, process_auto_equip
+            process_equipment_haul_jobs(jobs_module, zones_module)
+            
+            # Process auto-equip (colonists claim items matching preferences)
+            process_auto_equip(colonists, zones_module, jobs_module)
+            
             # Process stockpile relocation (items from zones being removed)
             zones_module.process_stockpile_relocation(jobs_module)
             
@@ -639,10 +795,21 @@ def main() -> None:
         filter_panel = get_stockpile_filter_panel()
         filter_panel.draw(screen)
         
+        # Draw workstation panel (if open)
+        from ui import get_workstation_panel
+        ws_panel = get_workstation_panel()
+        ws_panel.draw(screen)
+        
         # Draw colonist job tags panel (if open)
         from ui import get_colonist_panel
         colonist_panel = get_colonist_panel()
         colonist_panel.draw(screen)
+        
+        # Draw colonist management panel (if open)
+        from ui import get_colonist_management_panel
+        mgmt_panel = get_colonist_management_panel()
+        mgmt_panel.update(pygame.mouse.get_pos())  # Update tooltip
+        mgmt_panel.draw(screen)
         
         # Draw debug overlay (toggle with 'I' key)
         draw_debug(screen, grid, colonists, jobs_module, resources_module, zones_module, buildings_module, rooms_module)

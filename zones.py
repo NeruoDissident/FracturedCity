@@ -123,6 +123,7 @@ def create_stockpile_zone(tiles: List[Coord3D], grid=None, z: int = 0) -> int:
         "allow_power": True,
         "allow_raw_food": True,
         "allow_cooked_meal": True,
+        "allow_equipment": True,  # Crafted items (armor, tools, implants, charms)
     }
     
     # Register tiles
@@ -396,6 +397,56 @@ def add_to_zone_storage(x: int, y: int, z: int, resource_type: str, amount: int)
     return True
 
 
+# Equipment storage - separate from resource storage
+# Key: (x, y, z), Value: list of item dicts
+_EQUIPMENT_STORAGE: Dict[Coord3D, List[dict]] = {}
+
+
+def store_equipment_at_tile(x: int, y: int, z: int, item: dict) -> bool:
+    """Store an equipment item at a stockpile tile.
+    
+    Returns True if successful.
+    """
+    if not is_stockpile_zone(x, y, z):
+        return False
+    
+    # Check if zone allows equipment
+    zone_id = _TILE_TO_ZONE.get((x, y, z))
+    if zone_id is not None:
+        zone = _ZONES.get(zone_id)
+        if zone and not zone.get("allow_equipment", True):
+            return False
+    
+    coord = (x, y, z)
+    if coord not in _EQUIPMENT_STORAGE:
+        _EQUIPMENT_STORAGE[coord] = []
+    
+    _EQUIPMENT_STORAGE[coord].append(item)
+    return True
+
+
+def get_equipment_at_tile(x: int, y: int, z: int) -> List[dict]:
+    """Get all equipment items stored at a tile."""
+    return _EQUIPMENT_STORAGE.get((x, y, z), [])
+
+
+def remove_equipment_from_tile(x: int, y: int, z: int) -> Optional[dict]:
+    """Remove and return one equipment item from a tile."""
+    coord = (x, y, z)
+    items = _EQUIPMENT_STORAGE.get(coord, [])
+    if items:
+        item = items.pop(0)
+        if not items:
+            del _EQUIPMENT_STORAGE[coord]
+        return item
+    return None
+
+
+def get_all_stored_equipment() -> Dict[Coord3D, List[dict]]:
+    """Get all stored equipment for rendering/saving."""
+    return _EQUIPMENT_STORAGE.copy()
+
+
 def get_zone_storage(zone_id: int) -> Dict[str, int]:
     """Get the stored resources in a zone."""
     zone = _ZONES.get(zone_id)
@@ -587,6 +638,7 @@ def get_zone_filters(zone_id: int) -> Optional[Dict[str, bool]]:
         "power": zone.get("allow_power", True),
         "raw_food": zone.get("allow_raw_food", True),
         "cooked_meal": zone.get("allow_cooked_meal", True),
+        "equipment": zone.get("allow_equipment", True),
     }
 
 

@@ -25,12 +25,19 @@ from config import (
     COLOR_TILE_WALL,
     COLOR_TILE_FINISHED_WALL,
     COLOR_TILE_STREET,
+    COLOR_TILE_STREET_DESIGNATED,
     COLOR_TILE_SIDEWALK,
+    COLOR_TILE_SIDEWALK_DESIGNATED,
+    COLOR_TILE_SCORCHED,
     COLOR_TILE_DEBRIS,
     COLOR_TILE_WEEDS,
     COLOR_TILE_PROP_BARREL,
     COLOR_TILE_PROP_SIGN,
     COLOR_TILE_PROP_SCRAP,
+    COLOR_TILE_DIRT,
+    COLOR_TILE_GRASS,
+    COLOR_TILE_ROCK,
+    COLOR_TILE_EMPTY,
     COLOR_CONSTRUCTION_PROGRESS,
     COLOR_RESOURCE_NODE_WOOD,
     COLOR_RESOURCE_NODE_SCRAP,
@@ -51,7 +58,7 @@ from config import (
     COLOR_ZONE_STOCKPILE,
     COLOR_ZONE_STOCKPILE_BORDER,
 )
-from jobs import get_job_at
+from jobs import get_job_at, get_designation_category
 import resources
 import zones
 import buildings
@@ -167,19 +174,20 @@ class Grid:
             # Doors are handled specially - they can be opened
             # Fire escapes are walkable (they're transition points)
             # roof tiles are NOT walkable - must be converted to roof_access first
-            if value in ("finished_building", "finished_wall", "finished_wall_advanced", "roof", "finished_salvagers_bench", "finished_generator", "finished_stove"):
+            if value in ("finished_building", "finished_wall", "finished_wall_advanced", "roof", "finished_salvagers_bench", "finished_generator", "finished_stove", "finished_gutter_forge", "finished_skinshop_loom", "finished_cortex_spindle"):
                 self.walkable[z][y][x] = False
             elif value == "finished_window":
                 # Windows are passable (like doors) - colonists can climb through
                 self.walkable[z][y][x] = True
-            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove", "street", "sidewalk", "debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap"):
+            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "street", "street_designated", "sidewalk", "sidewalk_designated", "debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap", "dirt", "grass", "rock", "scorched", "gutter_slab", "crash_bed"):
                 # window_tile: passable wall with fire escape window
                 # fire_escape_platform: external platform for fire escape
                 # roof_access: walkable/buildable rooftop tile (player-allowed)
                 # roof_floor: legacy walkable roof (kept for compatibility)
                 # bridge/finished_bridge: walkable connections between buildings
-                # street: walkable city streets
+                # street/street_designated: walkable city streets
                 # sidewalk/debris/weeds/props: decorative, walkable
+                # dirt/grass/rock: natural ground tiles
                 self.walkable[z][y][x] = True
             
             # Initialize environmental parameters based on tile type
@@ -197,7 +205,7 @@ class Grid:
             )
         # New construction has clean values
         elif tile_type in ("building", "wall", "wall_advanced", "floor", "door", "window",
-                          "salvagers_bench", "generator", "stove", "bridge", "fire_escape"):
+                          "salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "bridge", "fire_escape", "gutter_slab", "crash_bed"):
             self.update_env_data(x, y, z,
                 echo=0.0,
                 integrity=1.0,
@@ -207,7 +215,8 @@ class Grid:
         # Finished construction maintains clean values
         elif tile_type in ("finished_building", "finished_wall", "finished_wall_advanced",
                           "finished_floor", "finished_window", "finished_bridge",
-                          "finished_salvagers_bench", "finished_generator", "finished_stove"):
+                          "finished_salvagers_bench", "finished_generator", "finished_stove",
+                          "finished_gutter_forge", "finished_skinshop_loom", "finished_cortex_spindle"):
             self.update_env_data(x, y, z,
                 echo=0.0,
                 integrity=1.0,
@@ -326,7 +335,7 @@ class Grid:
         tile = self.get_tile(x, y, z)
         
         # Only floor tiles can be interior
-        if tile not in ["finished_floor", "floor"]:
+        if tile not in ["finished_floor", "floor", "crash_bed"]:
             return False
         
         # Check all four cardinal directions for solid tiles
@@ -334,7 +343,8 @@ class Grid:
         solid_tiles = {
             "finished_wall", "finished_wall_advanced", "wall", "wall_advanced",
             "finished_building", "door", "window", "finished_window",
-            "finished_salvagers_bench", "finished_generator", "finished_stove"
+            "finished_salvagers_bench", "finished_generator", "finished_stove",
+            "finished_gutter_forge", "finished_skinshop_loom", "finished_cortex_spindle"
         }
         
         # North
@@ -403,9 +413,26 @@ class Grid:
 
                 tile = self.tiles[z][y][x]
 
-                # Draw decorative tiles first (beneath everything else)
-                # All decorative tiles get subtle color variation
-                if tile == "sidewalk":
+                # Draw base ground tiles first (beneath everything else)
+                # Empty/None tiles get earth tones instead of pure black
+                if tile == "empty" or tile is None:
+                    color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, z, 8)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "dirt":
+                    color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, z, 10)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "grass":
+                    color = self._get_tile_color_variation(COLOR_TILE_GRASS, x, y, z, 12)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "rock":
+                    color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, z, 8)
+                    pygame.draw.rect(surface, color, rect)
+                elif tile == "scorched":
+                    # Scorched earth from demolished pavement - dark charred look
+                    color = self._get_tile_color_variation(COLOR_TILE_SCORCHED, x, y, z, 6)
+                    pygame.draw.rect(surface, color, rect)
+                # Decorative tiles with subtle color variation
+                elif tile == "sidewalk":
                     color = self._get_tile_color_variation(COLOR_TILE_SIDEWALK, x, y, z, 8)
                     pygame.draw.rect(surface, color, rect)
                 elif tile == "debris":
@@ -498,6 +525,20 @@ class Grid:
                     # Street tiles - distinct dark gray with subtle variation
                     color = self._get_tile_color_variation(COLOR_TILE_STREET, x, y, z, 6)
                     pygame.draw.rect(surface, color, rect)
+                elif tile == "street_designated":
+                    # Street designated for harvesting - warmer tone with harvest indicator
+                    color = self._get_tile_color_variation(COLOR_TILE_STREET_DESIGNATED, x, y, z, 8)
+                    pygame.draw.rect(surface, color, rect)
+                    # Small pickaxe/mining indicator
+                    pygame.draw.circle(surface, (180, 160, 120), (rect.centerx, rect.centery), 4)
+                    pygame.draw.circle(surface, (100, 90, 70), (rect.centerx, rect.centery), 4, 1)
+                elif tile == "sidewalk_designated":
+                    # Sidewalk designated for harvesting
+                    color = self._get_tile_color_variation(COLOR_TILE_SIDEWALK_DESIGNATED, x, y, z, 8)
+                    pygame.draw.rect(surface, color, rect)
+                    # Small pickaxe/mining indicator
+                    pygame.draw.circle(surface, (180, 160, 120), (rect.centerx, rect.centery), 4)
+                    pygame.draw.circle(surface, (100, 90, 70), (rect.centerx, rect.centery), 4, 1)
                 elif tile == "wall_advanced":
                     # Reinforced wall under construction - darker gray
                     pygame.draw.rect(surface, (60, 60, 70), rect)
@@ -740,6 +781,50 @@ class Grid:
                         tint_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
                         tint_surface.fill((0, 0, 0, interior_darkness))
                         surface.blit(tint_surface, rect.topleft)
+                elif tile == "gutter_slab":
+                    # Gutter Slab - cyberpunk work surface: stained concrete with neon edge
+                    base_color = (45, 40, 50)  # Dark, slightly purple concrete
+                    slab_color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                    pygame.draw.rect(surface, slab_color, rect)
+
+                    # Slight inset to suggest a heavy slab sitting on the floor
+                    inset_rect = pygame.Rect(rect.left + 2, rect.top + 2, rect.width - 4, rect.height - 4)
+                    pygame.draw.rect(surface, (30, 25, 35), inset_rect, 1)
+
+                    # Neon edge line on one side (cyan/magenta mix)
+                    neon_color = (140, 30, 180)
+                    pygame.draw.line(surface, neon_color, (inset_rect.left, inset_rect.bottom - 3), (inset_rect.right, inset_rect.bottom - 3), 2)
+
+                    # Rat-blood smear – irregular dark red streak
+                    blood_color = (110, 20, 25)
+                    smear_points = [
+                        (inset_rect.left + 4, inset_rect.top + inset_rect.height // 2),
+                        (inset_rect.left + inset_rect.width // 3, inset_rect.top + inset_rect.height // 2 + 2),
+                        (inset_rect.left + inset_rect.width // 2, inset_rect.top + inset_rect.height // 2 + 1),
+                        (inset_rect.left + inset_rect.width // 2 + 4, inset_rect.top + inset_rect.height // 2 + 3),
+                    ]
+                    pygame.draw.lines(surface, blood_color, False, smear_points, 2)
+
+                    # Slight dirty overlay for grime
+                    grime_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    grime_surface.fill((10, 5, 10, 40))
+                    surface.blit(grime_surface, rect.topleft)
+                elif tile == "crash_bed":
+                    base_color = (35, 30, 45)
+                    bed_color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                    pygame.draw.rect(surface, bed_color, rect)
+
+                    frame_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                    pygame.draw.rect(surface, (20, 15, 25), frame_rect, 1)
+
+                    mattress_rect = pygame.Rect(frame_rect.left + 2, frame_rect.centery - 4, frame_rect.width - 4, 8)
+                    pygame.draw.rect(surface, (130, 130, 170), mattress_rect)
+
+                    pillow_rect = pygame.Rect(frame_rect.left + 3, frame_rect.top + 4, frame_rect.width // 3, 6)
+                    pygame.draw.rect(surface, (215, 215, 235), pillow_rect)
+
+                    neon_color = (120, 40, 255)
+                    pygame.draw.line(surface, neon_color, (frame_rect.left, frame_rect.bottom - 2), (frame_rect.right, frame_rect.bottom - 2), 2)
                 elif tile == "salvagers_bench":
                     # Salvager's bench under construction - rusty orange
                     pygame.draw.rect(surface, (140, 90, 50), rect)
@@ -863,6 +948,148 @@ class Grid:
                             bar_width = int((rect.width - 8) * progress_ratio)
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (255, 160, 80), bar_rect)
+                elif tile == "gutter_forge":
+                    # Gutter Forge under construction - dark metallic
+                    pygame.draw.rect(surface, (100, 70, 50), rect)
+                    # Show construction progress
+                    site = buildings.get_construction_site(x, y, z)
+                    if site is not None:
+                        delivered = site.get("materials_delivered", {})
+                        needed = site.get("materials_needed", {})
+                        icon_x = rect.left + 2
+                        for res_type in needed.keys():
+                            has_it = delivered.get(res_type, 0) >= needed.get(res_type, 0)
+                            color = (100, 200, 100) if has_it else (200, 100, 100)
+                            pygame.draw.rect(surface, color, (icon_x, rect.top + 2, 6, 6))
+                            icon_x += 8
+                        # Work progress bar
+                        work_done = site.get("work_done", 0)
+                        work_needed = site.get("work_needed", 120)
+                        if work_done > 0:
+                            bar_width = int((rect.width - 4) * work_done / work_needed)
+                            bar_rect = pygame.Rect(rect.left + 2, rect.bottom - 6, bar_width, 4)
+                            if bar_width > 0:
+                                pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
+                elif tile == "finished_gutter_forge":
+                    # Finished Gutter Forge - industrial forge appearance
+                    pygame.draw.rect(surface, (60, 50, 45), rect)
+                    # Forge body
+                    body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                    pygame.draw.rect(surface, (90, 75, 60), body_rect)
+                    # Anvil shape
+                    pygame.draw.rect(surface, (70, 70, 80), (rect.centerx - 5, rect.centery - 2, 10, 6))
+                    ws = buildings.get_workstation(x, y, z)
+                    if ws:
+                        # Show recipe indicator (first 2 chars of recipe name)
+                        recipe = buildings.get_workstation_recipe(x, y, z)
+                        if recipe:
+                            recipe_short = recipe.get("name", "?")[:2].upper()
+                            recipe_font = pygame.font.Font(None, 14)
+                            recipe_text = recipe_font.render(recipe_short, True, (200, 180, 140))
+                            surface.blit(recipe_text, (rect.right - 14, rect.top + 2))
+                        # Orange glow when working
+                        if ws.get("working", False):
+                            pygame.draw.circle(surface, (255, 140, 40), (rect.left + 8, rect.top + 8), 4)
+                            progress = ws.get("progress", 0)
+                            if recipe:
+                                work_time = recipe.get("work_time", 80)
+                                progress_ratio = min(1.0, progress / work_time)
+                                bar_width = int((rect.width - 8) * progress_ratio)
+                                bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
+                                pygame.draw.rect(surface, (255, 140, 40), bar_rect)
+                elif tile == "skinshop_loom":
+                    # Skinshop Loom under construction - fabric/leather tones
+                    pygame.draw.rect(surface, (120, 90, 70), rect)
+                    site = buildings.get_construction_site(x, y, z)
+                    if site is not None:
+                        delivered = site.get("materials_delivered", {})
+                        needed = site.get("materials_needed", {})
+                        icon_x = rect.left + 2
+                        for res_type in needed.keys():
+                            has_it = delivered.get(res_type, 0) >= needed.get(res_type, 0)
+                            color = (100, 200, 100) if has_it else (200, 100, 100)
+                            pygame.draw.rect(surface, color, (icon_x, rect.top + 2, 6, 6))
+                            icon_x += 8
+                        work_done = site.get("work_done", 0)
+                        work_needed = site.get("work_needed", 100)
+                        if work_done > 0:
+                            bar_width = int((rect.width - 4) * work_done / work_needed)
+                            bar_rect = pygame.Rect(rect.left + 2, rect.bottom - 6, bar_width, 4)
+                            if bar_width > 0:
+                                pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
+                elif tile == "finished_skinshop_loom":
+                    # Finished Skinshop Loom - textile/leather workstation
+                    pygame.draw.rect(surface, (80, 60, 50), rect)
+                    body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                    pygame.draw.rect(surface, (110, 85, 65), body_rect)
+                    # Thread/fabric lines
+                    for i in range(3):
+                        y_pos = rect.top + 8 + i * 6
+                        pygame.draw.line(surface, (140, 110, 80), (rect.left + 5, y_pos), (rect.right - 5, y_pos), 1)
+                    ws = buildings.get_workstation(x, y, z)
+                    if ws:
+                        # Show recipe indicator
+                        recipe = buildings.get_workstation_recipe(x, y, z)
+                        if recipe:
+                            recipe_short = recipe.get("name", "?")[:2].upper()
+                            recipe_font = pygame.font.Font(None, 14)
+                            recipe_text = recipe_font.render(recipe_short, True, (180, 150, 120))
+                            surface.blit(recipe_text, (rect.right - 14, rect.top + 2))
+                        if ws.get("working", False):
+                            progress = ws.get("progress", 0)
+                            if recipe:
+                                work_time = recipe.get("work_time", 70)
+                                progress_ratio = min(1.0, progress / work_time)
+                                bar_width = int((rect.width - 8) * progress_ratio)
+                                bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
+                                pygame.draw.rect(surface, (180, 140, 100), bar_rect)
+                elif tile == "cortex_spindle":
+                    # Cortex Spindle under construction - tech/purple tones
+                    pygame.draw.rect(surface, (80, 60, 100), rect)
+                    site = buildings.get_construction_site(x, y, z)
+                    if site is not None:
+                        delivered = site.get("materials_delivered", {})
+                        needed = site.get("materials_needed", {})
+                        icon_x = rect.left + 2
+                        for res_type in needed.keys():
+                            has_it = delivered.get(res_type, 0) >= needed.get(res_type, 0)
+                            color = (100, 200, 100) if has_it else (200, 100, 100)
+                            pygame.draw.rect(surface, color, (icon_x, rect.top + 2, 6, 6))
+                            icon_x += 8
+                        work_done = site.get("work_done", 0)
+                        work_needed = site.get("work_needed", 150)
+                        if work_done > 0:
+                            bar_width = int((rect.width - 4) * work_done / work_needed)
+                            bar_rect = pygame.Rect(rect.left + 2, rect.bottom - 6, bar_width, 4)
+                            if bar_width > 0:
+                                pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
+                elif tile == "finished_cortex_spindle":
+                    # Finished Cortex Spindle - high-tech implant station
+                    pygame.draw.rect(surface, (50, 45, 70), rect)
+                    body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                    pygame.draw.rect(surface, (70, 65, 100), body_rect)
+                    # Central spindle/crystal
+                    pygame.draw.circle(surface, (120, 100, 180), (rect.centerx, rect.centery), 5)
+                    pygame.draw.circle(surface, (180, 160, 220), (rect.centerx, rect.centery), 3)
+                    ws = buildings.get_workstation(x, y, z)
+                    if ws:
+                        # Show recipe indicator
+                        recipe = buildings.get_workstation_recipe(x, y, z)
+                        if recipe:
+                            recipe_short = recipe.get("name", "?")[:2].upper()
+                            recipe_font = pygame.font.Font(None, 14)
+                            recipe_text = recipe_font.render(recipe_short, True, (180, 160, 220))
+                            surface.blit(recipe_text, (rect.right - 14, rect.top + 2))
+                        if ws.get("working", False):
+                            # Pulsing glow effect
+                            pygame.draw.circle(surface, (200, 150, 255), (rect.centerx, rect.centery), 6, 1)
+                            progress = ws.get("progress", 0)
+                            if recipe:
+                                work_time = recipe.get("work_time", 100)
+                                progress_ratio = min(1.0, progress / work_time)
+                                bar_width = int((rect.width - 8) * progress_ratio)
+                                bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
+                                pygame.draw.rect(surface, (180, 140, 255), bar_rect)
                 elif tile == "fire_escape":
                     # Fire escape under construction - orange/red base
                     pygame.draw.rect(surface, (180, 80, 40), rect)
@@ -1044,6 +1271,8 @@ class Grid:
                 # Draw stockpile resource stacks ON TOP of floor tiles (on current Z level)
                 if zones.is_stockpile_zone(x, y, z):
                     tile_storage = zones.get_tile_storage(x, y, z)
+                    equipment_storage = zones.get_equipment_at_tile(x, y, z)
+                    
                     if tile_storage is not None:
                         res_type = tile_storage.get("type", "")
                         amount = tile_storage.get("amount", 0)
@@ -1077,6 +1306,30 @@ class Grid:
                         )
                         pygame.draw.rect(surface, stack_color, stack_rect)
                         pygame.draw.rect(surface, (255, 255, 255), stack_rect, 1)
+                    
+                    # Draw equipment stored in stockpile
+                    if equipment_storage:
+                        from items import get_item_def
+                        first_item = equipment_storage[0]
+                        item_id = first_item.get("id", "")
+                        item_def = get_item_def(item_id)
+                        if item_def and item_def.icon_color:
+                            equip_color = item_def.icon_color
+                        else:
+                            equip_color = (160, 140, 200)
+                        
+                        # Draw diamond in center (or offset if resources present)
+                        cx = rect.centerx + (8 if tile_storage else 0)
+                        cy = rect.centery
+                        points = [(cx, cy - 6), (cx + 6, cy), (cx, cy + 6), (cx - 6, cy)]
+                        pygame.draw.polygon(surface, equip_color, points)
+                        pygame.draw.polygon(surface, (255, 255, 255), points, 1)
+                        
+                        # Show count if multiple
+                        if len(equipment_storage) > 1:
+                            count_font = pygame.font.Font(None, 14)
+                            count_text = count_font.render(str(len(equipment_storage)), True, (255, 255, 255))
+                            surface.blit(count_text, (cx + 4, cy - 8))
                 
                 # Roof tile rendering (for z=1 level)
                 if tile == "roof":
@@ -1238,22 +1491,32 @@ class Grid:
                         )
                         pygame.draw.rect(surface, item_color, item_rect)
                         pygame.draw.rect(surface, (255, 255, 255), item_rect, 1)  # White border
-
-                # Draw roof overlay if this tile has a roof (ground level only - shows roof above)
-                if is_ground_level and rooms.has_roof(x, y):
-                    # Semi-transparent dark overlay to show roof coverage
-                    roof_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-                    roof_surf.fill((40, 30, 50, 140))  # Dark purple-ish tint
-                    surface.blit(roof_surf, rect)
-                    # Draw subtle roof pattern (diagonal lines)
-                    for i in range(0, TILE_SIZE * 2, 8):
-                        start_x = rect.left + i
-                        start_y = rect.top
-                        end_x = rect.left + i - TILE_SIZE
-                        end_y = rect.bottom
-                        pygame.draw.line(surface, (60, 50, 70, 100), 
-                                       (max(rect.left, start_x), max(rect.top, start_y + (start_x - max(rect.left, start_x)))),
-                                       (max(rect.left, end_x + TILE_SIZE), min(rect.bottom, end_y)), 1)
+                
+                # Draw world items (equipment/crafted items) on any Z level
+                from items import get_world_items_at, get_item_def
+                world_items = get_world_items_at(x, y, z)
+                if world_items:
+                    # Get first item's color
+                    first_item = world_items[0]
+                    item_id = first_item.get("id", "")
+                    item_def = get_item_def(item_id)
+                    if item_def and item_def.icon_color:
+                        item_color = item_def.icon_color
+                    else:
+                        item_color = (160, 140, 200)  # Default purple for equipment
+                    
+                    # Draw diamond shape in bottom-left corner
+                    cx = rect.left + 6
+                    cy = rect.bottom - 6
+                    points = [(cx, cy - 4), (cx + 4, cy), (cx, cy + 4), (cx - 4, cy)]
+                    pygame.draw.polygon(surface, item_color, points)
+                    pygame.draw.polygon(surface, (255, 255, 255), points, 1)
+                    
+                    # Show count if multiple
+                    if len(world_items) > 1:
+                        count_font = pygame.font.Font(None, 14)
+                        count_text = count_font.render(str(len(world_items)), True, (255, 255, 255))
+                        surface.blit(count_text, (cx + 5, cy - 6))
 
                 # Grid lines - faint standard lines, thicker every 10 tiles
                 # Standard 1px grid
@@ -1265,11 +1528,13 @@ class Grid:
                 if y % 10 == 0:
                     pygame.draw.line(surface, (80, 80, 80), (rect.left, rect.top), (rect.right, rect.top), 2)
                 
-                # Job category debug border - only for tiles with active jobs (ground level only)
+                # Job/designation category debug border - for tiles with active jobs or designations
                 if is_ground_level:
+                    category_color = None
+                    
+                    # First check for active job
                     job = get_job_at(x, y)
                     if job is not None:
-                        category_color = None
                         if job.category == "wall":
                             category_color = COLOR_JOB_CATEGORY_WALL
                         elif job.category == "harvest":
@@ -1278,7 +1543,19 @@ class Grid:
                             category_color = COLOR_JOB_CATEGORY_CONSTRUCTION
                         elif job.category == "haul":
                             category_color = COLOR_JOB_CATEGORY_HAUL
-                        
-                        if category_color is not None:
-                            # Draw thick border inside the tile
-                            pygame.draw.rect(surface, category_color, rect, 2)
+                        elif job.category == "salvage":
+                            category_color = COLOR_JOB_CATEGORY_HARVEST  # Use harvest color for salvage
+                    
+                    # If no job, check for designation (persistent highlight)
+                    if category_color is None:
+                        designation_cat = get_designation_category(x, y, self.current_z)
+                        if designation_cat == "harvest":
+                            category_color = COLOR_JOB_CATEGORY_HARVEST
+                        elif designation_cat == "haul":
+                            category_color = COLOR_JOB_CATEGORY_HAUL
+                        elif designation_cat == "salvage":
+                            category_color = COLOR_JOB_CATEGORY_HARVEST  # Use harvest color for salvage
+                    
+                    if category_color is not None:
+                        # Draw thick border inside the tile
+                        pygame.draw.rect(surface, category_color, rect, 2)

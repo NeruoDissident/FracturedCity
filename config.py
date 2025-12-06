@@ -30,12 +30,20 @@ COLOR_TILE_FINISHED_BUILDING = (170, 150, 40)
 COLOR_TILE_WALL = (100, 100, 110)           # planned wall (under construction)
 COLOR_TILE_FINISHED_WALL = (80, 80, 90)     # completed wall
 COLOR_TILE_STREET = (45, 45, 50)            # dark gray for city streets
+COLOR_TILE_STREET_DESIGNATED = (55, 50, 45) # slightly warmer for designated streets
 COLOR_TILE_SIDEWALK = (55, 55, 60)          # slightly lighter gray for sidewalks
+COLOR_TILE_SIDEWALK_DESIGNATED = (60, 55, 50) # warmer for designated sidewalks
+COLOR_TILE_SCORCHED = (25, 22, 20)          # dark scorched earth from demolished pavement
 COLOR_TILE_DEBRIS = (65, 60, 55)            # brownish gray for debris/rubble
 COLOR_TILE_WEEDS = (35, 45, 30)             # dark greenish for overgrowth
 COLOR_TILE_PROP_BARREL = (70, 50, 40)       # rusty barrel
 COLOR_TILE_PROP_SIGN = (60, 65, 70)         # broken sign post
 COLOR_TILE_PROP_SCRAP = (75, 70, 65)        # scrap heap
+# Natural ground tiles (earth tones)
+COLOR_TILE_DIRT = (55, 45, 35)              # brown dirt
+COLOR_TILE_GRASS = (40, 55, 35)             # dark grass
+COLOR_TILE_ROCK = (50, 50, 55)              # gray rock
+COLOR_TILE_EMPTY = (35, 32, 30)             # dark earth tone for empty tiles
 COLOR_DRAG_PREVIEW = (100, 150, 255, 100)   # semi-transparent blue for drag rectangle
 
 # Color used for small progress indicators on construction tiles.

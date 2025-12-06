@@ -348,8 +348,10 @@ def process_auto_haul_jobs(jobs_module, zones_module) -> int:
 NODE_TYPES = {
     "tree": {"resource": "wood", "amount": 50, "regrow_time": 600, "replenishable": True, "loose": False},
     "scrap_pile": {"resource": "scrap", "amount": 25, "regrow_time": 0, "replenishable": False, "loose": True},
-    "mineral_node": {"resource": "mineral", "amount": 75, "regrow_time": 900, "replenishable": True, "loose": False},
+    "mineral_node": {"resource": "mineral", "amount": 75, "regrow_time": 0, "replenishable": False, "loose": False},  # No respawn - finite resource
     "food_plant": {"resource": "raw_food", "amount": 20, "regrow_time": 800, "replenishable": True, "loose": False},
+    "street": {"resource": "mineral", "amount": 40, "regrow_time": 0, "replenishable": False, "loose": False, "converts_to": "scorched"},  # Streets can be harvested
+    "sidewalk": {"resource": "mineral", "amount": 25, "regrow_time": 0, "replenishable": False, "loose": False, "converts_to": "scorched"},  # Sidewalks can be harvested
 }
 
 # Salvage objects - can be designated for salvage to produce scrap
@@ -444,6 +446,84 @@ def is_node_loose(node_type: str) -> bool:
     if node_def is None:
         return False
     return node_def.get("loose", False)
+
+
+def designate_street_for_harvest(grid, x: int, y: int, jobs_module=None) -> bool:
+    """Designate a street tile for harvesting. Creates a resource node on the street.
+    
+    When harvested, the street yields mineral and converts to scorched earth.
+    Returns True if successful.
+    """
+    tile = grid.get_tile(x, y)
+    if tile != "street":
+        return False
+    
+    # Check if already has a node
+    if (x, y) in _RESOURCE_NODES:
+        return False
+    
+    # Create a street node (harvestable)
+    node_def = NODE_TYPES["street"]
+    amount = random.randint(30, node_def["amount"])
+    
+    _RESOURCE_NODES[(x, y)] = {
+        "type": "street",
+        "resource": node_def["resource"],
+        "amount": amount,
+        "max_amount": amount,
+        "regrow_time": node_def["regrow_time"],
+        "converts_to": node_def["converts_to"],
+        "state": NodeState.IDLE,
+        "depleted": False,
+    }
+    
+    # Change tile to show it's designated (but keep street appearance until harvested)
+    grid.set_tile(x, y, "street_designated")
+    
+    # Create gathering job if jobs_module provided
+    if jobs_module is not None:
+        jobs_module.add_job("gathering", x, y, required=60, resource_type="mineral")
+    
+    return True
+
+
+def designate_sidewalk_for_harvest(grid, x: int, y: int, jobs_module=None) -> bool:
+    """Designate a sidewalk tile for harvesting. Creates a resource node on the sidewalk.
+    
+    When harvested, the sidewalk yields mineral and converts to scorched earth.
+    Returns True if successful.
+    """
+    tile = grid.get_tile(x, y)
+    if tile != "sidewalk":
+        return False
+    
+    # Check if already has a node
+    if (x, y) in _RESOURCE_NODES:
+        return False
+    
+    # Create a sidewalk node (harvestable)
+    node_def = NODE_TYPES["sidewalk"]
+    amount = random.randint(15, node_def["amount"])
+    
+    _RESOURCE_NODES[(x, y)] = {
+        "type": "sidewalk",
+        "resource": node_def["resource"],
+        "amount": amount,
+        "max_amount": amount,
+        "regrow_time": node_def["regrow_time"],
+        "converts_to": node_def["converts_to"],
+        "state": NodeState.IDLE,
+        "depleted": False,
+    }
+    
+    # Change tile to show it's designated
+    grid.set_tile(x, y, "sidewalk_designated")
+    
+    # Create gathering job if jobs_module provided
+    if jobs_module is not None:
+        jobs_module.add_job("gathering", x, y, required=45, resource_type="mineral")
+    
+    return True
 
 
 # --- Node helpers -------------------------------------------------------------
@@ -1593,11 +1673,13 @@ def remove_node_if_empty(grid, x: int, y: int) -> None:
 
     Nodes with regrow_time > 0 stay in depleted state for respawning.
     Nodes with regrow_time = 0 are removed permanently.
+    Some nodes convert to a different tile type (e.g., street -> dirt).
     """
 
     node = get_node_at(x, y)
     if node is not None and node.get("amount", 0) <= 0:
         regrow_time = node.get("regrow_time", 0)
+        converts_to = node.get("converts_to")
         
         if regrow_time > 0:
             # Keep the node for respawning - it stays as depleted resource_node
@@ -1608,7 +1690,9 @@ def remove_node_if_empty(grid, x: int, y: int) -> None:
             _remove_node_at(x, y)
             # Only clear to empty if there is no pile here.
             if (x, y) not in _RESOURCE_PILES:
-                grid.set_tile(x, y, "empty")
+                # Convert to specified tile type, or empty
+                new_tile = converts_to if converts_to else "dirt"
+                grid.set_tile(x, y, new_tile)
 
 
 # --- Job integration helpers --------------------------------------------------

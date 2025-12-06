@@ -26,7 +26,7 @@ from config import (
     COLOR_COLONIST_ETHER,
 )
 from grid import Grid
-from jobs import Job, request_job, remove_job, get_next_available_job
+from jobs import Job, request_job, remove_job, get_next_available_job, get_all_available_jobs, remove_designation
 from resources import complete_gathering_job, set_node_state, NodeState, harvest_tick, pickup_resource_item, add_to_stockpile, spend_from_stockpile
 import buildings
 from buildings import deliver_material, mark_supply_job_completed, has_required_materials, is_door, is_door_open, open_door, is_window, is_window_open, open_window, register_window
@@ -67,6 +67,250 @@ DEFAULT_JOB_TAGS = {
     "can_haul": True,       # Hauling resources to stockpiles and construction sites
     "can_scavenge": True,   # Salvaging and harvesting resources
 }
+
+
+# =============================================================================
+# Identity Generation System (Display-only flavor text)
+# =============================================================================
+
+# Name pools - cyberpunk / dystopian / light eldritch tone
+FIRST_NAMES = [
+    "Kira", "Latch", "Soren", "Vex", "Mara", "Rime", "Ion", "Nessa", "Drax", "Vanta",
+    "Kestrel", "Hallow", "Jax", "Nyx", "Solin", "Vire", "Orin", "Luma", "Cade", "Zephyr",
+    "Rook", "Vesper", "Ash", "Cipher", "Dusk", "Echo", "Flint", "Glyph", "Hex", "Iris",
+    "Jinx", "Kade", "Lynx", "Moth", "Nova", "Onyx", "Pike", "Quill", "Rust", "Shade",
+    "Tarn", "Ulric", "Vale", "Wren", "Xen", "Yara", "Zara", "Blitz", "Crow", "Drift",
+]
+
+LAST_NAMES = [
+    "Coil", "Needle", "Bramble", "Dross", "Verge", "Thorn", "Vector", "Halogen", "Lockstep",
+    "Varn", "Umbra", "Flux", "Carbine", "Glass", "Ravel", "Shard", "Ember", "Hollow",
+    "Cipher", "Weld", "Rust", "Static", "Void", "Glitch", "Splice", "Fracture", "Conduit",
+    "Drift", "Null", "Surge", "Decay", "Wraith", "Synth", "Blight", "Crux", "Fray",
+    "Grim", "Haze", "Jolt", "Krypt", "Lumen", "Murk", "Nether", "Oxide", "Pulse", "Quake",
+]
+
+# Flavor likes - atmospheric, cosmetic only
+FLAVOR_LIKES = [
+    "The hum of old generators",
+    "Warm kitchens at night",
+    "Rain hitting metal rooftops",
+    "Dim neon signage",
+    "Flickering consoles",
+    "The smell of ozone",
+    "Wide, empty streets at dawn",
+    "The static glow of interference storms",
+    "Elevated walkways and fire escapes",
+    "Rooms with two doors — never one",
+    "The click of cooling pipes",
+    "Dust motes in shaft light",
+    "Echoes that come back wrong",
+    "The weight of concrete overhead",
+    "Machines that talk to themselves",
+    "Windows facing nowhere",
+    "The taste of recycled air",
+    "Shadows that stay put",
+    "Old graffiti no one can read",
+    "The silence between power cycles",
+    "Rooftops at midnight",
+    "The distant thrum of the grid",
+    "Corners where the light bends",
+    "Stairwells that go too deep",
+    "The crackle before a broadcast",
+]
+
+# Flavor dislikes - atmospheric, cosmetic only
+FLAVOR_DISLIKES = [
+    "Crowded salvage floors",
+    "Cold wind tunnels",
+    "Silence with no echo",
+    "Bright synthetic lighting",
+    "Loose wiring underfoot",
+    "Long hallways with no intersections",
+    "Being watched by dead cameras",
+    "Rooms that feel 'too clean'",
+    "Pressure spikes",
+    "Places where the static goes quiet",
+    "Walls that hum at the wrong frequency",
+    "Doors that open too slowly",
+    "The smell of burnt insulation",
+    "Floors that flex underfoot",
+    "Spaces with no corners",
+    "Lights that don't flicker",
+    "Air that tastes like nothing",
+    "Rooms with only one exit",
+    "The feeling of being counted",
+    "Ceilings too high to see",
+    "Surfaces too smooth to grip",
+    "The pause before alarms",
+    "Reflections that lag behind",
+    "Corridors that curve too gently",
+    "The quiet after a collapse",
+]
+
+# Bio templates - keyed by preference tendencies
+# {placeholder} will be filled based on colonist's affinities
+BIO_TEMPLATES = [
+    # Outside preference
+    ("outside_high", [
+        "Calm outdoors, uneasy indoors. Says sunlight 'keeps the signal clean.' No one knows what signal they mean.",
+        "Spent years running courier routes across open rooftops. Still flinches at low ceilings.",
+        "Prefers the sky overhead. Claims walls 'listen too closely.'",
+        "Former perimeter scout. Trusts open ground more than any shelter.",
+    ]),
+    ("outside_low", [
+        "Prefers sealed rooms with stable pressure. Avoids open streets. Once worked as a sublevel tech.",
+        "Uncomfortable under open sky. Says the stars 'look back.'",
+        "Grew up in the deep stacks. Finds comfort in enclosed spaces.",
+        "Distrusts anything without a roof. The sky feels 'unfinished.'",
+    ]),
+    # Integrity preference
+    ("integrity_high", [
+        "Feels safest in solid structures. Tests walls by tapping. Knows the sound of stable concrete.",
+        "Former structural surveyor. Can tell a building's age by its creaks.",
+        "Only sleeps in rooms with load-bearing walls. Calls it 'practical paranoia.'",
+    ]),
+    ("integrity_low", [
+        "Comforted by decayed structures and low integrity zones. Claims they can 'hear the building breathe.'",
+        "Prefers ruins to new construction. Says fresh walls 'haven't learned anything yet.'",
+        "Drawn to crumbling edges. Finds stability 'suspicious.'",
+    ]),
+    # Interference preference
+    ("interference_high", [
+        "Thrives in high-interference zones. Says the static 'drowns out the other noise.'",
+        "Former signal tech who spent too long near broadcast arrays. Finds silence unsettling.",
+        "Comfortable around electromagnetic chaos. Claims it 'feels like home.'",
+    ]),
+    ("interference_low", [
+        "Gets anxious under high interference. Former salvage diver who spent too long beneath collapsed grids.",
+        "Avoids areas with heavy static. Says it 'scrambles their thoughts.'",
+        "Sensitive to electromagnetic fields. Prefers clean signal zones.",
+    ]),
+    # Echo preference
+    ("echo_high", [
+        "Feels at home in echoing hallways. Distrusts quiet spaces. Known for whispering to themselves during long shifts.",
+        "Navigates by sound. Prefers spaces where footsteps carry.",
+        "Finds comfort in reverberant chambers. Says silence 'hides things.'",
+    ]),
+    ("echo_low", [
+        "Prefers acoustically dead spaces. Echoes make them 'hear things that aren't there.'",
+        "Works best in muffled environments. Loud reverb triggers old memories.",
+        "Seeks out quiet corners. Says echoes 'tell lies.'",
+    ]),
+    # Crowding preference
+    ("crowding_high", [
+        "Works better with others nearby. Finds isolation 'too loud.'",
+        "Former collective worker. Uncomfortable when alone for too long.",
+        "Prefers busy spaces. Says empty rooms 'watch too closely.'",
+    ]),
+    ("crowding_low", [
+        "Prefers solitude. Gets twitchy in crowds. Once spent a year alone in a signal tower.",
+        "Works best alone. Other people's breathing 'disrupts the pattern.'",
+        "Avoids groups when possible. Claims they can 'feel everyone thinking.'",
+    ]),
+    # Pressure preference
+    ("pressure_high", [
+        "Comfortable in pressurized environments. Former deep-level maintenance crew.",
+        "Finds low-pressure zones unsettling. Says their ears 'expect more.'",
+        "Prefers the weight of atmosphere. Open air feels 'too thin.'",
+    ]),
+    ("pressure_low", [
+        "Sensitive to pressure changes. Gets headaches in sealed environments.",
+        "Prefers ventilated spaces. Pressurized rooms feel 'too heavy.'",
+        "Former surface worker. Never adjusted to sublevel atmospherics.",
+    ]),
+    # Generic fallbacks
+    ("neutral", [
+        "Keeps to themselves. Watches more than they speak. Reliable in a crisis.",
+        "No strong preferences. Adapts to whatever the city throws at them.",
+        "Quiet worker. Does the job without complaint. Remembers everything.",
+        "Arrived from somewhere else. Doesn't talk about before. Fits in anyway.",
+        "Survived something once. Doesn't say what. Works harder than most.",
+    ]),
+]
+
+
+def generate_colonist_name() -> str:
+    """Generate a random colonist name in cyberpunk/dystopian style."""
+    first = random.choice(FIRST_NAMES)
+    last = random.choice(LAST_NAMES)
+    return f"{first} {last}"
+
+
+def generate_colonist_bio(preferences: dict[str, float]) -> str:
+    """Generate a bio based on colonist's preference profile.
+    
+    Args:
+        preferences: Dict of preference values (likes_outside, likes_integrity, etc.)
+    
+    Returns:
+        A 1-3 sentence atmospheric bio string.
+    """
+    # Find the strongest preference (positive or negative)
+    strongest_pref = None
+    strongest_value = 0.0
+    
+    pref_to_template_key = {
+        "likes_outside": ("outside_high", "outside_low"),
+        "likes_integrity": ("integrity_high", "integrity_low"),
+        "likes_interference": ("interference_high", "interference_low"),
+        "likes_echo": ("echo_high", "echo_low"),
+        "likes_crowding": ("crowding_high", "crowding_low"),
+        "likes_pressure": ("pressure_high", "pressure_low"),
+    }
+    
+    for pref_key, value in preferences.items():
+        if abs(value) > abs(strongest_value):
+            strongest_value = value
+            strongest_pref = pref_key
+    
+    # Select template based on strongest preference
+    template_key = "neutral"
+    if strongest_pref and abs(strongest_value) > 0.5:
+        high_key, low_key = pref_to_template_key.get(strongest_pref, ("neutral", "neutral"))
+        template_key = high_key if strongest_value > 0 else low_key
+    
+    # Find matching templates
+    templates = []
+    for key, template_list in BIO_TEMPLATES:
+        if key == template_key:
+            templates = template_list
+            break
+    
+    if not templates:
+        # Fallback to neutral
+        for key, template_list in BIO_TEMPLATES:
+            if key == "neutral":
+                templates = template_list
+                break
+    
+    return random.choice(templates) if templates else "A survivor. Nothing more to say."
+
+
+def generate_flavor_likes(count: int = 2) -> list[str]:
+    """Generate random flavor likes for a colonist.
+    
+    Args:
+        count: Number of likes to generate (1-3)
+    
+    Returns:
+        List of flavor like strings.
+    """
+    count = max(1, min(3, count))
+    return random.sample(FLAVOR_LIKES, min(count, len(FLAVOR_LIKES)))
+
+
+def generate_flavor_dislikes(count: int = 2) -> list[str]:
+    """Generate random flavor dislikes for a colonist.
+    
+    Args:
+        count: Number of dislikes to generate (1-3)
+    
+    Returns:
+        List of flavor dislike strings.
+    """
+    count = max(1, min(3, count))
+    return random.sample(FLAVOR_DISLIKES, min(count, len(FLAVOR_DISLIKES)))
 
 
 class Colonist:
@@ -126,6 +370,10 @@ class Colonist:
         # Carrying state for haul jobs
         self.carrying: dict | None = None  # {"type": "wood", "amount": 1}
         
+        # Carried items tracking - aggregates what colonist is currently carrying
+        # Keys are resource types, values are amounts. Updated via pick_up_item/drop_item methods.
+        self.carried_items: dict[str, int] = {}
+        
         # Hunger system
         # At 60 FPS: 0.003 per tick = 0.18 per second = ~9 minutes to reach 100
         # Colonists get hungry (>70) at ~6.5 minutes, giving plenty of time to set up food
@@ -156,6 +404,166 @@ class Colonist:
         self.affinity_integrity: float = 0.0
         self.affinity_outside: float = 0.0
         self.affinity_crowding: float = 0.0
+        
+        # Preference profile - accumulated personality direction derived from affinities
+        # Values range from -10.0 to +10.0, representing stable personality traits
+        # Updated each environment sample: preference += affinity * (sample - global_avg)
+        self.preferences: dict[str, float] = {
+            "likes_interference": 0.0,
+            "likes_echo": 0.0,
+            "likes_pressure": 0.0,
+            "likes_integrity": 0.0,
+            "likes_outside": 0.0,
+            "likes_crowding": 0.0,
+        }
+        
+        # Comfort/stress emotional state - derived from preference alignment with environment
+        # Values range from -10.0 to +10.0
+        # Comfort rises when environment matches preferences, stress rises when it doesn't
+        self.comfort: float = 0.0
+        self.stress: float = 0.0
+        
+        # Track strongest comfort influence this tick for debug display
+        self.comfort_influence: tuple[str, float] = ("none", 0.0)  # (parameter_name, contribution)
+        
+        # Preference drift system - slowly adjusts preferences based on comfort/stress
+        # When comfortable, preferences drift toward current environment parameters
+        # When stressed, preferences drift away from current environment parameters
+        self.preference_drift_rate: float = 0.00005  # Very small drift per tick
+        
+        # Track drift for debug display
+        self.last_total_drift: float = 0.0  # Total drift magnitude this tick
+        self.last_drift_strongest: tuple[str, float] = ("none", 0.0)  # (parameter, change)
+        
+        # Mood state - derived from comfort and stress, purely descriptive
+        # Updated each tick based on mood_score = comfort - stress
+        self.mood_state: str = "Focused"  # Default neutral mood
+        self.mood_score: float = 0.0  # Raw score for debug
+        
+        # Identity - display-only flavor text, does NOT affect any game systems
+        self.name: str = generate_colonist_name()
+        self.bio: str = generate_colonist_bio(self.preferences)  # Will be neutral initially
+        self.flavor_likes: list[str] = generate_flavor_likes(random.randint(1, 3))
+        self.flavor_dislikes: list[str] = generate_flavor_dislikes(random.randint(1, 3))
+        
+        # Equipment slots - UI/data only, no gameplay effects yet
+        # Each slot holds None or an item dict like {"name": "Hard Hat", "type": "head_armor"}
+        self.equipment: dict[str, dict | None] = {
+            "head": None,
+            "body": None,
+            "hands": None,
+            "feet": None,
+            "implant": None,
+            "charm": None,
+        }
+        
+        # Inventory slots - general carried items (pockets/backpack)
+        # Each slot holds None or an item dict like {"name": "Rusty Key", "type": "key"}
+        self.inventory_slots: list[dict | None] = [None, None, None, None, None, None]
+    
+    # =========================================================================
+    # Equipment Effects - Calculate bonuses from equipped items
+    # =========================================================================
+    
+    def get_equipment_stats(self) -> dict:
+        """Calculate total stat bonuses from all equipped items.
+        
+        Handles both static items (from items.py) and procedurally generated items.
+        
+        Returns dict with keys:
+            - comfort: float (bonus to comfort/mood)
+            - speed_bonus: float (movement speed modifier, e.g., 0.1 = +10%)
+            - hazard_resist: float (resistance to environmental hazards)
+            - work_bonus: float (work speed modifier, e.g., 0.15 = +15%)
+        """
+        from items import get_item_def
+        
+        totals = {
+            "comfort": 0.0,
+            "speed_bonus": 0.0,
+            "hazard_resist": 0.0,
+            "work_bonus": 0.0,
+        }
+        
+        # Stat mapping from generated item stat names to our totals keys
+        stat_mapping = {
+            "walk_speed": "speed_bonus",
+            "build_speed": "work_bonus",
+            "harvest_speed": "work_bonus",
+            "craft_speed": "work_bonus",
+            "hazard_resist": "hazard_resist",
+            "comfort": "comfort",
+            "warmth": "comfort",  # Warmth contributes to comfort for now
+            "focus": "work_bonus",  # Focus contributes to work speed
+        }
+        
+        for slot, item_data in self.equipment.items():
+            if item_data is None:
+                continue
+            
+            # Check if this is a generated item
+            if item_data.get("generated"):
+                # Sum modifiers from generated item (ALWAYS triggers only for base stats)
+                for mod in item_data.get("modifiers", []):
+                    if mod.get("trigger") == "always":
+                        stat = mod.get("stat", "")
+                        value = mod.get("value", 0.0)
+                        
+                        # Map to our stat keys
+                        target_key = stat_mapping.get(stat)
+                        if target_key:
+                            totals[target_key] += value
+            else:
+                # Static item - get from item registry
+                item_id = item_data.get("id")
+                if item_id is None:
+                    continue
+                    
+                item_def = get_item_def(item_id)
+                if item_def is None:
+                    continue
+                
+                # Sum up stats
+                totals["comfort"] += item_def.comfort
+                totals["speed_bonus"] += item_def.speed_bonus
+                totals["hazard_resist"] += item_def.hazard_resist
+                totals["work_bonus"] += item_def.work_bonus
+        
+        return totals
+    
+    def get_equipment_speed_modifier(self) -> float:
+        """Get movement speed modifier from equipment.
+        
+        Returns multiplier for move_speed (lower = faster):
+        - Positive speed_bonus (e.g., 0.1) → 0.9 multiplier (10% faster)
+        - Negative speed_bonus (e.g., -0.1) → 1.1 multiplier (10% slower)
+        """
+        stats = self.get_equipment_stats()
+        # Convert bonus to multiplier (invert because lower move_speed = faster)
+        return 1.0 - stats["speed_bonus"]
+    
+    def get_equipment_work_modifier(self) -> float:
+        """Get work speed modifier from equipment.
+        
+        Returns multiplier for work progress:
+        - Positive work_bonus (e.g., 0.15) → 1.15 multiplier (15% faster work)
+        """
+        stats = self.get_equipment_stats()
+        return 1.0 + stats["work_bonus"]
+    
+    def get_equipment_comfort_bonus(self) -> float:
+        """Get comfort bonus from equipment (added to mood calculations)."""
+        stats = self.get_equipment_stats()
+        return stats["comfort"]
+    
+    def get_equipment_hazard_resist(self) -> float:
+        """Get hazard resistance from equipment (reduces environmental damage)."""
+        stats = self.get_equipment_stats()
+        return stats["hazard_resist"]
+    
+    def regenerate_bio(self) -> None:
+        """Regenerate bio based on current preferences. Call after preferences develop."""
+        self.bio = generate_colonist_bio(self.preferences)
     
     def _generate_random_skin_tone(self) -> tuple[int, int, int]:
         """Generate a random skin tone for visual variety."""
@@ -180,6 +588,31 @@ class Colonist:
             (47, 79, 79),     # Dark slate gray
         ]
         return random.choice(colors)
+
+    # --- Carried Items Tracking ----------------------------------------------------------
+    
+    def pick_up_item(self, item: dict) -> None:
+        """Track picking up an item. Updates carried_items dict."""
+        if item is None:
+            return
+        res_type = item.get("type", "unknown")
+        amount = item.get("amount", 1)
+        self.carried_items[res_type] = self.carried_items.get(res_type, 0) + amount
+    
+    def drop_item(self, item: dict = None) -> None:
+        """Track dropping an item. Updates carried_items dict.
+        If item is None, clears all carried items (for interrupts/errors)."""
+        if item is None:
+            self.carried_items.clear()
+            return
+        res_type = item.get("type", "unknown")
+        amount = item.get("amount", 1)
+        current = self.carried_items.get(res_type, 0)
+        new_amount = current - amount
+        if new_amount <= 0:
+            self.carried_items.pop(res_type, None)
+        else:
+            self.carried_items[res_type] = new_amount
 
     # --- Environment Sampling System -----------------------------------------------------
     
@@ -227,6 +660,9 @@ class Colonist:
         
         # Update affinities based on this sample
         self._update_affinities(sample)
+        
+        # Update comfort/stress based on preference alignment with current environment
+        self._update_comfort_stress(sample)
     
     def _count_nearby_colonists(self, all_colonists: list) -> int:
         """Count colonists within radius 2 of this colonist."""
@@ -302,10 +738,244 @@ class Colonist:
             self.affinity_crowding = self._clamp_affinity(self.affinity_crowding + drift_rate)
         else:
             self.affinity_crowding = self._clamp_affinity(self.affinity_crowding - drift_rate)
+        
+        # Update preference profile based on affinities and sample deviation from average
+        # Formula: preference += affinity * (sample_value - global_average)
+        self._update_preferences(sample, averages)
+    
+    def _update_preferences(self, sample: dict, averages: dict) -> None:
+        """Update preference profile based on current affinities and environment sample.
+        
+        Each preference accumulates: affinity * (sample - global_average)
+        This creates a stable personality direction over time.
+        """
+        # Calculate deviations from global averages
+        interference_delta = sample.get('interference', 0.0) - averages.get('interference', 0.0)
+        echo_delta = sample.get('echo', 0.0) - averages.get('echo', 0.0)
+        pressure_delta = sample.get('pressure', 0.0) - averages.get('pressure', 0.0)
+        integrity_delta = sample.get('integrity', 1.0) - averages.get('integrity', 1.0)
+        
+        # Outside: convert boolean to float
+        sample_outside = 1.0 if sample.get('is_outside', True) else 0.0
+        outside_delta = sample_outside - averages.get('outside', 0.5)
+        
+        # Crowding
+        sample_crowding = float(sample.get('nearby_colonists', 0))
+        crowding_delta = sample_crowding - averages.get('crowding', 0.0)
+        
+        # Update preferences: affinity * delta
+        self.preferences["likes_interference"] = self._clamp_preference(
+            self.preferences["likes_interference"] + self.affinity_interference * interference_delta
+        )
+        self.preferences["likes_echo"] = self._clamp_preference(
+            self.preferences["likes_echo"] + self.affinity_echo * echo_delta
+        )
+        self.preferences["likes_pressure"] = self._clamp_preference(
+            self.preferences["likes_pressure"] + self.affinity_pressure * pressure_delta
+        )
+        self.preferences["likes_integrity"] = self._clamp_preference(
+            self.preferences["likes_integrity"] + self.affinity_integrity * integrity_delta
+        )
+        self.preferences["likes_outside"] = self._clamp_preference(
+            self.preferences["likes_outside"] + self.affinity_outside * outside_delta
+        )
+        self.preferences["likes_crowding"] = self._clamp_preference(
+            self.preferences["likes_crowding"] + self.affinity_crowding * crowding_delta
+        )
+    
+    def _clamp_preference(self, value: float) -> float:
+        """Clamp preference value to [-10.0, 10.0] range."""
+        return max(-10.0, min(10.0, value))
+    
+    def get_top_preferences(self) -> tuple[list[tuple[str, float]], list[tuple[str, float]]]:
+        """Get top 2 positive and top 1 negative preferences.
+        
+        Returns:
+            (top_positive, top_negative) - lists of (name, value) tuples
+        """
+        # Sort preferences by value
+        sorted_prefs = sorted(self.preferences.items(), key=lambda x: x[1], reverse=True)
+        
+        # Get top 2 positive (value > 0)
+        top_positive = [(name, val) for name, val in sorted_prefs if val > 0][:2]
+        
+        # Get top 1 negative (value < 0, most negative first)
+        top_negative = [(name, val) for name, val in reversed(sorted_prefs) if val < 0][:1]
+        
+        return top_positive, top_negative
+    
+    def _update_comfort_stress(self, sample: dict) -> None:
+        """Update comfort and stress based on preference alignment with environment.
+        
+        Computes comfort_change by multiplying each preference by the corresponding
+        tile parameter value. Positive result = environment matches preferences.
+        
+        Args:
+            sample: Environment sample dictionary with tile parameters
+        """
+        # Get tile parameter values
+        tile_interference = sample.get('interference', 0.0)
+        tile_echo = sample.get('echo', 0.0)
+        tile_pressure = sample.get('pressure', 0.0)
+        tile_integrity = sample.get('integrity', 1.0)
+        tile_outside = 1.0 if sample.get('is_outside', True) else 0.0
+        tile_crowding = float(sample.get('nearby_colonists', 0))
+        
+        # Calculate individual contributions for tracking strongest influence
+        contributions = {
+            "interference": self.preferences["likes_interference"] * tile_interference,
+            "echo": self.preferences["likes_echo"] * tile_echo,
+            "pressure": self.preferences["likes_pressure"] * tile_pressure,
+            "integrity": self.preferences["likes_integrity"] * tile_integrity,
+            "outside": self.preferences["likes_outside"] * tile_outside,
+            "crowding": self.preferences["likes_crowding"] * tile_crowding,
+        }
+        
+        # Sum all contributions for total comfort change
+        comfort_change = sum(contributions.values())
+        
+        # Find strongest influence (by absolute value)
+        strongest_param = max(contributions.keys(), key=lambda k: abs(contributions[k]))
+        self.comfort_influence = (strongest_param, contributions[strongest_param])
+        
+        # Clamp comfort_change to small range per tick
+        comfort_change = max(-0.1, min(0.1, comfort_change))
+        
+        # Update comfort and stress (inversely related)
+        self.comfort = self._clamp_comfort_stress(self.comfort + comfort_change)
+        self.stress = self._clamp_comfort_stress(self.stress - comfort_change)
+        
+        # Apply preference drift based on current comfort/stress
+        self._apply_preference_drift(sample)
+        
+        # Update mood state based on comfort and stress
+        self._update_mood_state()
+    
+    def _apply_preference_drift(self, sample: dict) -> None:
+        """Apply slow preference drift based on comfort/stress state.
+        
+        When comfortable (comfort > stress), preferences drift toward current environment.
+        When stressed (stress > comfort), preferences drift away from current environment.
+        
+        Args:
+            sample: Environment sample dictionary with tile parameters
+        """
+        # Calculate drift value based on comfort-stress difference
+        drift = (self.comfort - self.stress) * self.preference_drift_rate
+        
+        # Clamp drift to very small range
+        drift = max(-0.001, min(0.001, drift))
+        
+        # Get tile parameter values
+        tile_interference = sample.get('interference', 0.0)
+        tile_echo = sample.get('echo', 0.0)
+        tile_pressure = sample.get('pressure', 0.0)
+        tile_integrity = sample.get('integrity', 1.0)
+        tile_outside = 1.0 if sample.get('is_outside', True) else 0.0
+        tile_crowding = float(sample.get('nearby_colonists', 0))
+        
+        # Calculate individual preference changes
+        pref_changes = {
+            "likes_interference": drift * tile_interference,
+            "likes_echo": drift * tile_echo,
+            "likes_pressure": drift * tile_pressure,
+            "likes_integrity": drift * tile_integrity,
+            "likes_outside": drift * tile_outside,
+            "likes_crowding": drift * tile_crowding,
+        }
+        
+        # Apply changes and clamp preferences
+        for pref_key, change in pref_changes.items():
+            self.preferences[pref_key] = self._clamp_preference_drift(
+                self.preferences[pref_key] + change
+            )
+        
+        # Track total drift and strongest change for debug
+        self.last_total_drift = sum(abs(c) for c in pref_changes.values())
+        
+        # Find strongest change
+        strongest_key = max(pref_changes.keys(), key=lambda k: abs(pref_changes[k]))
+        self.last_drift_strongest = (
+            strongest_key.replace("likes_", ""),
+            pref_changes[strongest_key]
+        )
+    
+    def _clamp_preference_drift(self, value: float) -> float:
+        """Clamp preference value to [-5.0, 5.0] range for drift system."""
+        return max(-5.0, min(5.0, value))
+    
+    def _clamp_comfort_stress(self, value: float) -> float:
+        """Clamp comfort/stress value to [-10.0, 10.0] range."""
+        return max(-10.0, min(10.0, value))
     
     def _clamp_affinity(self, value: float) -> float:
         """Clamp affinity value to [-1.0, 1.0] range."""
         return max(-1.0, min(1.0, value))
+    
+    def _update_mood_state(self) -> None:
+        """Update mood state based on comfort, stress, and equipment.
+        
+        Computes mood_score = comfort + equipment_comfort - stress and classifies into mood states.
+        Equipment comfort bonus is added to base comfort for mood calculation.
+        """
+        equipment_comfort = self.get_equipment_comfort_bonus()
+        self.mood_score = self.comfort + equipment_comfort - self.stress
+        
+        if self.mood_score > 10:
+            self.mood_state = "Euphoric"
+        elif self.mood_score > 5:
+            self.mood_state = "Calm"
+        elif self.mood_score > 0:
+            self.mood_state = "Focused"
+        elif self.mood_score > -5:
+            self.mood_state = "Uneasy"
+        elif self.mood_score > -10:
+            self.mood_state = "Stressed"
+        else:
+            self.mood_state = "Overwhelmed"
+    
+    @staticmethod
+    def get_mood_color(mood_state: str) -> tuple[int, int, int]:
+        """Get the display color for a mood state."""
+        mood_colors = {
+            "Euphoric": (100, 255, 100),     # Bright green
+            "Calm": (150, 200, 255),         # Soft blue
+            "Focused": (100, 220, 220),      # Cyan
+            "Uneasy": (255, 255, 100),       # Yellow
+            "Stressed": (255, 180, 80),      # Orange
+            "Overwhelmed": (255, 80, 80),    # Red
+        }
+        return mood_colors.get(mood_state, (200, 200, 200))
+    
+    def get_mood_speed_modifier(self) -> float:
+        """Get movement speed modifier based on mood state.
+        
+        Returns:
+            Multiplier for movement speed:
+            - Comfortable moods (Euphoric, Calm): +10% speed (0.9 move_speed multiplier)
+            - Neutral moods (Focused): no change (1.0)
+            - Stressed moods (Uneasy, Stressed, Overwhelmed): -10% speed (1.1 move_speed multiplier)
+        
+        Note: Lower move_speed value = faster movement (fewer ticks between moves)
+        """
+        if self.mood_state in ("Euphoric", "Calm"):
+            return 0.9  # 10% faster (lower cooldown)
+        elif self.mood_state in ("Uneasy", "Stressed", "Overwhelmed"):
+            return 1.1  # 10% slower (higher cooldown)
+        else:
+            return 1.0  # No change (Focused)
+    
+    def get_mood_speed_display(self) -> str:
+        """Get human-readable speed modifier for UI display."""
+        modifier = self.get_mood_speed_modifier()
+        if modifier < 1.0:
+            percent = int((1.0 - modifier) * 100)
+            return f"+{percent}%"
+        elif modifier > 1.0:
+            percent = int((modifier - 1.0) * 100)
+            return f"-{percent}%"
+        else:
+            return "0%"
     
     # --- Job Tag System -----------------------------------------------------
     
@@ -330,6 +1000,7 @@ class Colonist:
             "cooking": "can_cook",
             "salvage": "can_scavenge",
             "harvest": "can_scavenge",
+            "equip": None,  # Anyone can equip items - no tag restriction
         }
         
         # Get the corresponding tag
@@ -340,6 +1011,123 @@ class Colonist:
         
         # Check if colonist has this tag enabled
         return self.job_tags.get(tag, True)
+    
+    # --- Job Desirability Scoring -------------------------------------------
+    
+    # Job type to typical environment mapping
+    # Maps job categories to which environment parameters they typically involve
+    JOB_ENVIRONMENT_AFFINITY = {
+        "harvest": {"outside": 1.0, "integrity": 0.5},      # Outdoor work, some structure
+        "haul": {"outside": 0.8, "crowding": 0.3},          # Mostly outdoor, some social
+        "construction": {"integrity": 0.8, "outside": 0.5}, # Building = integrity focus
+        "wall": {"integrity": 0.8, "outside": 0.5},
+        "crafting": {"interference": 0.5, "echo": 0.3},     # Indoor workstation work
+        "cooking": {"interference": 0.3, "pressure": 0.3},  # Indoor kitchen work
+        "salvage": {"outside": 0.7, "integrity": -0.5},     # Outdoor, low integrity areas
+        "supply": {"outside": 0.5, "crowding": 0.3},        # Similar to haul
+    }
+    
+    def calculate_job_desirability(self, job_category: str, job_x: int = None, job_y: int = None, job_z: int = None, grid = None) -> float:
+        """Calculate how desirable a job is for this colonist.
+        
+        Formula:
+            desirability = base_value + mood_factor + affinity_bonus + environment_match_bonus
+        
+        Args:
+            job_category: The job category (harvest, haul, construction, etc.)
+            job_x, job_y, job_z: Optional job location for environment matching
+            grid: Optional grid for environment data lookup
+        
+        Returns:
+            Desirability score (higher = more desirable)
+        """
+        # Base value - all jobs start equal
+        base_value = 1.0
+        
+        # Mood factor - happier colonists are slightly more motivated
+        # mood_score ranges roughly -20 to +20, scale to ±1.0
+        mood_factor = self.mood_score * 0.05
+        
+        # Affinity bonus - based on preference profile matching job's typical environment
+        affinity_bonus = self._calculate_affinity_bonus(job_category)
+        
+        # Environment match bonus - if job location is provided, check tile environment
+        environment_bonus = 0.0
+        if job_x is not None and job_y is not None and grid is not None:
+            environment_bonus = self._calculate_environment_bonus(job_x, job_y, job_z or 0, grid)
+        
+        return base_value + mood_factor + affinity_bonus + environment_bonus
+    
+    def _calculate_affinity_bonus(self, job_category: str) -> float:
+        """Calculate bonus based on preference profile matching job's typical environment."""
+        bonus = 0.0
+        
+        env_affinity = self.JOB_ENVIRONMENT_AFFINITY.get(job_category, {})
+        
+        for param, weight in env_affinity.items():
+            pref_key = f"likes_{param}"
+            pref_value = self.preferences.get(pref_key, 0.0)
+            
+            # If colonist likes this parameter and job involves it positively, bonus
+            # If colonist dislikes and job involves it, penalty
+            # Scale: preference (-5 to +5) * weight * 0.04 = max ±0.2 per param
+            bonus += pref_value * weight * 0.04
+        
+        # Clamp to reasonable range
+        return max(-0.3, min(0.3, bonus))
+    
+    def _calculate_environment_bonus(self, x: int, y: int, z: int, grid) -> float:
+        """Calculate bonus based on job tile's environment matching preferences."""
+        bonus = 0.0
+        
+        # Get environment data for the job tile
+        env_data = grid.get_env_data(x, y, z)
+        
+        # Check each preference against the tile's environment
+        # Interference
+        tile_interference = env_data.get('interference', 0.0)
+        if abs(tile_interference) > 0.1:
+            pref = self.preferences.get("likes_interference", 0.0)
+            bonus += pref * tile_interference * 0.02  # Small effect
+        
+        # Echo
+        tile_echo = env_data.get('echo', 0.0)
+        if abs(tile_echo) > 0.1:
+            pref = self.preferences.get("likes_echo", 0.0)
+            bonus += pref * tile_echo * 0.02
+        
+        # Pressure
+        tile_pressure = env_data.get('pressure', 0.0)
+        if abs(tile_pressure) > 0.1:
+            pref = self.preferences.get("likes_pressure", 0.0)
+            bonus += pref * tile_pressure * 0.02
+        
+        # Integrity
+        tile_integrity = env_data.get('integrity', 1.0)
+        pref = self.preferences.get("likes_integrity", 0.0)
+        bonus += pref * (tile_integrity - 0.5) * 0.04  # Center around 0.5
+        
+        # Outside
+        is_outside = 1.0 if env_data.get('is_outside', True) else 0.0
+        pref = self.preferences.get("likes_outside", 0.0)
+        bonus += pref * (is_outside - 0.5) * 0.04  # Center around 0.5
+        
+        # Clamp to reasonable range
+        return max(-0.2, min(0.2, bonus))
+    
+    def get_job_desirability_summary(self, grid = None) -> dict[str, float]:
+        """Get desirability scores for all job categories.
+        
+        Returns dict of category -> score for UI display.
+        """
+        categories = ["harvest", "haul", "construction", "crafting", "cooking", "salvage"]
+        result = {}
+        
+        for cat in categories:
+            # Calculate without specific location (general desirability)
+            result[cat] = self.calculate_job_desirability(cat, grid=grid)
+        
+        return result
     
     # --- Core behavior -----------------------------------------------------
 
@@ -361,38 +1149,59 @@ class Colonist:
                 self.x = new_x
                 self.y = new_y
 
-    def _try_take_job(self) -> None:
+    def _try_take_job(self, grid: Grid = None) -> None:
         """Claim a job from the global queue if available.
         
         Filters jobs based on colonist's job tags (can_build, can_haul, etc.)
-        """
-        # Skip construction jobs that don't have materials delivered yet
-        job = get_next_available_job(skip_types=[], skip_unready_construction=True)
+        Uses desirability scoring to pick the most attractive job.
         
-        # Check if colonist can perform this job based on job tags
-        if job is not None:
-            # Filter by job category using job tags
-            if not self.can_perform_job_category(job.category):
-                # This colonist can't do this job - skip it
-                # Don't assign it, let another colonist try
-                return
-            
-            job.assigned = True
-            self.current_job = job
-            self.current_path = []  # Will be calculated on first move
-            self.stuck_timer = 0
-            
-            # Set resource node to RESERVED state if this is a gathering job
-            if job.type == "gathering":
-                set_node_state(job.x, job.y, NodeState.RESERVED)
-                self.state = "moving_to_job"
-            elif job.type == "crafting":
-                # Reserve workstation and start fetching materials
-                buildings.reserve_workstation(job.x, job.y, job.z)
-                self.state = "crafting_fetch"
-                self._crafting_inputs_needed = None  # Will be set when we start fetching
-            else:
-                self.state = "moving_to_job"
+        Args:
+            grid: Optional grid for environment-based desirability scoring
+        """
+        # Get all available jobs
+        available_jobs = get_all_available_jobs(skip_types=[], skip_unready_construction=True)
+        
+        if not available_jobs:
+            return
+        
+        # Filter to jobs this colonist can perform
+        valid_jobs = [j for j in available_jobs if self.can_perform_job_category(j.category)]
+        
+        if not valid_jobs:
+            return
+        
+        # Score each job by desirability and sort (highest first)
+        scored_jobs = []
+        for job in valid_jobs:
+            score = self.calculate_job_desirability(
+                job.category, 
+                job.x, job.y, job.z,
+                grid=grid
+            )
+            scored_jobs.append((score, job))
+        
+        # Sort by score descending, then by original queue order for ties
+        scored_jobs.sort(key=lambda x: x[0], reverse=True)
+        
+        # Take the highest-scoring job
+        _, job = scored_jobs[0]
+        
+        job.assigned = True
+        self.current_job = job
+        self.current_path = []  # Will be calculated on first move
+        self.stuck_timer = 0
+        
+        # Set resource node to RESERVED state if this is a gathering job
+        if job.type == "gathering":
+            set_node_state(job.x, job.y, NodeState.RESERVED)
+            self.state = "moving_to_job"
+        elif job.type == "crafting":
+            # Reserve workstation and start fetching materials
+            buildings.reserve_workstation(job.x, job.y, job.z)
+            self.state = "crafting_fetch"
+            self._crafting_inputs_needed = None  # Will be set when we start fetching
+        else:
+            self.state = "moving_to_job"
 
     def _calculate_path(self, grid: Grid, target_x: int, target_y: int, target_z: int = 0) -> list[tuple[int, int, int]]:
         """Calculate path to target using BFS with z-level support.
@@ -544,11 +1353,16 @@ class Colonist:
             self.z = next_z
             self.current_path.pop(0)
             
+            # Apply mood and equipment speed modifiers
+            # Both are multipliers on move_speed (lower = faster)
+            combined_modifier = self.get_mood_speed_modifier() * self.get_equipment_speed_modifier()
+            base_speed = int(self.move_speed * combined_modifier)
+            
             # Windows have a movement speed penalty (climbing through)
             if is_window(next_x, next_y, next_z):
-                self.move_cooldown = self.move_speed * 2  # Double delay for windows
+                self.move_cooldown = base_speed * 2  # Double delay for windows
             else:
-                self.move_cooldown = self.move_speed
+                self.move_cooldown = base_speed
             self.stuck_timer = 0
         else:
             # Path blocked (wall built, door placed, etc.) - recalculate immediately
@@ -556,7 +1370,7 @@ class Colonist:
             self.stuck_timer += 1
             
             # Add a small delay before retrying to avoid spinning
-            self.move_cooldown = self.move_speed * 2
+            self.move_cooldown = self.move_speed * 2  # No mood modifier for stuck delay
             
             if self.stuck_timer > self.max_stuck_time:
                 # Give up on this job - reset node state if gathering
@@ -596,16 +1410,31 @@ class Colonist:
                 self.state = "idle"
                 return
         
-        job.progress += 1
+        # Apply equipment work bonus to progress
+        # Base progress is 1 per tick, modified by equipment
+        work_modifier = self.get_equipment_work_modifier()
+        job.progress += work_modifier
+        
+        # Log work progress on first tick of job (to verify equipment effects)
+        if job.progress <= work_modifier + 0.01:  # First tick
+            if work_modifier != 1.0:
+                print(f"[Work] {self.name} working on {job.type} at {work_modifier:.0%} speed (equipment bonus)")
         
         # Sample environment on every job tick
         self.sample_environment(grid, self._all_colonists, self._game_tick)
         
         # For gathering jobs, harvest resources incrementally
         if job.type == "gathering":
-            harvest_tick(job.x, job.y, job.progress, job.required)
+            harvest_tick(job.x, job.y, int(job.progress), job.required)
 
         if job.progress >= job.required:
+            # Log job completion with timing info
+            if work_modifier != 1.0:
+                expected_ticks = job.required
+                actual_ticks = int(job.required / work_modifier)
+                saved = expected_ticks - actual_ticks
+                print(f"[Work] {self.name} finished {job.type} in ~{actual_ticks} ticks (saved ~{saved} ticks from {work_modifier:.0%} speed)")
+            
             # Sample environment on job completion
             self.sample_environment(grid, self._all_colonists, self._game_tick)
             # Dispatch completion based on job type.
@@ -665,6 +1494,15 @@ class Colonist:
                     grid.set_tile(job.x, job.y, "finished_stove", z=job.z)
                     # Register as workstation
                     buildings.register_workstation(job.x, job.y, job.z, "stove")
+                elif current_tile == "gutter_forge":
+                    grid.set_tile(job.x, job.y, "finished_gutter_forge", z=job.z)
+                    buildings.register_workstation(job.x, job.y, job.z, "gutter_forge")
+                elif current_tile == "skinshop_loom":
+                    grid.set_tile(job.x, job.y, "finished_skinshop_loom", z=job.z)
+                    buildings.register_workstation(job.x, job.y, job.z, "skinshop_loom")
+                elif current_tile == "cortex_spindle":
+                    grid.set_tile(job.x, job.y, "finished_cortex_spindle", z=job.z)
+                    buildings.register_workstation(job.x, job.y, job.z, "cortex_spindle")
                 else:
                     grid.set_tile(job.x, job.y, "finished_building", z=job.z)
                 buildings.remove_construction_site(job.x, job.y, job.z)
@@ -676,17 +1514,63 @@ class Colonist:
             elif job.type == "gathering":
                 complete_gathering_job(grid, job)
                 remove_job(job)
+                # Remove designation when job completes
+                remove_designation(job.x, job.y, job.z)
                 self.current_job = None
                 self.state = "idle"
             elif job.type == "haul":
                 # Pickup phase complete - pick up the item and start hauling
-                item = pickup_resource_item(job.x, job.y, job.z)
-                if item is not None:
-                    self.carrying = item
-                    self.state = "hauling"
-                    self.current_path = []  # Will recalculate path to destination
+                # Check if this is an equipment haul or resource haul
+                if job.resource_type == "equipment":
+                    # Equipment haul - pick up from world items
+                    from items import pickup_world_item
+                    item = pickup_world_item(job.x, job.y, job.z)
+                    if item is not None:
+                        # Convert to carrying format
+                        self.carrying = {"type": "equipment", "amount": 1, "item": item}
+                        self.pick_up_item(self.carrying)
+                        self.state = "hauling"
+                        self.current_path = []
+                        remove_designation(job.x, job.y, job.z)
+                    else:
+                        remove_job(job)
+                        remove_designation(job.x, job.y, job.z)
+                        self.current_job = None
+                        self.state = "idle"
                 else:
-                    # Item was already picked up by someone else
+                    # Resource haul
+                    item = pickup_resource_item(job.x, job.y, job.z)
+                    if item is not None:
+                        self.carrying = item
+                        self.pick_up_item(item)
+                        self.state = "hauling"
+                        self.current_path = []  # Will recalculate path to destination
+                        # Remove designation when item is picked up
+                        remove_designation(job.x, job.y, job.z)
+                    else:
+                        # Item was already picked up by someone else
+                        remove_job(job)
+                        # Remove designation anyway
+                        remove_designation(job.x, job.y, job.z)
+                        self.current_job = None
+                        self.state = "idle"
+            elif job.type == "equip":
+                # Equip job - pick up item from stockpile and equip it
+                item = zones.remove_equipment_from_tile(job.x, job.y, job.z)
+                if item is not None:
+                    # Equip the item directly
+                    slot = item.get("slot")
+                    if slot and slot in self.equipment:
+                        self.equipment[slot] = item
+                        print(f"[Equip] {self.name} equipped {item.get('name')} in {slot} slot")
+                    else:
+                        print(f"[Equip] {self.name} couldn't equip {item.get('name')} - invalid slot")
+                    
+                    remove_job(job)
+                    self.current_job = None
+                    self.state = "idle"
+                else:
+                    # Item was already taken
                     remove_job(job)
                     self.current_job = None
                     self.state = "idle"
@@ -707,6 +1591,7 @@ class Colonist:
                     # Also remove from global stockpile count
                     spend_from_stockpile(item["type"], item.get("amount", 1))
                     self.carrying = item
+                    self.pick_up_item(item)
                     self.state = "hauling"  # Reuse hauling state
                     self.current_path = []
                 else:
@@ -722,10 +1607,26 @@ class Colonist:
                     # Also remove from global stockpile count (will be re-added at destination)
                     spend_from_stockpile(item["type"], item.get("amount", 1))
                     self.carrying = item
+                    self.pick_up_item(item)
                     self.state = "hauling"
                     self.current_path = []
                 else:
                     # Tile is now empty - job complete
+                    remove_job(job)
+                    self.current_job = None
+                    self.state = "idle"
+            elif job.type == "install_furniture":
+                # Install furniture: pick up furniture item from stockpile, then haul to destination
+                from zones import remove_equipment_from_tile
+                item = remove_equipment_from_tile(job.x, job.y, job.z)
+                if item is not None:
+                    # Carry as furniture item (consumed on install)
+                    self.carrying = {"type": "furniture", "amount": 1, "item": item, "item_id": job.resource_type}
+                    self.pick_up_item(self.carrying)
+                    self.state = "hauling"
+                    self.current_path = []
+                else:
+                    # Nothing to pick up here anymore - cancel job
                     remove_job(job)
                     self.current_job = None
                     self.state = "idle"
@@ -739,6 +1640,8 @@ class Colonist:
                     create_resource_item(job.x, job.y, 0, "scrap", scrap_amount)
                     print(f"[Salvage] Recovered {scrap_amount} scrap at ({job.x},{job.y})")
                 remove_job(job)
+                # Remove designation when salvage completes
+                remove_designation(job.x, job.y, job.z)
                 self.current_job = None
                 self.state = "idle"
             else:
@@ -761,6 +1664,7 @@ class Colonist:
                 remove_job(self.current_job)
             self.current_job = None
             self.state = "idle"
+            self.drop_item()  # Clear all carried items
             self.carrying = None
             return
         
@@ -772,6 +1676,7 @@ class Colonist:
             # No destination - drop item and abort
             if job.type == "supply":
                 mark_supply_job_completed(dest_x, dest_y, dest_z, job.resource_type)
+            self.drop_item(self.carrying)
             self.carrying = None
             remove_job(job)
             self.current_job = None
@@ -789,7 +1694,16 @@ class Colonist:
                 mark_supply_job_completed(dest_x, dest_y, dest_z, job.resource_type)
             elif job.type == "haul":
                 # Deliver to stockpile
-                if zones.is_stockpile_zone(dest_x, dest_y, dest_z):
+                if resource_type == "equipment":
+                    # Equipment delivery - store the item data
+                    item_data = self.carrying.get("item", {})
+                    item_name = item_data.get("name", "equipment")
+                    if zones.is_stockpile_zone(dest_x, dest_y, dest_z):
+                        zones.store_equipment_at_tile(dest_x, dest_y, dest_z, item_data)
+                        print(f"[Haul] Stored {item_name} in stockpile at ({dest_x},{dest_y})")
+                    else:
+                        print(f"[Haul] Dropped {item_name} (stockpile zone removed)")
+                elif zones.is_stockpile_zone(dest_x, dest_y, dest_z):
                     add_to_stockpile(resource_type, amount)
                     zones.add_to_zone_storage(dest_x, dest_y, dest_z, resource_type, amount)
                     print(f"[Haul] Delivered {amount} {resource_type} to stockpile at ({dest_x},{dest_y})")
@@ -797,8 +1711,20 @@ class Colonist:
                     # Destination is no longer a stockpile - just add to global stockpile
                     add_to_stockpile(resource_type, amount)
                     print(f"[Haul] Delivered {amount} {resource_type} (stockpile zone removed)")
+            elif job.type == "install_furniture":
+                # Install furniture at destination: convert tile and consume item
+                furniture_item_id = job.resource_type or self.carrying.get("item_id")
+                tile_type = furniture_item_id or "gutter_slab"
+                grid.set_tile(dest_x, dest_y, tile_type, z=dest_z)
+                item_data = self.carrying.get("item", {})
+                item_name = item_data.get("name", furniture_item_id or "furniture")
+                print(f"[Furniture] Installed {item_name} at ({dest_x},{dest_y},z={dest_z})")
+                # Furniture can change room classification (e.g., Kitchen), so
+                # mark rooms dirty to trigger re-detection on next update.
+                mark_rooms_dirty()
             
             # Job complete
+            self.drop_item(self.carrying)
             self.carrying = None
             remove_job(job)
             self.current_job = None
@@ -818,6 +1744,7 @@ class Colonist:
                 self.stuck_timer += 1
                 if self.stuck_timer > self.max_stuck_time:
                     # Can't reach destination - drop item and abort
+                    self.drop_item(self.carrying)
                     self.carrying = None
                     remove_job(job)
                     self.current_job = None
@@ -836,17 +1763,19 @@ class Colonist:
             self.y = next_y
             self.z = next_z
             self.current_path.pop(0)
-            self.move_cooldown = self.move_speed
+            # Apply mood speed modifier
+            self.move_cooldown = int(self.move_speed * self.get_mood_speed_modifier())
             self.stuck_timer = 0
         else:
             # Path blocked - recalculate
             self.current_path = []
             self.stuck_timer += 1
-            self.move_cooldown = self.move_speed * 2  # Delay before retry
+            self.move_cooldown = self.move_speed * 2  # No mood modifier for stuck delay
             
             if self.stuck_timer > self.max_stuck_time:
                 # Can't reach destination - drop item and abort
                 print(f"[Stuck] Colonist hauling path blocked, dropping item")
+                self.drop_item(self.carrying)
                 self.carrying = None
                 remove_job(job)
                 self.current_job = None
@@ -924,6 +1853,7 @@ class Colonist:
         # Drop carried items
         if self.carrying is not None:
             print(f"[Interrupt] Dropped {self.carrying.get('type', 'item')}")
+            self.drop_item()  # Clear all carried items
             self.carrying = None
         
         # Clear path and enter recovery
@@ -1029,6 +1959,7 @@ class Colonist:
                 res_type = self.carrying.get("type", "")
                 amount = self.carrying.get("amount", 1)
                 buildings.add_input_to_workstation(job.x, job.y, job.z, res_type, amount)
+                self.drop_item(self.carrying)
                 self.carrying = None
                 
                 # Check if workstation has all inputs
@@ -1090,6 +2021,7 @@ class Colonist:
                     item = zones.remove_from_tile_storage(source_x, source_y, source_z, 1)
                     if item:
                         self.carrying = {"type": item["type"], "amount": item["amount"]}
+                        self.pick_up_item(self.carrying)
                         spend_from_stockpile(item["type"], item["amount"])
                         self.current_path = []
                     return
@@ -1163,21 +2095,59 @@ class Colonist:
         work_time = recipe.get("work_time", 60)
         
         if ws["progress"] >= work_time:
-            # Crafting complete - consume inputs and produce output
-            buildings.consume_workstation_inputs(job.x, job.y, job.z)
+            # Check if this produces an item or a resource
+            output_item_id = recipe.get("output_item")
             
-            # Produce output as dropped item
-            outputs = recipe.get("output", {})
-            from resources import create_resource_item
-            for res_type, amount in outputs.items():
-                # Drop output adjacent to workstation
+            if output_item_id:
+                # Determine if this output is equippable gear or non-equippable (e.g. furniture)
+                from items import spawn_world_item, get_item_def
+                item_def = get_item_def(output_item_id)
+                is_equippable = item_def is not None and getattr(item_def, "slot", None) is not None
+
+                if is_equippable:
+                    # For equippable gear, ensure there is stockpile space for equipment
+                    dest = zones.find_stockpile_tile_for_resource("equipment", z=job.z, from_x=job.x, from_y=job.y)
+                    if dest is None:
+                        # No stockpile space - pause crafting until space available
+                        if not ws.get("waiting_for_storage"):
+                            print(f"[Crafting] Waiting for stockpile space for equipment...")
+                            ws["waiting_for_storage"] = True
+                        return  # Don't complete - wait for space
+
+                # Either non-equippable item (furniture) or we have confirmed storage for gear
+                ws["waiting_for_storage"] = False
+                
+                # Crafting complete - consume inputs and produce output
+                buildings.consume_workstation_inputs(job.x, job.y, job.z)
+                
+                # Produce an item from the item system
+                item_name = item_def.name if item_def else output_item_id
+                
+                # Drop item adjacent to workstation
                 for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
                     drop_x, drop_y = job.x + dx, job.y + dy
                     if grid.is_walkable(drop_x, drop_y, job.z):
-                        create_resource_item(drop_x, drop_y, job.z, res_type, amount)
-                        print(f"[Crafting] Produced {amount} {res_type} at ({drop_x},{drop_y})")
+                        spawn_world_item(drop_x, drop_y, job.z, output_item_id)
+                        print(f"[Crafting] Produced {item_name} at ({drop_x},{drop_y})")
                         break
+            else:
+                # Produce resource output (legacy behavior)
+                outputs = recipe.get("output", {})
+                from resources import create_resource_item
+                for res_type, amount in outputs.items():
+                    # Drop output adjacent to workstation
+                    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+                        drop_x, drop_y = job.x + dx, job.y + dy
+                        if grid.is_walkable(drop_x, drop_y, job.z):
+                            create_resource_item(drop_x, drop_y, job.z, res_type, amount)
+                            print(f"[Crafting] Produced {amount} {res_type} at ({drop_x},{drop_y})")
+                            break
             
+            # Decrement any finite craft queue for this workstation
+            ws_final = buildings.get_workstation(job.x, job.y, job.z)
+            if ws_final is not None and ws_final.get("craft_queue", 0) > 0:
+                ws_final["craft_queue"] -= 1
+
             # Complete job
             buildings.release_workstation(job.x, job.y, job.z)
             buildings.mark_crafting_job_completed(job.x, job.y, job.z)
@@ -1291,7 +2261,8 @@ class Colonist:
             self.y = next_y
             self.z = next_z
             self.current_path.pop(0)
-            self.move_cooldown = self.move_speed
+            # Apply mood speed modifier
+            self.move_cooldown = int(self.move_speed * self.get_mood_speed_modifier())
         else:
             # Path blocked - recalculate
             self.current_path = []
@@ -1364,7 +2335,7 @@ class Colonist:
                         return
 
         if self.state == "idle":
-            self._try_take_job()
+            self._try_take_job(grid)
             if self.state == "idle":
                 self._maybe_wander_when_idle(grid)
         elif self.state == "moving_to_job":

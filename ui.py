@@ -267,7 +267,8 @@ class SubMenu:
 class ActionBar:
     """Bottom action bar with main category buttons and submenus."""
     
-    # Menu structure - costs shown in parentheses
+    # Menu structure - base categories. Some entries (workstations, furniture)
+    # are populated at runtime from data definitions.
     BUILD_MENU = {
         "walls": [
             {"id": "wall", "name": "Wall", "cost": "2 wood", "keybind": "1"},
@@ -284,11 +285,10 @@ class ActionBar:
             {"id": "door", "name": "Door", "cost": "1 wood, 1 metal", "keybind": "1"},
             {"id": "window", "name": "Window", "cost": "1 wood, 1 mineral", "keybind": "2"},
         ],
-        "workstations": [
-            {"id": "salvagers_bench", "name": "Salvager's Bench", "cost": "3 wood, 2 scrap", "keybind": "1"},
-            {"id": "generator", "name": "Generator", "cost": "2 wood, 2 metal", "keybind": "2"},
-            {"id": "stove", "name": "Stove", "cost": "2 metal, 1 mineral", "keybind": "3"},
-        ],
+        # Workstations category is populated at runtime from BUILDING_TYPES
+        "workstations": [],
+        # Furniture category is populated at runtime from items tagged as "furniture"
+        "furniture": [],
     }
     
     ZONE_MENU = [
@@ -314,6 +314,75 @@ class ActionBar:
         self.bar_rect = pygame.Rect(0, SCREEN_H - BAR_HEIGHT, SCREEN_W, BAR_HEIGHT)
         
         self._create_ui()
+    
+    def _build_workstation_menu_items(self) -> None:
+        """Populate the Workstations build submenu from BUILDING_TYPES.
+        
+        Any building definition with workstation=True will appear here. This
+        makes adding new stations mostly data-only (edit buildings.py).
+        """
+        try:
+            import buildings as buildings_module
+        except ImportError:
+            ActionBar.BUILD_MENU["workstations"] = []
+            return
+        
+        ws_defs = []
+        for b_id, b_def in buildings_module.BUILDING_TYPES.items():
+            if not b_def.get("workstation", False):
+                continue
+            name = b_def.get("name", b_id)
+            materials = b_def.get("materials", {}) or {}
+            if materials:
+                parts = [f"{amount} {res}" for res, amount in materials.items()]
+                cost = ", ".join(parts)
+            else:
+                cost = ""
+            ws_defs.append((b_id, name, cost))
+        
+        menu_items: List[dict] = []
+        for idx, (b_id, display_name, cost) in enumerate(ws_defs):
+            keybind = str(idx + 1) if idx < 9 else ""
+            menu_items.append({
+                "id": b_id,
+                "name": display_name,
+                "cost": cost,
+                "keybind": keybind,
+            })
+        
+        ActionBar.BUILD_MENU["workstations"] = menu_items
+    
+    def _build_furniture_menu_items(self) -> None:
+        """Populate the Furniture build submenu from items tagged as furniture.
+        
+        Each furniture item becomes a tool id of the form "furn_<item_id>" so
+        placement logic can treat all furniture generically.
+        """
+        try:
+            import items as items_module
+        except ImportError:
+            # If items registry is not available yet, leave furniture menu empty
+            ActionBar.BUILD_MENU["furniture"] = []
+            return
+        
+        furniture_defs = items_module.get_items_with_tag("furniture")
+        if not furniture_defs:
+            ActionBar.BUILD_MENU["furniture"] = []
+            return
+        
+        # Stable ordering by display name
+        furniture_defs = sorted(furniture_defs, key=lambda d: d.name)
+        menu_items = []
+        for idx, item_def in enumerate(furniture_defs):
+            keybind = str(idx + 1) if idx < 9 else ""
+            menu_items.append({
+                "id": f"furn_{item_def.id}",
+                "name": item_def.name,
+                "cost": "From stockpile",
+                "keybind": keybind,
+            })
+        
+        ActionBar.BUILD_MENU["furniture"] = menu_items
     
     def _create_ui(self) -> None:
         """Create all UI elements."""
@@ -364,13 +433,14 @@ class ActionBar:
             keybind="H",
         )
         
-        # Build category submenu (Walls, Floors, Movement, Entrance, Workstations)
+        # Build category submenu (Walls, Floors, Movement, Entrance, Workstations, Furniture)
         build_categories = [
             {"id": "walls", "name": "Walls", "keybind": "1"},
             {"id": "floors", "name": "Floors", "keybind": "2"},
             {"id": "movement", "name": "Movement", "keybind": "3"},
             {"id": "entrance", "name": "Entrance", "keybind": "4"},
             {"id": "workstations", "name": "Workstations", "keybind": "5"},
+            {"id": "furniture", "name": "Furniture", "keybind": "6"},
         ]
         self.submenus["build"] = SubMenu(build_categories, self.main_buttons["build"])
         
@@ -378,6 +448,9 @@ class ActionBar:
         self.submenus["zone"] = SubMenu(self.ZONE_MENU, self.main_buttons["zone"])
         
         # Build sub-submenus (one for each category)
+        # Populate dynamic menus (workstations, furniture) from data definitions
+        self._build_workstation_menu_items()
+        self._build_furniture_menu_items()
         for cat_id, items in self.BUILD_MENU.items():
             # Create a temporary parent for positioning
             self.build_submenus[cat_id] = SubMenu(items, self.main_buttons["build"])
@@ -473,12 +546,12 @@ class ActionBar:
             return True
         
         # Number keys for submenu selection
-        if key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
-            num = key - pygame.K_1  # 0-4
+        if key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6):
+            num = key - pygame.K_1  # 0-based index
             
             if self.active_menu == "build" and self.active_submenu is None:
                 # Select build category
-                categories = ["walls", "floors", "movement", "entrance", "workstations"]
+                categories = ["walls", "floors", "movement", "entrance", "workstations", "furniture"]
                 if num < len(categories):
                     self._open_build_submenu(categories[num])
                     return True
@@ -628,7 +701,7 @@ class ActionBar:
 class StockpileFilterPanel:
     """UI panel for editing stockpile zone filters."""
     
-    RESOURCE_TYPES = ["wood", "mineral", "scrap", "metal", "power", "raw_food", "cooked_meal"]
+    RESOURCE_TYPES = ["wood", "mineral", "scrap", "metal", "power", "raw_food", "cooked_meal", "equipment"]
     RESOURCE_COLORS = {
         "wood": (139, 90, 43),
         "mineral": (80, 200, 200),
@@ -637,6 +710,7 @@ class StockpileFilterPanel:
         "power": (255, 220, 80),
         "raw_food": (180, 220, 100),
         "cooked_meal": (220, 160, 80),
+        "equipment": (160, 140, 200),
     }
     RESOURCE_NAMES = {
         "wood": "Wood",
@@ -646,13 +720,14 @@ class StockpileFilterPanel:
         "power": "Power",
         "raw_food": "Raw Food",
         "cooked_meal": "Meal",
+        "equipment": "Equipment & Furniture",
     }
     
     def __init__(self):
         self.visible = False
         self.zone_id: Optional[int] = None
         self.zone_info: Optional[dict] = None
-        self.panel_rect = pygame.Rect(0, 0, 180, 260)  # Taller for more items
+        self.panel_rect = pygame.Rect(0, 0, 180, 290)  # Taller for more items
         self.filter_rects: Dict[str, pygame.Rect] = {}
         self.font: Optional[pygame.font.Font] = None
     
@@ -769,6 +844,324 @@ def get_stockpile_filter_panel() -> StockpileFilterPanel:
 
 
 # ============================================================================
+# Workstation Panel - Recipe selection and crafting info
+# ============================================================================
+
+class WorkstationPanel:
+    """UI panel for viewing/selecting workstation recipes."""
+    
+    def __init__(self):
+        self.visible = False
+        self.workstation_pos: Optional[tuple[int, int, int]] = None
+        self.workstation_data: Optional[dict] = None
+        self.recipes: list[dict] = []
+        self.panel_rect = pygame.Rect(0, 0, 280, 320)
+        self.recipe_rects: list[pygame.Rect] = []
+        self.font: Optional[pygame.font.Font] = None
+        self.font_small: Optional[pygame.font.Font] = None
+        # Order control button rects (set during draw)
+        self.button_craft_one_rect: Optional[pygame.Rect] = None
+        self.button_auto_rect: Optional[pygame.Rect] = None
+        self.target_minus_rect: Optional[pygame.Rect] = None
+        self.target_plus_rect: Optional[pygame.Rect] = None
+    
+    def init_font(self) -> None:
+        self.font = pygame.font.Font(None, 24)
+        self.font_small = pygame.font.Font(None, 20)
+    
+    def open(self, x: int, y: int, z: int, screen_x: int, screen_y: int) -> None:
+        """Open the workstation panel."""
+        import buildings
+        
+        self.workstation_pos = (x, y, z)
+        self.workstation_data = buildings.get_workstation(x, y, z)
+        if self.workstation_data is None:
+            return
+        
+        self.recipes = buildings.get_workstation_recipes(x, y, z)
+        self.visible = True
+        
+        # Dynamically adjust panel height based on recipe count so nothing is squished
+        base_height = 220  # Minimum height for title + status + orders
+        if self.recipes:
+            # Each recipe row uses ~65px vertical space, starting after ~50px header
+            num_recipes = len(self.recipes)
+            recipes_block = 110 + max(0, num_recipes - 1) * 65  # first row + spacing
+            bottom_margin = 90  # Space for Orders strip + status text
+            needed_height = recipes_block + bottom_margin
+            # Clamp to screen height with some safety margin from bottom
+            max_height = SCREEN_H - 80
+            self.panel_rect.height = max(base_height, min(needed_height, max_height))
+        else:
+            self.panel_rect.height = base_height
+        
+        # Position panel near click but keep on screen after resizing
+        self.panel_rect.x = min(screen_x + 10, SCREEN_W - self.panel_rect.width - 10)
+        self.panel_rect.y = min(screen_y, SCREEN_H - self.panel_rect.height - 60)
+        
+        self._build_recipe_rects()
+    
+    def _build_recipe_rects(self) -> None:
+        """Build clickable rectangles for each recipe."""
+        self.recipe_rects.clear()
+        y = self.panel_rect.y + 50
+        for _ in self.recipes:
+            self.recipe_rects.append(pygame.Rect(
+                self.panel_rect.x + 10, y, self.panel_rect.width - 20, 60
+            ))
+            y += 65
+    
+    def close(self) -> None:
+        """Close the panel."""
+        self.visible = False
+        self.workstation_pos = None
+        self.workstation_data = None
+        self.recipes = []
+        self.button_craft_one_rect = None
+        self.button_auto_rect = None
+        self.target_minus_rect = None
+        self.target_plus_rect = None
+    
+    def handle_click(self, mouse_pos: tuple[int, int]) -> bool:
+        """Handle click. Returns True if consumed."""
+        if not self.visible:
+            return False
+        
+        # Click outside panel closes it
+        if not self.panel_rect.collidepoint(mouse_pos):
+            self.close()
+            return True
+        
+        # Check recipe selection
+        import buildings
+        for i, rect in enumerate(self.recipe_rects):
+            if rect.collidepoint(mouse_pos) and i < len(self.recipes):
+                recipe = self.recipes[i]
+                if self.workstation_pos:
+                    x, y, z = self.workstation_pos
+                    buildings.set_workstation_recipe(x, y, z, recipe["id"])
+                    print(f"[Workstation] Selected: {recipe['name']}")
+                    # Refresh data
+                    self.workstation_data = buildings.get_workstation(x, y, z)
+                return True
+        
+        # Order controls (Craft 1 / Auto / Target)
+        ws = self.workstation_data
+        if ws is not None:
+            # Craft 1 - enqueue a single crafting job for the selected recipe
+            if self.button_craft_one_rect and self.button_craft_one_rect.collidepoint(mouse_pos):
+                ws["craft_queue"] = ws.get("craft_queue", 0) + 1
+                return True
+            
+            # Toggle auto mode between infinite and target
+            if self.button_auto_rect and self.button_auto_rect.collidepoint(mouse_pos):
+                current_mode = ws.get("auto_mode", "infinite")
+                ws["auto_mode"] = "target" if current_mode == "infinite" else "infinite"
+                return True
+            
+            # Adjust target count (used when auto_mode == "target")
+            if self.target_minus_rect and self.target_minus_rect.collidepoint(mouse_pos):
+                current = ws.get("target_count", 0)
+                ws["target_count"] = max(0, current - 1)
+                # If we have a non-zero target, ensure mode is target
+                if ws["target_count"] > 0:
+                    ws["auto_mode"] = "target"
+                return True
+            if self.target_plus_rect and self.target_plus_rect.collidepoint(mouse_pos):
+                current = ws.get("target_count", 0)
+                ws["target_count"] = min(99, current + 1)
+                ws["auto_mode"] = "target"
+                return True
+        
+        return True  # Consume click on panel
+    
+    def draw(self, surface: pygame.Surface) -> None:
+        """Draw the workstation panel."""
+        if not self.visible or self.workstation_data is None:
+            return
+        
+        if self.font is None:
+            self.init_font()
+        
+        import buildings
+        from items import get_item_def
+        
+        # Panel background
+        pygame.draw.rect(surface, (30, 35, 45), self.panel_rect)
+        pygame.draw.rect(surface, (80, 90, 100), self.panel_rect, 2)
+        
+        # Title
+        ws_type = self.workstation_data.get("type", "Workstation")
+        building_def = buildings.BUILDING_TYPES.get(ws_type, {})
+        title = building_def.get("name", ws_type.replace("_", " ").title())
+        title_surf = self.font.render(title, True, (220, 220, 230))
+        surface.blit(title_surf, (self.panel_rect.x + 10, self.panel_rect.y + 10))
+        
+        # Current recipe indicator
+        selected_id = self.workstation_data.get("selected_recipe")
+        
+        # Draw recipes
+        for i, (recipe, rect) in enumerate(zip(self.recipes, self.recipe_rects)):
+            is_selected = recipe["id"] == selected_id
+            
+            # Background
+            bg_color = (50, 60, 70) if is_selected else (40, 45, 55)
+            pygame.draw.rect(surface, bg_color, rect)
+            border_color = (100, 180, 100) if is_selected else (60, 70, 80)
+            pygame.draw.rect(surface, border_color, rect, 2 if is_selected else 1)
+            
+            # Recipe name
+            name_color = (180, 220, 180) if is_selected else (180, 180, 190)
+            name_surf = self.font.render(recipe["name"], True, name_color)
+            surface.blit(name_surf, (rect.x + 8, rect.y + 5))
+            
+            # Cost line
+            inputs = recipe.get("input", {})
+            cost_parts = [f"{amt} {res}" for res, amt in inputs.items()]
+            cost_text = "Cost: " + ", ".join(cost_parts) if cost_parts else "Cost: Free"
+            cost_surf = self.font_small.render(cost_text, True, (140, 140, 150))
+            surface.blit(cost_surf, (rect.x + 8, rect.y + 24))
+            
+            # Effect line - get from item definition
+            output_item = recipe.get("output_item")
+            if output_item:
+                item_def = get_item_def(output_item)
+                if item_def:
+                    effects = []
+                    if item_def.speed_bonus != 0:
+                        effects.append(f"Speed {item_def.speed_bonus:+.0%}")
+                    if item_def.work_bonus != 0:
+                        effects.append(f"Work {item_def.work_bonus:+.0%}")
+                    if item_def.comfort != 0:
+                        effects.append(f"Comfort {item_def.comfort:+.2f}")
+                    if item_def.hazard_resist != 0:
+                        effects.append(f"Hazard {item_def.hazard_resist:+.0%}")
+                    
+                    effect_text = ", ".join(effects) if effects else f"Slot: {item_def.slot}"
+                    effect_color = (100, 180, 220)
+                else:
+                    effect_text = f"Creates: {output_item}"
+                    effect_color = (140, 140, 150)
+            else:
+                # Resource output
+                outputs = recipe.get("output", {})
+                output_parts = [f"{amt} {res}" for res, amt in outputs.items()]
+                effect_text = "→ " + ", ".join(output_parts) if output_parts else ""
+                effect_color = (180, 180, 100)
+            
+            effect_surf = self.font_small.render(effect_text, True, effect_color)
+            surface.blit(effect_surf, (rect.x + 8, rect.y + 42))
+        
+        # Status at bottom
+        progress = self.workstation_data.get("progress", 0)
+        if progress > 0 and selected_id:
+            # Find work time for selected recipe
+            for recipe in self.recipes:
+                if recipe["id"] == selected_id:
+                    work_time = recipe.get("work_time", 100)
+                    pct = min(100, int(progress / work_time * 100))
+                    status = f"Crafting: {pct}%"
+                    break
+            else:
+                status = "Idle"
+        else:
+            status = "Click recipe to select"
+        
+        status_y = self.panel_rect.bottom - 25
+        status_surf = self.font_small.render(status, True, (140, 160, 180))
+        surface.blit(status_surf, (self.panel_rect.x + 10, status_y))
+
+        # Orders controls (Craft 1 / Auto / Target)
+        # Reset button rects each frame
+        self.button_craft_one_rect = None
+        self.button_auto_rect = None
+        self.target_minus_rect = None
+        self.target_plus_rect = None
+
+        # Only show order controls if there is at least one recipe
+        if self.recipes:
+            ws = self.workstation_data
+            auto_mode = ws.get("auto_mode", "infinite")
+            target_count = ws.get("target_count", 0)
+            craft_queue = ws.get("craft_queue", 0)
+
+            orders_y = self.panel_rect.bottom - 70
+            label_surf = self.font_small.render("Orders:", True, (150, 160, 190))
+            surface.blit(label_surf, (self.panel_rect.x + 10, orders_y))
+
+            btn_w = 70
+            btn_h = 20
+            y_btn = orders_y + 18
+
+            # Craft 1 button
+            craft_rect = pygame.Rect(self.panel_rect.x + 10, y_btn, btn_w, btn_h)
+            self.button_craft_one_rect = craft_rect
+            pygame.draw.rect(surface, (60, 70, 80), craft_rect)
+            pygame.draw.rect(surface, (100, 110, 130), craft_rect, 1)
+            craft_label = self.font_small.render("Craft 1", True, (220, 225, 230))
+            surface.blit(craft_label, (craft_rect.x + 6, craft_rect.y + 2))
+
+            # Show queued count if any
+            if craft_queue > 0:
+                queue_text = f"x{craft_queue}"
+                queue_surf = self.font_small.render(queue_text, True, (170, 190, 210))
+                surface.blit(queue_surf, (craft_rect.right + 4, craft_rect.y + 2))
+
+            # Auto-mode button
+            auto_rect = pygame.Rect(craft_rect.right + 10, y_btn, btn_w, btn_h)
+            self.button_auto_rect = auto_rect
+            auto_active = (auto_mode == "infinite")
+            auto_bg = (70, 90, 70) if auto_active else (60, 70, 80)
+            auto_border = (120, 180, 120) if auto_active else (100, 110, 130)
+            pygame.draw.rect(surface, auto_bg, auto_rect)
+            pygame.draw.rect(surface, auto_border, auto_rect, 1)
+            auto_text = "∞ Auto" if auto_mode == "infinite" else "Target"
+            auto_label = self.font_small.render(auto_text, True, (220, 230, 220))
+            surface.blit(auto_label, (auto_rect.x + 6, auto_rect.y + 2))
+
+            # Target controls
+            target_label = self.font_small.render("Target:", True, (150, 160, 190))
+            target_label_x = auto_rect.right + 10
+            surface.blit(target_label, (target_label_x, orders_y + 2))
+
+            minus_rect = pygame.Rect(target_label_x, y_btn, 18, btn_h)
+            plus_rect = pygame.Rect(target_label_x + 60, y_btn, 18, btn_h)
+            self.target_minus_rect = minus_rect
+            self.target_plus_rect = plus_rect
+
+            # Minus button
+            pygame.draw.rect(surface, (60, 70, 80), minus_rect)
+            pygame.draw.rect(surface, (100, 110, 130), minus_rect, 1)
+            minus_label = self.font_small.render("-", True, (220, 225, 230))
+            surface.blit(minus_label, (minus_rect.x + 5, minus_rect.y + 2))
+
+            # Plus button
+            pygame.draw.rect(surface, (60, 70, 80), plus_rect)
+            pygame.draw.rect(surface, (100, 110, 130), plus_rect, 1)
+            plus_label = self.font_small.render("+", True, (220, 225, 230))
+            surface.blit(plus_label, (plus_rect.x + 4, plus_rect.y + 2))
+
+            # Target value between buttons
+            value_text = str(target_count)
+            value_surf = self.font_small.render(value_text, True, (200, 210, 230))
+            value_x = minus_rect.right + 8
+            value_y = y_btn + 2
+            surface.blit(value_surf, (value_x, value_y))
+
+
+# Global workstation panel
+_workstation_panel: Optional[WorkstationPanel] = None
+
+
+def get_workstation_panel() -> WorkstationPanel:
+    """Get or create the global workstation panel."""
+    global _workstation_panel
+    if _workstation_panel is None:
+        _workstation_panel = WorkstationPanel()
+    return _workstation_panel
+
+
+# ============================================================================
 # Colonist Job Tags Panel
 # ============================================================================
 
@@ -786,7 +1179,7 @@ class ColonistJobTagsPanel:
     def __init__(self):
         self.visible = False
         self.colonist = None
-        self.panel_rect = pygame.Rect(0, 0, 300, 550)  # Larger to fit environment data + affinities
+        self.panel_rect = pygame.Rect(0, 0, 280, 700)  # Compact panel with scrollable content
         self.toggle_rects: Dict[str, pygame.Rect] = {}
         self.font: Optional[pygame.font.Font] = None
         self.show_env_data = True  # Toggle for environment data display
@@ -803,13 +1196,14 @@ class ColonistJobTagsPanel:
         self.panel_rect.x = min(screen_x, SCREEN_W - self.panel_rect.width - 10)
         self.panel_rect.y = min(screen_y, SCREEN_H - self.panel_rect.height - 60)
         
-        # Build toggle rects
-        padding = 8
-        item_height = 32
+        # Build toggle rects (offset by compact identity section)
+        padding = 6
+        item_height = 26
+        identity_offset = 100  # Compact identity section
         for i, (tag_id, _, _) in enumerate(self.JOB_TAGS):
             rect = pygame.Rect(
                 self.panel_rect.x + padding,
-                self.panel_rect.y + 30 + i * item_height,
+                self.panel_rect.y + identity_offset + 20 + i * item_height,
                 self.panel_rect.width - padding * 2,
                 item_height - 4
             )
@@ -858,12 +1252,70 @@ class ColonistJobTagsPanel:
         pygame.draw.rect(surface, COLOR_UI_PANEL, self.panel_rect, border_radius=8)
         pygame.draw.rect(surface, (100, 100, 110), self.panel_rect, 1, border_radius=8)
         
-        # Title
-        title_text = self.font.render("Job Tags", True, (220, 220, 230))
-        title_rect = title_text.get_rect(centerx=self.panel_rect.centerx, y=self.panel_rect.y + 8)
-        surface.blit(title_text, title_rect)
+        # --- Compact Identity Section (top of panel) ---
+        identity_y = self.panel_rect.y + 6
+        font_tiny = pygame.font.Font(None, 15)
         
-        # Draw toggles
+        # Colonist name (highlighted)
+        name = getattr(self.colonist, 'name', 'Unknown')
+        name_font = pygame.font.Font(None, 20)
+        name_text = name_font.render(name, True, (255, 220, 150))
+        surface.blit(name_text, (self.panel_rect.x + 8, identity_y))
+        identity_y += 18
+        
+        # Bio (compact, max 2 lines)
+        bio = getattr(self.colonist, 'bio', '')
+        if bio:
+            bio_color = (160, 160, 180)
+            max_width = self.panel_rect.width - 16
+            words = bio.split()
+            lines = []
+            current_line = ""
+            for word in words:
+                test_line = current_line + " " + word if current_line else word
+                if font_tiny.size(test_line)[0] <= max_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+            if current_line:
+                lines.append(current_line)
+            
+            for line in lines[:2]:  # Max 2 lines
+                bio_text = font_tiny.render(line, True, bio_color)
+                surface.blit(bio_text, (self.panel_rect.x + 8, identity_y))
+                identity_y += 12
+        
+        # Compact likes/dislikes on same line if short
+        flavor_likes = getattr(self.colonist, 'flavor_likes', [])
+        flavor_dislikes = getattr(self.colonist, 'flavor_dislikes', [])
+        
+        if flavor_likes:
+            # Just show first like
+            like_text = font_tiny.render(f"♥ {flavor_likes[0][:25]}", True, (120, 170, 120))
+            surface.blit(like_text, (self.panel_rect.x + 8, identity_y))
+            identity_y += 11
+        
+        if flavor_dislikes:
+            # Just show first dislike
+            dislike_text = font_tiny.render(f"✗ {flavor_dislikes[0][:25]}", True, (170, 120, 120))
+            surface.blit(dislike_text, (self.panel_rect.x + 8, identity_y))
+            identity_y += 11
+        
+        identity_y += 2
+        
+        # Separator line
+        pygame.draw.line(surface, (70, 70, 80), 
+                        (self.panel_rect.x + 8, identity_y),
+                        (self.panel_rect.x + self.panel_rect.width - 8, identity_y), 1)
+        identity_y += 4
+        
+        # --- Job Tags Section ---
+        title_text = self.font.render("Job Tags", True, (200, 200, 210))
+        surface.blit(title_text, (self.panel_rect.x + 8, identity_y))
+        
+        # Draw toggles (offset by identity section height)
         for tag_id, tag_name, tag_desc in self.JOB_TAGS:
             rect = self.toggle_rects[tag_id]
             enabled = self.colonist.job_tags.get(tag_id, True)
@@ -901,71 +1353,1037 @@ class ColonistJobTagsPanel:
         
         # Draw environment data section if enabled
         if self.show_env_data and hasattr(self.colonist, 'recent_context') and len(self.colonist.recent_context) > 0:
-            env_y = self.panel_rect.y + 190  # Start below job tags
+            env_y = self.panel_rect.y + 240  # Start below compact identity + job tags
             
             # Section title
-            env_title = self.font.render("Environment Data", True, (200, 200, 255))
-            surface.blit(env_title, (self.panel_rect.x + 10, env_y))
-            env_y += 25
+            font_tiny = pygame.font.Font(None, 14)
+            env_title = font_tiny.render("Environment", True, (180, 180, 220))
+            surface.blit(env_title, (self.panel_rect.x + 8, env_y))
+            env_y += 14
             
-            # Get most recent sample
+            # Get most recent sample - compact display
             recent = self.colonist.recent_context[-1]
-            font_tiny = pygame.font.Font(None, 16)
             
-            # Display key environment parameters
-            env_params = [
-                f"Tick: {recent.get('tick', 0)}",
-                f"Pos: ({recent.get('x', 0)}, {recent.get('y', 0)}, {recent.get('z', 0)})",
-                f"Interference: {recent.get('interference', 0.0):.2f}",
-                f"Pressure: {recent.get('pressure', 0.0):.2f}",
-                f"Echo: {recent.get('echo', 0.0):.2f}",
-                f"Integrity: {recent.get('integrity', 1.0):.2f}",
-                f"Outside: {recent.get('is_outside', True)}",
-                f"Room: {recent.get('room_id', 'None')}",
-                f"Exits: {recent.get('exit_count', 0)}",
-                f"Nearby: {recent.get('nearby_colonists', 0)}",
+            # Two columns for compact display
+            col1 = [
+                f"Int:{recent.get('interference', 0.0):.1f}",
+                f"Prs:{recent.get('pressure', 0.0):.1f}",
+                f"Ech:{recent.get('echo', 0.0):.1f}",
+            ]
+            col2 = [
+                f"Itg:{recent.get('integrity', 1.0):.1f}",
+                f"Out:{'Y' if recent.get('is_outside', True) else 'N'}",
+                f"Crw:{recent.get('nearby_colonists', 0)}",
             ]
             
-            for param in env_params:
-                param_text = font_tiny.render(param, True, (180, 180, 190))
-                surface.blit(param_text, (self.panel_rect.x + 15, env_y))
-                env_y += 18
+            for i, (c1, c2) in enumerate(zip(col1, col2)):
+                t1 = font_tiny.render(c1, True, (160, 160, 170))
+                t2 = font_tiny.render(c2, True, (160, 160, 170))
+                surface.blit(t1, (self.panel_rect.x + 8, env_y))
+                surface.blit(t2, (self.panel_rect.x + 80, env_y))
+                env_y += 11
             
-            # Show sample count
-            sample_count_text = font_tiny.render(f"Samples: {len(self.colonist.recent_context)}/10", True, (150, 150, 160))
-            surface.blit(sample_count_text, (self.panel_rect.x + 15, env_y))
-            env_y += 25
+            env_y += 4
             
-            # Draw affinity section
-            affinity_title = self.font.render("Affinities", True, (255, 200, 100))
-            surface.blit(affinity_title, (self.panel_rect.x + 10, env_y))
-            env_y += 20
+            # Affinities - compact
+            aff_title = font_tiny.render("Affinities", True, (220, 180, 100))
+            surface.blit(aff_title, (self.panel_rect.x + 8, env_y))
+            env_y += 12
             
-            # Display affinity values with color coding
-            # Positive = green, Negative = red, Neutral = gray
             affinities = [
-                ("Interference", self.colonist.affinity_interference),
-                ("Echo", self.colonist.affinity_echo),
-                ("Pressure", self.colonist.affinity_pressure),
-                ("Integrity", self.colonist.affinity_integrity),
-                ("Outside", self.colonist.affinity_outside),
-                ("Crowding", self.colonist.affinity_crowding),
+                ("Int", self.colonist.affinity_interference),
+                ("Ech", self.colonist.affinity_echo),
+                ("Prs", self.colonist.affinity_pressure),
+                ("Itg", self.colonist.affinity_integrity),
+                ("Out", self.colonist.affinity_outside),
+                ("Crw", self.colonist.affinity_crowding),
             ]
             
-            for name, value in affinities:
-                # Color based on value
-                if value > 0.1:
-                    color = (100, 255, 100)  # Green for positive
-                elif value < -0.1:
-                    color = (255, 100, 100)  # Red for negative
+            # Display in two rows of 3
+            for row in range(2):
+                x_off = 8
+                for col in range(3):
+                    idx = row * 3 + col
+                    if idx < len(affinities):
+                        name, value = affinities[idx]
+                        color = (100, 220, 100) if value > 0.1 else (220, 100, 100) if value < -0.1 else (150, 150, 150)
+                        sign = "+" if value >= 0 else ""
+                        aff_text = font_tiny.render(f"{name}:{sign}{value:.1f}", True, color)
+                        surface.blit(aff_text, (self.panel_rect.x + x_off, env_y))
+                        x_off += 55
+                env_y += 11
+            
+            env_y += 4
+            
+            # Preferences - compact
+            pref_title = font_tiny.render("Preferences", True, (100, 180, 220))
+            surface.blit(pref_title, (self.panel_rect.x + 8, env_y))
+            env_y += 12
+            
+            # Get top preferences - compact inline
+            if hasattr(self.colonist, 'get_top_preferences'):
+                top_positive, top_negative = self.colonist.get_top_preferences()
+                prefs_text = ""
+                if top_positive:
+                    prefs_text += " ".join([f"+{p[0].replace('likes_','')[:3]}" for p in top_positive[:2]])
+                if top_negative:
+                    prefs_text += " " + " ".join([f"-{p[0].replace('likes_','')[:3]}" for p in top_negative[:1]])
+                if prefs_text:
+                    pt = font_tiny.render(prefs_text.strip(), True, (150, 180, 150))
+                    surface.blit(pt, (self.panel_rect.x + 8, env_y))
                 else:
-                    color = (180, 180, 180)  # Gray for neutral
+                    pt = font_tiny.render("(developing)", True, (120, 120, 120))
+                    surface.blit(pt, (self.panel_rect.x + 8, env_y))
+                env_y += 12
+            
+            env_y += 4
+            
+            # Emotional state - compact
+            emo_title = font_tiny.render("Mood", True, (220, 160, 200))
+            surface.blit(emo_title, (self.panel_rect.x + 8, env_y))
+            env_y += 12
+            
+            # Comfort/Stress on one line
+            comfort_val = getattr(self.colonist, 'comfort', 0.0)
+            stress_val = getattr(self.colonist, 'stress', 0.0)
+            c_color = (100, 200, 100) if comfort_val > 1 else (200, 100, 100) if comfort_val < -1 else (150, 150, 150)
+            s_color = (200, 100, 100) if stress_val > 1 else (100, 200, 100) if stress_val < -1 else (150, 150, 150)
+            
+            cs_text = font_tiny.render(f"C:{comfort_val:+.1f} S:{stress_val:+.1f}", True, (160, 160, 170))
+            surface.blit(cs_text, (self.panel_rect.x + 8, env_y))
+            
+            # Mood state
+            mood_state = getattr(self.colonist, 'mood_state', 'Focused')
+            from colonist import Colonist
+            mood_color = Colonist.get_mood_color(mood_state)
+            mood_text = font_tiny.render(mood_state, True, mood_color)
+            surface.blit(mood_text, (self.panel_rect.x + 90, env_y))
+            env_y += 11
+            
+            # Speed mod
+            if hasattr(self.colonist, 'get_mood_speed_display'):
+                speed_mod = self.colonist.get_mood_speed_display()
+                sp_color = (100, 200, 100) if speed_mod.startswith("+") else (200, 100, 100) if speed_mod.startswith("-") else (150, 150, 150)
+                sp_text = font_tiny.render(f"Speed:{speed_mod}", True, sp_color)
+                surface.blit(sp_text, (self.panel_rect.x + 8, env_y))
+                env_y += 12
+            
+            env_y += 4
+            
+            # Job attraction - compact two-column
+            job_title = font_tiny.render("Jobs", True, (220, 200, 130))
+            surface.blit(job_title, (self.panel_rect.x + 8, env_y))
+            env_y += 12
+            
+            if hasattr(self.colonist, 'get_job_desirability_summary'):
+                desirability = self.colonist.get_job_desirability_summary()
+                sorted_jobs = sorted(desirability.items(), key=lambda x: x[1], reverse=True)
                 
-                # Format with sign
-                sign = "+" if value >= 0 else ""
-                affinity_text = font_tiny.render(f"{name}: {sign}{value:.2f}", True, color)
-                surface.blit(affinity_text, (self.panel_rect.x + 15, env_y))
-                env_y += 16
+                # Two columns
+                for row in range(3):
+                    x_off = 8
+                    for col in range(2):
+                        idx = row * 2 + col
+                        if idx < len(sorted_jobs):
+                            job_cat, score = sorted_jobs[idx]
+                            jc = (100, 200, 100) if score > 1.1 else (200, 100, 100) if score < 0.9 else (150, 150, 150)
+                            jt = font_tiny.render(f"{job_cat[:4]}:{score:.1f}", True, jc)
+                            surface.blit(jt, (self.panel_rect.x + x_off, env_y))
+                            x_off += 70
+                    env_y += 10
+
+
+# ============================================================================
+# Colonist Management Panel (Full-screen detailed view)
+# ============================================================================
+
+class ColonistManagementPanel:
+    """Large UI panel showing detailed colonist information with equipment slots and job tags."""
+    
+    # Job tags for toggling work assignments
+    JOB_TAGS = [
+        ("can_build", "Build", "Construction"),
+        ("can_haul", "Haul", "Transport"),
+        ("can_craft", "Craft", "Workbenches"),
+        ("can_cook", "Cook", "Meals"),
+        ("can_scavenge", "Scavenge", "Harvest"),
+    ]
+    
+    # Tab definitions
+    TABS = ["Overview", "Stats"]
+    
+    def __init__(self):
+        self.visible = False
+        self.colonists: List = []  # Reference to all colonists
+        self.current_index = 0  # Currently viewed colonist index
+        self.current_tab = 0  # 0 = Overview, 1 = Stats
+        self.font: Optional[pygame.font.Font] = None
+        self.font_large: Optional[pygame.font.Font] = None
+        self.font_small: Optional[pygame.font.Font] = None
+        
+        # Panel dimensions - centered on screen
+        self.panel_width = 420
+        self.panel_height = 620  # Taller for stats tab
+        self.panel_rect = pygame.Rect(
+            (SCREEN_W - self.panel_width) // 2,
+            (SCREEN_H - self.panel_height) // 2 - 20,
+            self.panel_width,
+            self.panel_height
+        )
+        
+        # Navigation button rects
+        self.prev_btn_rect = pygame.Rect(0, 0, 60, 28)
+        self.next_btn_rect = pygame.Rect(0, 0, 60, 28)
+        self.close_btn_rect = pygame.Rect(0, 0, 24, 24)
+        
+        # Tab button rects (built dynamically)
+        self.tab_rects: List[pygame.Rect] = []
+        
+        # Job tag toggle rects (built dynamically)
+        self.job_tag_rects: Dict[str, pygame.Rect] = {}
+        
+        # Equipment slot rects for tooltip (built during draw)
+        self.equipment_slot_rects: Dict[str, tuple[pygame.Rect, dict]] = {}
+        
+        # Tooltip state
+        self.tooltip_item: Optional[dict] = None
+        self.tooltip_pos: tuple[int, int] = (0, 0)
+    
+    def init_font(self) -> None:
+        self.font = pygame.font.Font(None, 20)
+        self.font_large = pygame.font.Font(None, 28)
+        self.font_small = pygame.font.Font(None, 16)
+    
+    def open(self, colonists: List, start_index: int = 0) -> None:
+        """Open the panel with a list of colonists."""
+        self.colonists = colonists
+        self.current_index = max(0, min(start_index, len(colonists) - 1))
+        self.visible = True
+        self._update_button_positions()
+    
+    def open_for_colonist(self, colonists: List, colonist) -> None:
+        """Open the panel focused on a specific colonist."""
+        self.colonists = colonists
+        try:
+            self.current_index = colonists.index(colonist)
+        except ValueError:
+            self.current_index = 0
+        self.visible = True
+        self._update_button_positions()
+    
+    def close(self) -> None:
+        self.visible = False
+        self.tooltip_item = None
+    
+    def toggle(self, colonists: List) -> None:
+        """Toggle panel visibility."""
+        if self.visible:
+            self.close()
+        else:
+            self.open(colonists)
+    
+    def update(self, mouse_pos: tuple[int, int]) -> None:
+        """Update tooltip based on mouse position."""
+        if not self.visible or self.current_tab != 0:  # Only Overview tab has equipment
+            self.tooltip_item = None
+            return
+        
+        # Check if mouse is over any equipment slot
+        self.tooltip_item = None
+        for slot_key, (rect, item) in self.equipment_slot_rects.items():
+            if rect.collidepoint(mouse_pos) and item:
+                self.tooltip_item = item
+                self.tooltip_pos = (mouse_pos[0] + 15, mouse_pos[1] + 10)
+                break
+    
+    def _update_button_positions(self) -> None:
+        """Update button positions based on panel rect."""
+        # Prev/Next at bottom
+        self.prev_btn_rect.x = self.panel_rect.x + 20
+        self.prev_btn_rect.y = self.panel_rect.bottom - 40
+        self.next_btn_rect.x = self.panel_rect.right - 80
+        self.next_btn_rect.y = self.panel_rect.bottom - 40
+        # Close button top-right
+        self.close_btn_rect.x = self.panel_rect.right - 32
+        self.close_btn_rect.y = self.panel_rect.y + 8
+    
+    def handle_click(self, mouse_pos: tuple[int, int]) -> bool:
+        """Handle mouse click. Returns True if consumed."""
+        if not self.visible:
+            return False
+        
+        # Check close button
+        if self.close_btn_rect.collidepoint(mouse_pos):
+            self.close()
+            return True
+        
+        # Check tab buttons
+        for i, rect in enumerate(self.tab_rects):
+            if rect.collidepoint(mouse_pos):
+                self.current_tab = i
+                return True
+        
+        # Check prev button
+        if self.prev_btn_rect.collidepoint(mouse_pos):
+            self._prev_colonist()
+            return True
+        
+        # Check next button
+        if self.next_btn_rect.collidepoint(mouse_pos):
+            self._next_colonist()
+            return True
+        
+        # Check job tag toggles (only on Overview tab)
+        if self.current_tab == 0:
+            colonist = self.current_colonist
+            if colonist:
+                for tag_id, rect in self.job_tag_rects.items():
+                    if rect.collidepoint(mouse_pos):
+                        # Toggle the job tag
+                        current = colonist.job_tags.get(tag_id, True)
+                        colonist.job_tags[tag_id] = not current
+                        return True
+        
+        # Consume click if inside panel
+        if self.panel_rect.collidepoint(mouse_pos):
+            return True
+        
+        return False
+    
+    def _prev_colonist(self) -> None:
+        if self.colonists:
+            self.current_index = (self.current_index - 1) % len(self.colonists)
+    
+    def _next_colonist(self) -> None:
+        if self.colonists:
+            self.current_index = (self.current_index + 1) % len(self.colonists)
+    
+    @property
+    def current_colonist(self):
+        """Get the currently selected colonist."""
+        if self.colonists and 0 <= self.current_index < len(self.colonists):
+            return self.colonists[self.current_index]
+        return None
+    
+    def draw(self, surface: pygame.Surface) -> None:
+        """Draw the management panel."""
+        if not self.visible or not self.colonists:
+            return
+        
+        if self.font is None:
+            self.init_font()
+        
+        colonist = self.current_colonist
+        if colonist is None:
+            return
+        
+        # Panel background with shadow
+        shadow_rect = self.panel_rect.copy()
+        shadow_rect.x += 4
+        shadow_rect.y += 4
+        pygame.draw.rect(surface, (15, 15, 20), shadow_rect, border_radius=12)
+        
+        # Main panel
+        pygame.draw.rect(surface, (35, 38, 45), self.panel_rect, border_radius=12)
+        pygame.draw.rect(surface, (80, 85, 95), self.panel_rect, 2, border_radius=12)
+        
+        x = self.panel_rect.x
+        y = self.panel_rect.y
+        w = self.panel_rect.width
+        
+        # === Header Section ===
+        # Colonist name (large)
+        name = getattr(colonist, 'name', f'Colonist {self.current_index + 1}')
+        name_surf = self.font_large.render(name, True, (255, 230, 180))
+        surface.blit(name_surf, (x + 20, y + 15))
+        
+        # Colonist counter
+        counter_text = f"{self.current_index + 1} / {len(self.colonists)}"
+        counter_surf = self.font_small.render(counter_text, True, (140, 140, 150))
+        surface.blit(counter_surf, (x + 20, y + 42))
+        
+        # Close button
+        pygame.draw.rect(surface, (80, 50, 50), self.close_btn_rect, border_radius=4)
+        pygame.draw.rect(surface, (120, 70, 70), self.close_btn_rect, 1, border_radius=4)
+        close_text = self.font.render("X", True, (200, 150, 150))
+        close_rect = close_text.get_rect(center=self.close_btn_rect.center)
+        surface.blit(close_text, close_rect)
+        
+        # Header separator
+        pygame.draw.line(surface, (60, 65, 75), (x + 15, y + 58), (x + w - 15, y + 58), 1)
+        
+        # === Tab Buttons ===
+        tab_y = y + 62
+        tab_width = 80
+        tab_height = 22
+        self.tab_rects = []
+        
+        for i, tab_name in enumerate(self.TABS):
+            tab_x = x + 20 + i * (tab_width + 4)
+            tab_rect = pygame.Rect(tab_x, tab_y, tab_width, tab_height)
+            self.tab_rects.append(tab_rect)
+            
+            is_active = (i == self.current_tab)
+            if is_active:
+                bg_color = (60, 65, 80)
+                border_color = (100, 110, 140)
+                text_color = (220, 220, 240)
+            else:
+                bg_color = (40, 42, 50)
+                border_color = (60, 65, 75)
+                text_color = (140, 140, 150)
+            
+            pygame.draw.rect(surface, bg_color, tab_rect, border_radius=4)
+            pygame.draw.rect(surface, border_color, tab_rect, 1, border_radius=4)
+            
+            tab_surf = self.font_small.render(tab_name, True, text_color)
+            tab_text_rect = tab_surf.get_rect(center=tab_rect.center)
+            surface.blit(tab_surf, tab_text_rect)
+        
+        content_y = y + 90
+        col1_x = x + 20
+        col2_x = x + w // 2 + 10
+        
+        # Draw tab content
+        if self.current_tab == 0:
+            self._draw_overview_tab(surface, colonist, x, content_y, w, col1_x, col2_x)
+        elif self.current_tab == 1:
+            self._draw_stats_tab(surface, colonist, x, content_y, w, col1_x)
+        
+        # Draw navigation buttons (shared by all tabs)
+        self._draw_navigation_buttons(surface)
+        
+        # Draw tooltip last (on top of everything)
+        self._draw_equipment_tooltip(surface)
+    
+    def _draw_overview_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int, col2_x: int) -> None:
+        """Draw the Overview tab content."""
+        # Save initial content_y for right column
+        initial_content_y = content_y
+        
+        # === Left Column: Status & Stats ===
+        # Current Task
+        section_color = (180, 200, 220)
+        value_color = (220, 220, 230)
+        muted_color = (140, 140, 150)
+        
+        self._draw_section_header(surface, "Current Task", col1_x, content_y, section_color)
+        content_y += 18
+        
+        state = colonist.state
+        job_desc = state
+        if colonist.current_job:
+            job_type = colonist.current_job.type
+            job_desc = f"{state} ({job_type})"
+        task_surf = self.font_small.render(job_desc[:28], True, value_color)
+        surface.blit(task_surf, (col1_x + 8, content_y))
+        content_y += 22
+        
+        # Hunger
+        self._draw_section_header(surface, "Hunger", col1_x, content_y, section_color)
+        content_y += 18
+        hunger_val = colonist.hunger
+        hunger_color = (100, 200, 100) if hunger_val < 50 else (200, 200, 100) if hunger_val < 70 else (200, 100, 100)
+        self._draw_stat_bar(surface, col1_x + 8, content_y, 160, hunger_val, 100, hunger_color)
+        hunger_text = self.font_small.render(f"{hunger_val:.0f} / 100", True, muted_color)
+        surface.blit(hunger_text, (col1_x + 175, content_y))
+        content_y += 22
+        
+        # Comfort
+        self._draw_section_header(surface, "Comfort", col1_x, content_y, section_color)
+        content_y += 18
+        comfort_val = getattr(colonist, 'comfort', 0.0)
+        comfort_color = (100, 200, 150) if comfort_val > 0 else (200, 150, 100) if comfort_val < 0 else (150, 150, 150)
+        comfort_display = (comfort_val + 10) / 20 * 100  # Map -10..10 to 0..100
+        self._draw_stat_bar(surface, col1_x + 8, content_y, 160, comfort_display, 100, comfort_color)
+        comfort_text = self.font_small.render(f"{comfort_val:+.1f}", True, muted_color)
+        surface.blit(comfort_text, (col1_x + 175, content_y))
+        content_y += 22
+        
+        # Stress
+        self._draw_section_header(surface, "Stress", col1_x, content_y, section_color)
+        content_y += 18
+        stress_val = getattr(colonist, 'stress', 0.0)
+        stress_color = (200, 100, 100) if stress_val > 2 else (200, 200, 100) if stress_val > 0 else (100, 150, 200)
+        stress_display = (stress_val + 10) / 20 * 100  # Map -10..10 to 0..100
+        self._draw_stat_bar(surface, col1_x + 8, content_y, 160, stress_display, 100, stress_color)
+        stress_text = self.font_small.render(f"{stress_val:+.1f}", True, muted_color)
+        surface.blit(stress_text, (col1_x + 175, content_y))
+        content_y += 28
+        
+        # === Preferences Section ===
+        self._draw_section_header(surface, "Preferences", col1_x, content_y, (150, 200, 255))
+        content_y += 18
+        
+        preferences = getattr(colonist, 'preferences', {})
+        pref_items = [
+            ("Outside", preferences.get('likes_outside', 0.0)),
+            ("Integrity", preferences.get('likes_integrity', 0.0)),
+            ("Interference", preferences.get('likes_interference', 0.0)),
+            ("Echo", preferences.get('likes_echo', 0.0)),
+            ("Pressure", preferences.get('likes_pressure', 0.0)),
+            ("Crowding", preferences.get('likes_crowding', 0.0)),
+        ]
+        
+        for pref_name, pref_val in pref_items:
+            pref_color = (100, 200, 100) if pref_val > 0.5 else (200, 100, 100) if pref_val < -0.5 else (150, 150, 150)
+            pref_text = self.font_small.render(f"{pref_name}: {pref_val:+.1f}", True, pref_color)
+            surface.blit(pref_text, (col1_x + 8, content_y))
+            content_y += 14
+        
+        content_y += 10
+        
+        # === Personality Drift Section ===
+        self._draw_section_header(surface, "Personality Drift", col1_x, content_y, (200, 180, 255))
+        content_y += 18
+        
+        total_drift = getattr(colonist, 'last_total_drift', 0.0)
+        drift_strongest = getattr(colonist, 'last_drift_strongest', ('none', 0.0))
+        
+        drift_text = self.font_small.render(f"Rate: {total_drift:.6f}", True, muted_color)
+        surface.blit(drift_text, (col1_x + 8, content_y))
+        content_y += 14
+        
+        drift_param, drift_val = drift_strongest
+        if abs(drift_val) > 0.000001:
+            drift_dir = "+" if drift_val > 0 else ""
+            strongest_text = f"Strongest: {drift_param} ({drift_dir}{drift_val:.5f})"
+        else:
+            strongest_text = "Strongest: (none)"
+        strongest_surf = self.font_small.render(strongest_text, True, muted_color)
+        surface.blit(strongest_surf, (col1_x + 8, content_y))
+        
+        # === Right Column: Equipment Slots ===
+        equip_y = initial_content_y
+        
+        self._draw_section_header(surface, "Equipment", col2_x, equip_y, (255, 200, 150))
+        equip_y += 18
+        
+        # Get equipment data from colonist
+        equipment = getattr(colonist, 'equipment', {})
+        
+        # Equipment slots in 2 columns, 3 rows
+        slot_width = 82
+        slot_height = 32
+        slot_gap = 4
+        
+        equipment_layout = [
+            ("Head", "head"),
+            ("Body", "body"),
+            ("Hands", "hands"),
+            ("Feet", "feet"),
+            ("Implant", "implant"),
+            ("Charm", "charm"),
+        ]
+        
+        # Clear equipment slot rects for tooltip tracking
+        self.equipment_slot_rects.clear()
+        
+        for i, (display_name, slot_key) in enumerate(equipment_layout):
+            row = i // 2
+            col = i % 2
+            slot_x = col2_x + col * (slot_width + slot_gap)
+            slot_y = equip_y + row * (slot_height + slot_gap)
+            item = equipment.get(slot_key)
+            self._draw_equipment_slot(surface, slot_x, slot_y, slot_width, slot_height, display_name, item)
+            
+            # Store rect for tooltip
+            self.equipment_slot_rects[slot_key] = (
+                pygame.Rect(slot_x, slot_y, slot_width, slot_height),
+                item
+            )
+        
+        equip_y += 3 * (slot_height + slot_gap) + 8
+        
+        # === Inventory Section (shows carried items) ===
+        self._draw_section_header(surface, "Carrying", col2_x, equip_y, (200, 180, 255))
+        equip_y += 18
+        
+        # Get carried items from colonist (resource type -> amount)
+        carried_items = getattr(colonist, 'carried_items', {})
+        
+        # Convert to list of items for display (up to 6 slots)
+        carried_list = []
+        for res_type, amount in carried_items.items():
+            if amount > 0:
+                carried_list.append({"type": res_type, "amount": amount})
+        
+        # 6 inventory slots in a row
+        inv_slot_size = 26
+        inv_gap = 4
+        
+        for i in range(6):
+            slot_x = col2_x + i * (inv_slot_size + inv_gap)
+            item = carried_list[i] if i < len(carried_list) else None
+            self._draw_inventory_slot(surface, slot_x, equip_y, inv_slot_size, item)
+        
+        equip_y += inv_slot_size + 12
+        
+        # Mood display
+        self._draw_section_header(surface, "Mood", col2_x, equip_y, (255, 180, 220))
+        equip_y += 18
+        
+        mood_state = getattr(colonist, 'mood_state', 'Focused')
+        mood_score = getattr(colonist, 'mood_score', 0.0)
+        from colonist import Colonist
+        mood_color = Colonist.get_mood_color(mood_state)
+        
+        mood_surf = self.font.render(mood_state, True, mood_color)
+        surface.blit(mood_surf, (col2_x + 8, equip_y))
+        
+        score_surf = self.font_small.render(f"({mood_score:+.1f})", True, muted_color)
+        surface.blit(score_surf, (col2_x + 8 + mood_surf.get_width() + 8, equip_y + 2))
+        equip_y += 24
+        
+        # === Job Tags Section ===
+        self._draw_section_header(surface, "Work Assignments", col2_x, equip_y, (180, 220, 180))
+        equip_y += 20
+        
+        # Draw job tag toggles
+        tag_width = 80
+        tag_height = 22
+        tags_per_row = 2
+        
+        for i, (tag_id, tag_name, tag_desc) in enumerate(self.JOB_TAGS):
+            row = i // tags_per_row
+            col = i % tags_per_row
+            
+            tag_x = col2_x + col * (tag_width + 6)
+            tag_y = equip_y + row * (tag_height + 4)
+            
+            rect = pygame.Rect(tag_x, tag_y, tag_width, tag_height)
+            self.job_tag_rects[tag_id] = rect
+            
+            enabled = colonist.job_tags.get(tag_id, True)
+            
+            # Toggle background
+            if enabled:
+                bg_color = (50, 90, 60)
+                border_color = (80, 140, 90)
+                text_color = (180, 230, 180)
+            else:
+                bg_color = (70, 50, 50)
+                border_color = (110, 70, 70)
+                text_color = (160, 130, 130)
+            
+            pygame.draw.rect(surface, bg_color, rect, border_radius=4)
+            pygame.draw.rect(surface, border_color, rect, 1, border_radius=4)
+            
+            # Tag label centered
+            tag_surf = self.font_small.render(tag_name, True, text_color)
+            tag_rect = tag_surf.get_rect(center=rect.center)
+            surface.blit(tag_surf, tag_rect)
+    
+    def _draw_stats_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Stats tab - D&D style wall of text with all stats."""
+        muted_color = (140, 140, 150)
+        value_color = (220, 220, 230)
+        bonus_color = (100, 200, 100)
+        penalty_color = (200, 100, 100)
+        header_color = (180, 200, 220)
+        
+        # Get equipment stats
+        equip_stats = colonist.get_equipment_stats()
+        
+        # === Base Stats Section ===
+        self._draw_section_header(surface, "=== BASE STATS ===", col1_x, content_y, header_color)
+        content_y += 20
+        
+        # Movement
+        base_move = colonist.move_speed  # 8 = base ticks between moves
+        equip_mod = colonist.get_equipment_speed_modifier()
+        mood_mod = colonist.get_mood_speed_modifier()
+        effective_move = base_move * equip_mod * mood_mod
+        
+        # Show effective ticks (lower = faster)
+        speed_bonus = equip_stats.get("speed_bonus", 0)
+        move_text = f"{effective_move:.1f} ticks"
+        if effective_move < base_move:
+            move_text += " (FASTER)"
+        elif effective_move > base_move:
+            move_text += " (slower)"
+        
+        self._draw_stat_line(surface, col1_x, content_y, "Move Delay", 
+                            move_text, speed_bonus, value_color, bonus_color, penalty_color)
+        content_y += 14
+        
+        self._draw_stat_line(surface, col1_x, content_y, "Walk Steady", 
+                            "1.0 (base)", 0, value_color, bonus_color, penalty_color)
+        content_y += 14
+        
+        # Work speeds - show as percentage
+        work_mod = colonist.get_equipment_work_modifier()
+        work_bonus = equip_stats.get("work_bonus", 0)
+        
+        work_text = f"{work_mod:.0%}"
+        if work_mod > 1.0:
+            work_text += " (FASTER)"
+        elif work_mod < 1.0:
+            work_text += " (slower)"
+        
+        self._draw_stat_line(surface, col1_x, content_y, "Build Speed", 
+                            work_text, work_bonus, value_color, bonus_color, penalty_color)
+        content_y += 14
+        
+        self._draw_stat_line(surface, col1_x, content_y, "Harvest Speed", 
+                            work_text, work_bonus, value_color, bonus_color, penalty_color)
+        content_y += 14
+        
+        self._draw_stat_line(surface, col1_x, content_y, "Craft Speed", 
+                            work_text, work_bonus, value_color, bonus_color, penalty_color)
+        content_y += 20
+        
+        # === Senses Section ===
+        self._draw_section_header(surface, "=== SENSES ===", col1_x, content_y, header_color)
+        content_y += 20
+        
+        self._draw_stat_line(surface, col1_x, content_y, "Vision", "1.0 (base)", 0, value_color, bonus_color, penalty_color)
+        content_y += 14
+        self._draw_stat_line(surface, col1_x, content_y, "Hearing", "1.0 (base)", 0, value_color, bonus_color, penalty_color)
+        content_y += 14
+        self._draw_stat_line(surface, col1_x, content_y, "Echo Sense", "1.0 (base)", 0, value_color, bonus_color, penalty_color)
+        content_y += 20
+        
+        # === Survival Section ===
+        self._draw_section_header(surface, "=== SURVIVAL ===", col1_x, content_y, header_color)
+        content_y += 20
+        
+        hazard = equip_stats.get("hazard_resist", 0)
+        self._draw_stat_line(surface, col1_x, content_y, "Hazard Resist", 
+                            f"{hazard:.0%}", hazard, value_color, bonus_color, penalty_color)
+        content_y += 14
+        
+        self._draw_stat_line(surface, col1_x, content_y, "Warmth", "0 (base)", 0, value_color, bonus_color, penalty_color)
+        content_y += 14
+        self._draw_stat_line(surface, col1_x, content_y, "Cooling", "0 (base)", 0, value_color, bonus_color, penalty_color)
+        content_y += 20
+        
+        # === Mental Section ===
+        self._draw_section_header(surface, "=== MENTAL ===", col1_x, content_y, header_color)
+        content_y += 20
+        
+        comfort = equip_stats.get("comfort", 0)
+        self._draw_stat_line(surface, col1_x, content_y, "Comfort Bonus", 
+                            f"{comfort:+.2f}", comfort, value_color, bonus_color, penalty_color)
+        content_y += 14
+        
+        mood_score = getattr(colonist, 'mood_score', 0)
+        mood_state = getattr(colonist, 'mood_state', 'Focused')
+        mood_surf = self.font_small.render(f"Mood: {mood_state} ({mood_score:+.1f})", True, value_color)
+        surface.blit(mood_surf, (col1_x, content_y))
+        content_y += 14
+        
+        stress = getattr(colonist, 'stress', 0)
+        stress_surf = self.font_small.render(f"Stress: {stress:+.1f}", True, value_color)
+        surface.blit(stress_surf, (col1_x, content_y))
+        content_y += 20
+        
+        # === Equipment Bonuses Section ===
+        self._draw_section_header(surface, "=== EQUIPMENT BONUSES ===", col1_x, content_y, (255, 200, 150))
+        content_y += 20
+        
+        equipment = getattr(colonist, 'equipment', {})
+        has_any = False
+        
+        for slot, item_data in equipment.items():
+            if item_data is None:
+                continue
+            has_any = True
+            
+            item_name = item_data.get("name", slot)
+            # Truncate long names
+            if len(item_name) > 25:
+                item_name = item_name[:22] + "..."
+            
+            item_surf = self.font_small.render(f"[{slot.upper()}] {item_name}", True, (180, 180, 200))
+            surface.blit(item_surf, (col1_x, content_y))
+            content_y += 12
+            
+            # Show item stats if it's a generated item
+            if item_data.get("generated"):
+                for mod in item_data.get("modifiers", [])[:3]:  # Limit to 3 per item
+                    stat = mod.get("stat", "").replace("_", " ").title()
+                    val = mod.get("value", 0)
+                    trigger = mod.get("trigger", "always")
+                    
+                    sign = "+" if val >= 0 else ""
+                    if trigger == "always":
+                        mod_text = f"  {sign}{val:.1f} {stat}"
+                    else:
+                        trigger_text = trigger.replace("_", " ")
+                        mod_text = f"  {sign}{val:.1f} {stat} ({trigger_text})"
+                    
+                    mod_color = bonus_color if val >= 0 else penalty_color
+                    mod_surf = self.font_small.render(mod_text, True, mod_color)
+                    surface.blit(mod_surf, (col1_x + 10, content_y))
+                    content_y += 11
+        
+        if not has_any:
+            no_equip = self.font_small.render("(no equipment)", True, muted_color)
+            surface.blit(no_equip, (col1_x, content_y))
+    
+    def _draw_stat_line(self, surface, x: int, y: int, name: str, value: str, 
+                        bonus: float, value_color: tuple, bonus_color: tuple, penalty_color: tuple) -> None:
+        """Draw a stat line with name, value, and optional bonus indicator."""
+        # Name
+        name_surf = self.font_small.render(f"{name}:", True, (160, 160, 170))
+        surface.blit(name_surf, (x, y))
+        
+        # Value
+        value_surf = self.font_small.render(value, True, value_color)
+        surface.blit(value_surf, (x + 120, y))
+        
+        # Bonus indicator
+        if bonus != 0:
+            sign = "+" if bonus > 0 else ""
+            bonus_text = f"({sign}{bonus:.0%} equip)"
+            color = bonus_color if bonus > 0 else penalty_color
+            bonus_surf = self.font_small.render(bonus_text, True, color)
+            surface.blit(bonus_surf, (x + 200, y))
+    
+    def _draw_navigation_buttons(self, surface) -> None:
+        """Draw navigation buttons (shared by all tabs)."""
+        # Prev button
+        pygame.draw.rect(surface, (50, 55, 65), self.prev_btn_rect, border_radius=4)
+        pygame.draw.rect(surface, (80, 85, 95), self.prev_btn_rect, 1, border_radius=4)
+        prev_text = self.font.render("< Prev", True, (180, 180, 190))
+        prev_rect = prev_text.get_rect(center=self.prev_btn_rect.center)
+        surface.blit(prev_text, prev_rect)
+        
+        # Next button
+        pygame.draw.rect(surface, (50, 55, 65), self.next_btn_rect, border_radius=4)
+        pygame.draw.rect(surface, (80, 85, 95), self.next_btn_rect, 1, border_radius=4)
+        next_text = self.font.render("Next >", True, (180, 180, 190))
+        next_rect = next_text.get_rect(center=self.next_btn_rect.center)
+        surface.blit(next_text, next_rect)
+        
+        # Hotkey hint
+        hint_text = self.font_small.render("TAB to close | Arrow keys to switch", True, (100, 100, 110))
+        hint_rect = hint_text.get_rect(centerx=self.panel_rect.centerx, y=self.panel_rect.bottom - 18)
+        surface.blit(hint_text, hint_rect)
+    
+    def _draw_section_header(self, surface, text: str, x: int, y: int, color: tuple) -> None:
+        """Draw a section header."""
+        header_surf = self.font.render(text, True, color)
+        surface.blit(header_surf, (x, y))
+    
+    def _draw_stat_bar(self, surface, x: int, y: int, width: int, value: float, max_val: float, color: tuple) -> None:
+        """Draw a stat bar."""
+        bar_height = 8
+        # Background
+        pygame.draw.rect(surface, (30, 30, 35), (x, y, width, bar_height), border_radius=2)
+        # Fill
+        fill_width = int(width * min(value, max_val) / max_val)
+        if fill_width > 0:
+            pygame.draw.rect(surface, color, (x, y, fill_width, bar_height), border_radius=2)
+        # Border
+        pygame.draw.rect(surface, (60, 60, 70), (x, y, width, bar_height), 1, border_radius=2)
+    
+    def _draw_equipment_slot(self, surface, x: int, y: int, width: int, height: int, slot_name: str, item) -> None:
+        """Draw an equipment slot with item icon and name."""
+        # Slot background
+        bg_color = (30, 35, 42) if item else (25, 28, 35)
+        border_color = (80, 100, 80) if item else (55, 60, 70)
+        pygame.draw.rect(surface, bg_color, (x, y, width, height), border_radius=4)
+        pygame.draw.rect(surface, border_color, (x, y, width, height), 1, border_radius=4)
+        
+        # Slot label
+        label_surf = self.font_small.render(slot_name, True, (100, 105, 115))
+        surface.blit(label_surf, (x + 4, y + 2))
+        
+        if item and isinstance(item, dict) and "name" in item:
+            # Get icon color from item or look up from registry
+            icon_color = item.get("icon_color")
+            if icon_color is None:
+                # Try to get from item registry
+                from items import get_item_def
+                item_def = get_item_def(item.get("id", ""))
+                if item_def:
+                    icon_color = item_def.icon_color
+                else:
+                    icon_color = (150, 150, 150)
+            
+            # Draw small icon square
+            icon_size = 10
+            icon_x = x + 4
+            icon_y = y + height - 14
+            pygame.draw.rect(surface, icon_color, (icon_x, icon_y, icon_size, icon_size), border_radius=2)
+            
+            # Show item name next to icon
+            item_surf = self.font_small.render(item["name"][:10], True, (180, 200, 180))
+            surface.blit(item_surf, (icon_x + icon_size + 4, icon_y))
+        else:
+            # Empty indicator
+            empty_surf = self.font_small.render("Empty", True, (60, 60, 65))
+            empty_rect = empty_surf.get_rect(centerx=x + width // 2, y=y + height - 14)
+            surface.blit(empty_surf, empty_rect)
+    
+    def _draw_equipment_tooltip(self, surface) -> None:
+        """Draw tooltip for hovered equipment item."""
+        if self.tooltip_item is None:
+            return
+        
+        item = self.tooltip_item
+        from items import get_item_def
+        
+        # Build tooltip lines
+        lines = []
+        
+        # Item name
+        name = item.get("name", "Unknown Item")
+        lines.append(("name", name))
+        
+        # Check if generated item
+        if item.get("generated"):
+            # Show rarity
+            rarity = item.get("rarity", "common")
+            lines.append(("rarity", rarity.title()))
+            
+            # Show modifiers
+            for mod in item.get("modifiers", []):
+                stat = mod.get("stat", "").replace("_", " ").title()
+                value = mod.get("value", 0)
+                trigger = mod.get("trigger", "always")
+                
+                if trigger == "always":
+                    line = f"{stat}: {value:+.0%}" if abs(value) < 1 else f"{stat}: {value:+.1f}"
+                else:
+                    trigger_text = trigger.replace("_", " ")
+                    line = f"{stat}: {value:+.0%} ({trigger_text})" if abs(value) < 1 else f"{stat}: {value:+.1f} ({trigger_text})"
+                lines.append(("stat", line))
+            
+            # Show flavor text
+            flavor = item.get("flavor")
+            if flavor:
+                lines.append(("flavor", flavor))
+        else:
+            # Static item - get from registry
+            item_def = get_item_def(item.get("id", ""))
+            if item_def:
+                # Show stats
+                if item_def.speed_bonus != 0:
+                    lines.append(("stat", f"Speed: {item_def.speed_bonus:+.0%}"))
+                if item_def.work_bonus != 0:
+                    lines.append(("stat", f"Work: {item_def.work_bonus:+.0%}"))
+                if item_def.comfort != 0:
+                    lines.append(("stat", f"Comfort: {item_def.comfort:+.2f}"))
+                if item_def.hazard_resist != 0:
+                    lines.append(("stat", f"Hazard Resist: {item_def.hazard_resist:+.0%}"))
+                
+                # Show description
+                if item_def.description:
+                    lines.append(("flavor", item_def.description))
+        
+        if not lines:
+            return
+        
+        # Calculate tooltip size
+        padding = 8
+        line_height = 16
+        max_width = 200
+        
+        # Measure text widths
+        for line_type, text in lines:
+            text_surf = self.font_small.render(text, True, (255, 255, 255))
+            max_width = max(max_width, text_surf.get_width() + padding * 2)
+        
+        tooltip_height = len(lines) * line_height + padding * 2
+        tooltip_width = min(max_width, 280)
+        
+        # Position tooltip (keep on screen)
+        tx, ty = self.tooltip_pos
+        if tx + tooltip_width > SCREEN_W:
+            tx = SCREEN_W - tooltip_width - 10
+        if ty + tooltip_height > SCREEN_H:
+            ty = SCREEN_H - tooltip_height - 10
+        
+        # Draw tooltip background
+        tooltip_rect = pygame.Rect(tx, ty, tooltip_width, tooltip_height)
+        pygame.draw.rect(surface, (25, 30, 40), tooltip_rect, border_radius=4)
+        pygame.draw.rect(surface, (80, 100, 120), tooltip_rect, 1, border_radius=4)
+        
+        # Draw lines
+        y_offset = ty + padding
+        for line_type, text in lines:
+            if line_type == "name":
+                color = (255, 220, 150)  # Gold for name
+            elif line_type == "rarity":
+                rarity_colors = {
+                    "Common": (180, 180, 180),
+                    "Uncommon": (100, 200, 100),
+                    "Rare": (100, 150, 255),
+                    "Epic": (200, 100, 255),
+                    "Legendary": (255, 180, 50),
+                }
+                color = rarity_colors.get(text, (180, 180, 180))
+            elif line_type == "stat":
+                color = (150, 220, 255)  # Blue for stats
+            elif line_type == "flavor":
+                color = (140, 140, 150)  # Gray for flavor
+            else:
+                color = (200, 200, 200)
+            
+            # Wrap long text
+            if len(text) > 35:
+                text = text[:32] + "..."
+            
+            text_surf = self.font_small.render(text, True, color)
+            surface.blit(text_surf, (tx + padding, y_offset))
+            y_offset += line_height
+    
+    def _draw_inventory_slot(self, surface, x: int, y: int, size: int, item) -> None:
+        """Draw an inventory slot showing carried resources."""
+        # Slot background
+        bg_color = (30, 35, 42) if item else (22, 25, 30)
+        border_color = (70, 90, 70) if item else (45, 50, 55)
+        pygame.draw.rect(surface, bg_color, (x, y, size, size), border_radius=3)
+        pygame.draw.rect(surface, border_color, (x, y, size, size), 1, border_radius=3)
+        
+        if item and isinstance(item, dict):
+            res_type = item.get("type", "")
+            amount = item.get("amount", 1)
+            
+            # Resource type colors
+            type_colors = {
+                "wood": (139, 90, 43),
+                "scrap": (120, 120, 130),
+                "food": (100, 180, 80),
+                "cooked_meal": (200, 150, 80),
+                "minerals": (100, 140, 180),
+            }
+            icon_color = type_colors.get(res_type, (150, 150, 150))
+            
+            # Draw small colored square as icon
+            icon_size = 12
+            icon_x = x + (size - icon_size) // 2
+            icon_y = y + 3
+            pygame.draw.rect(surface, icon_color, (icon_x, icon_y, icon_size, icon_size), border_radius=2)
+            
+            # Draw amount below icon
+            amount_text = str(amount) if amount < 100 else "99+"
+            amount_surf = self.font_small.render(amount_text, True, (200, 200, 210))
+            amount_rect = amount_surf.get_rect(centerx=x + size // 2, y=y + size - 11)
+            surface.blit(amount_surf, amount_rect)
+        else:
+            # Empty dot indicator
+            pygame.draw.circle(surface, (40, 42, 48), (x + size // 2, y + size // 2), 3)
+    
+    def handle_key(self, key: int) -> bool:
+        """Handle keyboard input. Returns True if consumed."""
+        if not self.visible:
+            return False
+        
+        if key == pygame.K_TAB or key == pygame.K_ESCAPE:
+            self.close()
+            return True
+        elif key == pygame.K_LEFT:
+            self._prev_colonist()
+            return True
+        elif key == pygame.K_RIGHT:
+            self._next_colonist()
+            return True
+        
+        return False
 
 
 # Compatibility layer for existing code
@@ -1000,6 +2418,7 @@ class ConstructionUI:
 # Global UI instances
 _construction_ui: Optional[ConstructionUI] = None
 _colonist_panel: Optional[ColonistJobTagsPanel] = None
+_colonist_management_panel: Optional[ColonistManagementPanel] = None
 
 
 def get_construction_ui() -> ConstructionUI:
@@ -1016,3 +2435,11 @@ def get_colonist_panel() -> ColonistJobTagsPanel:
     if _colonist_panel is None:
         _colonist_panel = ColonistJobTagsPanel()
     return _colonist_panel
+
+
+def get_colonist_management_panel() -> ColonistManagementPanel:
+    """Get or create the global colonist management panel instance."""
+    global _colonist_management_panel
+    if _colonist_management_panel is None:
+        _colonist_management_panel = ColonistManagementPanel()
+    return _colonist_management_panel

@@ -16,7 +16,7 @@ from collections import deque
 Coord = Tuple[int, int]
 Coord3D = Tuple[int, int, int]  # (x, y, z)
 
-# Room storage: room_id -> {"tiles": [(x,y),...], "z": z_level}
+# Room storage: room_id -> {"tiles": [(x,y),...], "z": z_level, ...}
 _ROOMS: Dict[int, dict] = {}
 
 # Reverse lookup: (x, y, z) -> room_id
@@ -29,8 +29,165 @@ _ROOF_TILES: Dict[Coord3D, int] = {}
 # Next room ID to assign
 _next_room_id = 1
 
-# Dirty flag - set when construction completes to trigger re-detection
+ # Dirty flag - set when construction completes to trigger re-detection
 _needs_update = False
+
+
+# ============================================================================
+# Data-driven room classification and effects
+# ============================================================================
+
+# Each rule can define:
+# - id: internal identifier
+# - label: human-readable name (stored as room_type)
+# - requires: {tile_type: min_count}
+# - requires_any: [tile_type, ...] (optional)
+# - forbid_any: [tile_type, ...] (optional)
+# - min_stockpile_tiles: minimum number of tiles in stockpile zones (optional)
+# - effects: arbitrary dict of room-level effects (stored on room data)
+ROOM_RULES: List[dict] = [
+    {
+        "id": "Kitchen",
+        "label": "Kitchen",
+        # Requires at least one finished stove and one gutter slab in the room
+        "requires": {"finished_stove": 1, "gutter_slab": 1},
+        # Forbid any other crafting workstations in the same room
+        "forbid_any": [
+            "finished_salvagers_bench",
+            "finished_gutter_forge",
+            "finished_skinshop_loom",
+            "finished_cortex_spindle",
+        ],
+        # Effects are a placeholder for future systemic bonuses
+        "effects": {},
+    },
+    {
+        "id": "SalvageBay",
+        "label": "Salvage Bay",
+        # Salvage station + at least 4 stockpile tiles in the room
+        "requires": {"finished_salvagers_bench": 1},
+        "min_stockpile_tiles": 4,
+        # Keep it focused on salvage (no stove or other crafting benches)
+        "forbid_any": [
+            "finished_stove",
+            "gutter_slab",
+            "finished_gutter_forge",
+            "finished_skinshop_loom",
+            "finished_cortex_spindle",
+        ],
+        "effects": {},
+    },
+    {
+        "id": "ForgeDen",
+        "label": "Forge Den",
+        # Gutter Forge + Gutter Slab = weapon/tool workshop
+        "requires": {"finished_gutter_forge": 1, "gutter_slab": 1},
+        # Avoid mixing with other major craft benches for now
+        "forbid_any": [
+            "finished_salvagers_bench",
+            "finished_stove",
+            "finished_skinshop_loom",
+            "finished_cortex_spindle",
+        ],
+        "effects": {},
+    },
+    {
+        "id": "SkinShop",
+        "label": "Skin Shop",
+        # Skinshop Loom + Gutter Slab = armor/loom room
+        "requires": {"finished_skinshop_loom": 1, "gutter_slab": 1},
+        "forbid_any": [
+            "finished_salvagers_bench",
+            "finished_stove",
+            "finished_gutter_forge",
+            "finished_cortex_spindle",
+        ],
+        "effects": {},
+    },
+    {
+        "id": "CortexCell",
+        "label": "Cortex Cell",
+        # Cortex Spindle + Gutter Slab = implant/ripperdoc lab
+        "requires": {"finished_cortex_spindle": 1, "gutter_slab": 1},
+        "forbid_any": [
+            "finished_salvagers_bench",
+            "finished_stove",
+            "finished_gutter_forge",
+            "finished_skinshop_loom",
+        ],
+        "effects": {},
+    },
+    {
+        "id": "CrashPad",
+        "label": "Crash Pad",
+        # Shared bedroom: at least one Crash Bed and two or more entrances
+        "requires": {"crash_bed": 1},
+        "min_exits": 2,
+        "effects": {},
+    },
+    {
+        "id": "CoffinNook",
+        "label": "Coffin Nook",
+        # Private bedroom: Crash Bed with a single entrance
+        "requires": {"crash_bed": 1},
+        "max_exits": 1,
+        "effects": {},
+    },
+]
+
+
+def _classify_room_from_contents(contents: Dict[str, int], tiles: List[Coord], z: int, grid, entrances: List[Coord]) -> tuple[str | None, Dict[str, float]]:
+    """Apply ROOM_RULES to determine room type and effects.
+
+    Returns (room_type, effects_dict).
+    room_type is a human-readable label or None if no rule matches.
+    effects_dict is the rule's effects mapping (may be empty).
+    """
+    stockpile_tiles: int | None = None
+    exit_count = len(entrances)
+    for rule in ROOM_RULES:
+        requires: Dict[str, int] = rule.get("requires", {}) or {}
+        if any(contents.get(tile, 0) < amount for tile, amount in requires.items()):
+            continue
+
+        requires_any = rule.get("requires_any")
+        if requires_any:
+            if not any(contents.get(tile, 0) > 0 for tile in requires_any):
+                continue
+
+        forbid_any = rule.get("forbid_any", []) or []
+        if any(contents.get(tile, 0) > 0 for tile in forbid_any):
+            continue
+
+        min_stockpile = rule.get("min_stockpile_tiles")
+        if min_stockpile:
+            if stockpile_tiles is None:
+                # Lazily compute number of stockpile tiles in this room
+                try:
+                    import zones
+                    count = 0
+                    for tx, ty in tiles:
+                        if zones.is_stockpile_zone(tx, ty, z):
+                            count += 1
+                    stockpile_tiles = count
+                except Exception:
+                    stockpile_tiles = 0
+            if stockpile_tiles < min_stockpile:
+                continue
+
+        min_exits = rule.get("min_exits")
+        if min_exits is not None and exit_count < min_exits:
+            continue
+
+        max_exits = rule.get("max_exits")
+        if max_exits is not None and exit_count > max_exits:
+            continue
+
+        label = rule.get("label") or rule.get("id")
+        effects = rule.get("effects", {}) or {}
+        return label, effects
+
+    return None, {}
 
 
 def get_room_at(x: int, y: int, z: int = 0) -> int | None:
@@ -268,6 +425,17 @@ def detect_rooms(grid) -> None:
     _ROOMS.clear()
     _TILE_TO_ROOM.clear()
     
+    # Reset grid env_data for room-related fields before re-detecting
+    # This ensures hover/tooltips and AI see up-to-date room info.
+    for z_level in range(grid.depth):
+        for y in range(grid.height):
+            for x in range(grid.width):
+                # Clear room assignment
+                grid.set_env_param(x, y, z_level, "room_id", None)
+                # Recompute base tile-level exits (adjacent walkable tiles)
+                base_exits = grid.calculate_exit_count(x, y, z_level)
+                grid.set_env_param(x, y, z_level, "exit_count", base_exits)
+    
     # Track which rooms are new vs continuing
     new_room_ids: Set[int] = set()
     
@@ -292,13 +460,38 @@ def detect_rooms(grid) -> None:
                         room_id = _next_room_id
                         _next_room_id += 1
                         
-                        # Store room with Z-level info
+                        # Compute entrances (doors/windows) on the room boundary
+                        entrances: List[Coord] = []
+                        for bx, by in boundary_tiles:
+                            if _is_entrance_tile(grid, bx, by, z):
+                                entrances.append((bx, by))
+
+                        # Collect simple contents by tile type for interior tiles
+                        contents: Dict[str, int] = {}
+                        for tx, ty in interior_tiles:
+                            tile_type = grid.get_tile(tx, ty, z)
+                            if tile_type is None:
+                                continue
+                            contents[tile_type] = contents.get(tile_type, 0) + 1
+                        
+                        # Classify room type and compute room-level effects from contents
+                        room_type, room_effects = _classify_room_from_contents(contents, interior_tiles, z, grid, entrances)
+                        
+                        # Store room with Z-level info, entrances, contents, classification, and effects
                         _ROOMS[room_id] = {
                             "tiles": interior_tiles,
                             "z": z,
+                            "entrances": entrances,
+                            "contents": contents,
+                            "room_type": room_type,
+                            "effects": room_effects,
                         }
                         for tx, ty in interior_tiles:
                             _TILE_TO_ROOM[(tx, ty, z)] = room_id
+                            # Update env data so hover/AI can see room membership
+                            grid.set_env_param(tx, ty, z, "room_id", room_id)
+                            # For interior tiles, use room-level exit count (number of entrances)
+                            grid.set_env_param(tx, ty, z, "exit_count", len(entrances))
                         
                         new_room_ids.add(room_id)
                         z_info = f" on Z={z}" if z > 0 else ""

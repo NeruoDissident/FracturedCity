@@ -97,6 +97,55 @@ BUILDING_TYPES = {
         "workstation": True,  # This is a workstation
         "recipe": {"input": {"raw_food": 1, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
     },
+    # === Item Crafting Stations ===
+    "gutter_forge": {
+        "name": "Gutter Forge",
+        "tile_type": "gutter_forge",
+        "materials": {"metal": 3, "scrap": 2},
+        "construction_work": 120,
+        "walkable": False,
+        "workstation": True,
+        "multi_recipe": True,  # Supports multiple recipes
+        "recipes": [
+            {"id": "salvage_tool", "name": "Salvage Tool", "input": {"metal": 2, "scrap": 1}, "output_item": "salvage_tool", "work_time": 80},
+            {"id": "work_gloves", "name": "Work Gloves", "input": {"scrap": 2}, "output_item": "work_gloves", "work_time": 60},
+            {"id": "signal_gauntlet", "name": "Signal Gauntlet", "input": {"metal": 2, "power": 1}, "output_item": "signal_gauntlet", "work_time": 100},
+            {"id": "gutter_slab", "name": "Gutter Slab", "input": {"wood": 4, "mineral": 2}, "output_item": "gutter_slab", "work_time": 90},
+        ],
+    },
+    "skinshop_loom": {
+        "name": "Skinshop Loom",
+        "tile_type": "skinshop_loom",
+        "materials": {"wood": 3, "scrap": 2},
+        "construction_work": 100,
+        "walkable": False,
+        "workstation": True,
+        "multi_recipe": True,
+        "recipes": [
+            {"id": "hard_hat", "name": "Hard Hat", "input": {"scrap": 2}, "output_item": "hard_hat", "work_time": 60},
+            {"id": "work_vest", "name": "Work Vest", "input": {"scrap": 2, "wood": 1}, "output_item": "work_vest", "work_time": 70},
+            {"id": "padded_jacket", "name": "Padded Jacket", "input": {"scrap": 3}, "output_item": "padded_jacket", "work_time": 90},
+            {"id": "work_boots", "name": "Work Boots", "input": {"scrap": 2}, "output_item": "work_boots", "work_time": 60},
+            {"id": "scrap_armor", "name": "Scrap Armor", "input": {"metal": 3, "scrap": 2}, "output_item": "scrap_armor", "work_time": 120},
+            {"id": "crash_bed", "name": "Crash Bed", "input": {"scrap": 2, "wood": 2}, "output_item": "crash_bed", "work_time": 90},
+        ],
+    },
+    "cortex_spindle": {
+        "name": "Cortex Spindle",
+        "tile_type": "cortex_spindle",
+        "materials": {"metal": 2, "mineral": 2, "power": 1},
+        "construction_work": 150,
+        "walkable": False,
+        "workstation": True,
+        "multi_recipe": True,
+        "recipes": [
+            {"id": "focus_chip", "name": "Focus Chip", "input": {"metal": 2, "mineral": 1}, "output_item": "focus_chip", "work_time": 100},
+            {"id": "echo_dampener", "name": "Echo Dampener", "input": {"metal": 1, "mineral": 2}, "output_item": "echo_dampener", "work_time": 100},
+            {"id": "lucky_coin", "name": "Lucky Coin", "input": {"metal": 1}, "output_item": "lucky_coin", "work_time": 40},
+            {"id": "memory_locket", "name": "Memory Locket", "input": {"metal": 1, "mineral": 1}, "output_item": "memory_locket", "work_time": 60},
+            {"id": "signal_stone", "name": "Signal Stone", "input": {"mineral": 2, "power": 1}, "output_item": "signal_stone", "work_time": 80},
+        ],
+    },
 }
 
 # Track door states (open/closed)
@@ -178,11 +227,11 @@ def workstation_has_inputs(x: int, y: int, z: int = 0) -> bool:
     if ws is None:
         return False
     
-    building_def = BUILDING_TYPES.get(ws.get("type", ""))
-    if building_def is None or "recipe" not in building_def:
+    # Get the current recipe (handles both single and multi-recipe stations)
+    recipe = get_workstation_recipe(x, y, z)
+    if recipe is None:
         return False
     
-    recipe = building_def["recipe"]
     inputs_needed = recipe.get("input", {})
     inputs_have = ws.get("input_items", {})
     
@@ -198,11 +247,11 @@ def consume_workstation_inputs(x: int, y: int, z: int = 0) -> bool:
     if ws is None:
         return False
     
-    building_def = BUILDING_TYPES.get(ws.get("type", ""))
-    if building_def is None or "recipe" not in building_def:
+    # Get the current recipe (handles both single and multi-recipe stations)
+    recipe = get_workstation_recipe(x, y, z)
+    if recipe is None:
         return False
     
-    recipe = building_def["recipe"]
     inputs_needed = recipe.get("input", {})
     
     # Consume inputs
@@ -216,7 +265,11 @@ def consume_workstation_inputs(x: int, y: int, z: int = 0) -> bool:
 
 
 def get_workstation_recipe(x: int, y: int, z: int = 0) -> Optional[dict]:
-    """Get the recipe for a workstation."""
+    """Get the current recipe for a workstation.
+    
+    For single-recipe stations, returns the 'recipe' field.
+    For multi-recipe stations, returns the selected recipe from 'recipes' list.
+    """
     ws = _WORKSTATIONS.get((x, y, z))
     if ws is None:
         return None
@@ -224,6 +277,16 @@ def get_workstation_recipe(x: int, y: int, z: int = 0) -> Optional[dict]:
     building_def = BUILDING_TYPES.get(ws.get("type", ""))
     if building_def is None:
         return None
+    
+    # Check for multi-recipe station
+    if building_def.get("multi_recipe", False):
+        selected_id = ws.get("selected_recipe")
+        recipes = building_def.get("recipes", [])
+        for recipe in recipes:
+            if recipe["id"] == selected_id:
+                return recipe
+        # Fallback to first recipe
+        return recipes[0] if recipes else None
     
     return building_def.get("recipe")
 
@@ -380,15 +443,164 @@ def place_stove(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     return place_building(grid, x, y, "stove", z)
 
 
+# === Item Crafting Stations ===
+
+def can_place_gutter_forge(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Check if a Gutter Forge can be placed at (x, y, z)."""
+    return can_place_salvagers_bench(grid, x, y, z)
+
+
+def place_gutter_forge(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a Gutter Forge construction site at (x, y, z)."""
+    if not can_place_gutter_forge(grid, x, y, z):
+        return False
+    return place_building(grid, x, y, "gutter_forge", z)
+
+
+def can_place_skinshop_loom(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Check if a Skinshop Loom can be placed at (x, y, z)."""
+    return can_place_salvagers_bench(grid, x, y, z)
+
+
+def place_skinshop_loom(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a Skinshop Loom construction site at (x, y, z)."""
+    if not can_place_skinshop_loom(grid, x, y, z):
+        return False
+    return place_building(grid, x, y, "skinshop_loom", z)
+
+
+def can_place_cortex_spindle(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Check if a Cortex Spindle can be placed at (x, y, z)."""
+    return can_place_salvagers_bench(grid, x, y, z)
+
+
+def place_cortex_spindle(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a Cortex Spindle construction site at (x, y, z)."""
+    if not can_place_cortex_spindle(grid, x, y, z):
+        return False
+    return place_building(grid, x, y, "cortex_spindle", z)
+
+
+def place_workstation_generic(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -> bool:
+    """Generic placement helper for 1x1 workstations.
+    
+    Uses the same placement rules as Salvager's Bench:
+    - Must be on a finished/roof floor
+    - Must be inside a room (has roof above)
+    """
+    building_def = BUILDING_TYPES.get(building_type)
+    if building_def is None or not building_def.get("workstation", False):
+        return False
+    
+    if not can_place_salvagers_bench(grid, x, y, z):
+        return False
+    
+    return place_building(grid, x, y, building_type, z)
+
+
+def request_furniture_install(grid: Grid, dest_x: int, dest_y: int, dest_z: int, item_id: str) -> bool:
+    """Request installation of a furniture item at the given tile.
+    
+    Creates an install_furniture job that will fetch the item from
+    equipment stockpiles and install it at the destination.
+    """
+    # For now, require a solid floor/roof-access tile to place furniture on
+    tile = grid.get_tile(dest_x, dest_y, dest_z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access", "floor"):
+        print(f"[Furniture] Cannot install {item_id} at ({dest_x},{dest_y},z={dest_z}) - needs floor")
+        return False
+    
+    # Find stored equipment item matching this furniture ID
+    all_equipment = zones.get_all_stored_equipment()
+    best_source = None
+    best_dist = None
+    for (sx, sy, sz), items in all_equipment.items():
+        for stored in items:
+            if stored.get("id") == item_id:
+                dist = abs(sx - dest_x) + abs(sy - dest_y)
+                # Small penalty for different Z-level to prefer same level
+                if sz != dest_z:
+                    dist += 5
+                if best_dist is None or dist < best_dist:
+                    best_dist = dist
+                    best_source = (sx, sy, sz)
+                break
+    
+    if best_source is None:
+        print(f"[Furniture] No {item_id} available in equipment stockpiles for install")
+        return False
+    
+    src_x, src_y, src_z = best_source
+    work_time = 30  # Time to prepare/pick up furniture
+    add_job(
+        "install_furniture",
+        src_x,
+        src_y,
+        required=work_time,
+        resource_type=item_id,
+        dest_x=dest_x,
+        dest_y=dest_y,
+        dest_z=dest_z,
+        z=src_z,
+    )
+    print(f"[Furniture] Install {item_id} from ({src_x},{src_y},z={src_z}) to ({dest_x},{dest_y},z={dest_z})")
+    return True
+
+
 def register_workstation(x: int, y: int, z: int, workstation_type: str) -> None:
     """Register a completed workstation."""
-    _WORKSTATIONS[(x, y, z)] = {
+    building_def = BUILDING_TYPES.get(workstation_type, {})
+    is_multi_recipe = building_def.get("multi_recipe", False)
+    recipes = building_def.get("recipes", [])
+    
+    ws_data = {
         "type": workstation_type,
         "reserved": False,
         "working": False,
         "progress": 0,
         "input_items": {},
+        "auto_mode": "infinite",
+        "craft_queue": 0,
+        "target_count": 0,
     }
+    
+    # For multi-recipe stations, default to first recipe
+    if is_multi_recipe and recipes:
+        ws_data["selected_recipe"] = recipes[0]["id"]
+    
+    _WORKSTATIONS[(x, y, z)] = ws_data
+
+
+def set_workstation_recipe(x: int, y: int, z: int, recipe_id: str) -> bool:
+    """Set the selected recipe for a multi-recipe workstation."""
+    ws = _WORKSTATIONS.get((x, y, z))
+    if ws is None:
+        return False
+    
+    building_def = BUILDING_TYPES.get(ws["type"], {})
+    recipes = building_def.get("recipes", [])
+    
+    # Validate recipe exists
+    for recipe in recipes:
+        if recipe["id"] == recipe_id:
+            ws["selected_recipe"] = recipe_id
+            # Clear any in-progress work when changing recipe
+            ws["input_items"] = {}
+            ws["progress"] = 0
+            ws["working"] = False
+            return True
+    
+    return False
+
+
+def get_workstation_recipes(x: int, y: int, z: int) -> list:
+    """Get available recipes for a workstation."""
+    ws = _WORKSTATIONS.get((x, y, z))
+    if ws is None:
+        return []
+    
+    building_def = BUILDING_TYPES.get(ws["type"], {})
+    return building_def.get("recipes", [])
 
 
 # Tiles that can be demolished
@@ -1025,6 +1237,51 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
         # Get recipe for this workstation
         recipe = get_workstation_recipe(x, y, z)
         if recipe is None:
+            continue
+        
+        # Determine order settings for this workstation
+        auto_mode = ws.get("auto_mode", "infinite")
+        craft_queue = ws.get("craft_queue", 0)
+        target_count = ws.get("target_count", 0)
+
+        # Decide if a new crafting job should be created based on order mode
+        allow_craft = False
+
+        # Explicit queued crafts always take priority
+        if craft_queue > 0:
+            allow_craft = True
+        elif auto_mode == "infinite":
+            # Legacy behavior - always craft when inputs are available
+            allow_craft = True
+        elif auto_mode == "target" and target_count > 0:
+            # For target mode, only craft while total output is below target
+            output_item_id = recipe.get("output_item")
+            outputs = recipe.get("output", {})
+            current_total = 0
+
+            if output_item_id:
+                # Count crafted items on the ground and in equipment storage
+                import items as items_module
+                all_world_items = items_module.get_all_world_items()
+                for _, items_at_tile in all_world_items.items():
+                    for item in items_at_tile:
+                        if item.get("id") == output_item_id:
+                            current_total += 1
+
+                all_equipment = zones_module.get_all_stored_equipment()
+                for _, stored_items in all_equipment.items():
+                    for stored in stored_items:
+                        if stored.get("id") == output_item_id:
+                            current_total += 1
+            elif outputs:
+                # For resource outputs, track the first resource type
+                res_type = next(iter(outputs.keys()))
+                current_total = zones_module.get_total_stored(res_type)
+
+            if current_total < target_count:
+                allow_craft = True
+
+        if not allow_craft:
             continue
         
         # Check if stockpile has required inputs

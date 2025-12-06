@@ -1,0 +1,413 @@
+🧱 Milestone 1 – Carry System + Inventory Display
+Prompt 1 – Add carried-items system and show in UI
+I want to add a proper “carried items” system for colonists and display it in the UI.
+Please:
+Give each colonist a data structure for what they are currently carrying (resources and later items). Keep it small and simple for now: just type + amount is fine.
+
+
+Integrate this with the existing hauling / job logic so that when a colonist picks something up or drops it off, their carried-items state updates correctly.
+
+
+In the colonist detail UI and the global colonist panel, show a compact readout of “Carrying: [wood x2, scrap x1]” or similar.
+
+
+Reuse any existing resource / job / UI helpers you find that make this easier instead of creating redundant systems.
+
+
+Make sure this doesn’t break the current hauling behavior or job assignment; just layer the carry tracking and display on top of what’s already working.
+Checklist 1 – Before moving on
+Make sure ALL of these are true in-game:
+When a colonist goes to pick up a resource, their “Carrying” readout updates with the correct type and amount.
+
+
+When they drop resources in a stockpile or into construction, “Carrying” goes back down or to empty.
+
+
+Multiple resources can be carried sequentially (e.g., wood then scrap) without bugging out or desyncing.
+
+
+The new carry readout is visible in the colonist detail panel and doesn’t overlap or break other UI.
+
+
+No errors or crashes appear related to jobs / hauling / resources.
+
+
+
+⚙ Milestone 2 – Base Item System
+Prompt 2 – Create base item definitions and hook to equipment slots
+I want a lightweight item system that plugs into the existing equipment slots (Head, Body, Hands, Feet, Implant, Charm) and inventory UI, even if most stats are placeholders for now.
+Please:
+Introduce a central way to define item types (weapons, tools, clothing, implants, charms, etc.) with fields like: id, name, slot, tags, and placeholder stat fields (comfort, speed_bonus, hazard_resist, etc.). A simple Python dict or data registry is fine.
+
+
+Wire items into the existing equipment slots so the UI can show the item’s name (and, if we already have it, an icon) in that slot.
+
+
+Ensure items can also exist as “world items” or “stored items” so we can later craft and equip them, even if at first they’re only spawned for testing.
+
+
+Reuse any existing resource / data / UI patterns already in the project instead of inventing a parallel system.
+
+
+For now I mainly want items to be definable and visible in equipment slots; we’ll hook meaningful stats up in a later milestone.
+Checklist 2
+There is a clear place in code where item types are defined (weapons, clothing, implants, charms, etc.).
+
+
+Each item definition knows which slot it belongs to (Head, Body, etc.).
+
+
+You can manually spawn an item on a colonist and see it show up in the correct equipment slot in the colonist detail UI.
+
+
+Items can exist off-colonist in some form (stored, dropped, or at least representable for future crafting).
+
+
+No existing resource/job UI has been broken by this.
+
+
+
+🛠 Milestone 3 – Tier 1 Crafting Stations
+Prompt 3 – Add core crafting stations & recipes
+I want to add the first real crafting stations and recipes so colonists can produce basic gear.
+Please:
+Add three placeable crafting stations (names can be tweaked, but go for ND/cyberpunk flavor):
+
+
+A basic weapon/tool bench (e.g., “Gutter Forge”)
+
+
+A clothing/armor bench (e.g., “Skinshop Loom”)
+
+
+An implant/oddity bench (e.g., “Cortex Spindle”)
+
+
+Each station should consume existing resources (wood, mineral, scrap/metal, etc.) and produce items from our item system into storage or onto the ground.
+
+
+Reuse the existing “Craft” job category and job queue system so colonists claim and work crafting jobs the same way they do other tasks.
+
+
+Add a few simple test recipes per station (e.g., basic helmet, jacket, wrench/hammer, simple implant, small charm), referencing the item definitions from the previous milestone.
+
+
+Integrate station placement into the current build menu in a clean, readable way.
+
+
+Focus on making the stations and recipes function from a systems point of view; we’ll tune visuals and balance later.
+Checklist 3
+You can build each new station from the build menu.
+
+
+Colonists with “Craft” enabled will walk to the stations, consume the required resources, and produce items.
+
+
+The produced items show up in stockpiles or on the ground and are recognized by the item system.
+
+
+No existing job categories break; building, hauling, cooking continue to work.
+
+
+Crafting work is visible and doesn’t hang or stall.
+
+
+
+🧢 Milestone 4 – Simple Equipment Effects
+Prompt 4 – Hook equipment stats into colonist behavior
+Now I want equipment to actually do something, even if it’s simple.
+Please:
+Read item stat fields from our item definitions (e.g., speed bonus, comfort bonus, hazard resistance, mood modifiers).
+
+
+Apply equipment effects to colonists when items are in the correct slots:
+
+
+Clothing/armor → modify comfort, stress, or protection modifiers.
+
+
+Tools/weapons in Hands → speed up relevant jobs (build, salvage, haul, craft, etc.).
+
+
+Implants/charms → tweak affinities, mood, or environmental preferences.
+
+
+Make sure these bonuses stack cleanly with existing mood, comfort, and preference systems rather than replacing them.
+
+
+If there is already a central place where colonist stats are calculated, plug item effects into that instead of scattering calculations.
+
+
+Keep the math straightforward and readable so it’s easy to rebalance later.
+Checklist 4
+Equipping boots or body gear clearly changes movement speed or comfort in a noticeable way.
+
+
+Equipping a tool in hands noticeably speeds up a related job (e.g., building/harvesting).
+
+
+Equipping an implant or charm alters affinities or mood in the colonist UI in a visible way.
+
+
+Removing equipment removes its effects with no leftover buffs/debuffs.
+
+
+No obvious performance regression or explosions in the stat code.
+
+
+
+☣ Milestone 5 – Hazards System
+Prompt 5 – Add environmental hazards that interact with gear & mood
+I’d like to introduce environmental hazards and basic internal consequences so gear and personality matter more.
+Please:
+Add a lightweight hazard system for tiles: for example, tiles can have flags or values such as “bio-corruption”, “shards/debris”, or “echo static”.
+
+
+When colonists stand on or pass through these tiles, update their stress, comfort, or special ND-ish metrics (e.g., echo, integrity) accordingly.
+
+
+Have equipment from previous milestones mitigate specific hazards (e.g., boots reduce shard damage, masks reduce bio-corruption, implants or charms interact with echo).
+
+
+Keep the logic centralized where colonist movement/environment effects are already processed, rather than duplicating checks all over.
+
+
+Add some hazard patches into world gen so players will encounter them without manual setup.
+
+
+For now, I just want mood and stress to clearly respond to hazards, and basic mitigation from gear.
+Checklist 5
+You can visually identify hazard tiles (even if it’s just a tint or overlay).
+
+
+Walking through hazard tiles changes mood/stress/ND metrics according to type.
+
+
+Wearing relevant gear noticeably reduces or cancels that effect.
+
+
+Colonists don’t instantly die or become unusable; hazards are a pressure, not a permanent brick.
+
+
+No pathfinding or movement crashes are triggered by hazard checks.
+
+
+
+🧠 Milestone 6 – Expanded Personality System (Traits + Behaviors)
+Prompt 6 – Add personality traits and link them to environment & work
+I want colonists to feel less generic and more ND-flavored through traits and personality-driven preferences.
+Please:
+Introduce a trait system for colonists (e.g., “Rustborn”, “Echo-Touched”, “Streetbound”, “Warmaker”, etc.) that modifies their affinities, mood responses, and job leanings.
+
+
+Make sure traits are data-driven (easy to add more) and show up clearly in the colonist UI with short descriptions.
+
+
+Connect traits to existing environmental metrics and work types; e.g.,
+
+
+Rustborn likes scrap lots and salvage jobs.
+
+
+Echo-Touched is comfortable near interference/echo noise, maybe stressed in silent/clean areas.
+
+
+Streetbound prefers asphalt/streets to interior rooms.
+
+
+Reuse the existing affinity and preference systems so traits are mostly modifiers, not a new parallel system.
+
+
+No need for super complex emergent behaviors yet; I just want traits to meaningfully bias preferences and mood.
+Checklist 6
+Colonists now spawn with one or more traits visible in their detail panel.
+
+
+Traits clearly modify affinities (e.g., Outside, Integrity, Echo) in a visible and understandable way.
+
+
+Given the same environment, two colonists with different traits react differently (mood/comfort-wise).
+
+
+Traits don’t break existing personality drift or affinity sampling—you still see drift values behave reasonably.
+
+
+
+🏙 Milestone 7 – Colony Needs & Pressure
+Prompt 7 – Add colony-level pressures that influence priorities
+I want the colony as a whole to have “pressure” metrics that make certain jobs more urgent when conditions get bad.
+Please:
+Add a small set of colony-wide pressure values, such as:
+
+
+Food pressure (based on meals/raw food per colonist)
+
+
+Shelter pressure (based on number/quality of rooms vs colonists)
+
+
+Security pressure (later we can expand; for now, maybe based on hazard density or lack of walls/doors)
+
+
+Update these pressures periodically based on current game state.
+
+
+Expose pressures in a simple colony UI block so I can see them rising/falling.
+
+
+Don’t change job logic yet; just compute and display these pressures cleanly so we can hook into them in the next milestone.
+
+
+Reuse any existing global state or metrics if they already capture similar information.
+
+
+This is a read-only system for now—calculation and display only.
+Checklist 7
+There is a place in the UI showing colony pressures (Food, Shelter, Security or similar).
+
+
+Pressures visibly go up and down when you remove/add food, rooms, or walls.
+
+
+Pressures feel stable (no wild flickering unless game conditions genuinely jump).
+
+
+No job logic has been changed yet; this is only a foundation.
+
+
+
+🤖 Milestone 8 – AI Task Selection Driven by Personality & Pressure
+Prompt 8 – Make colonists choose jobs based on traits, preferences, and colony pressure
+Now I want colonist job selection to use personality, traits, and colony pressures instead of being flat and generic.
+Please:
+Keep the existing job types and queues, but change how colonists choose which job to take.
+
+
+When a colonist looks for work, consider:
+
+
+Their traits and affinities (what they like or dislike)
+
+
+Their current mood/stress
+
+
+Colony pressure values (food, shelter, etc.), treated as a “this needs doing” multiplier
+
+
+Whether they’ve been doing the same job for a long time (to avoid being hard-stuck if possible)
+
+
+Turn this into a clear scoring or weighting system per job type so we can tune it later: high pressure + likes job → very attractive.
+
+
+Reuse existing job-assignment code paths; don’t throw out systems that already work, just replace the “which job should I pick?” decision.
+
+
+Make sure there’s still a fallback so someone will eventually do critical work even if it’s nobody’s favorite.
+
+
+Goal: different colonists gravitate toward different work, and priorities shift as the colony’s situation changes.
+Checklist 8
+Two colonists with different traits and moods choose different jobs under the same conditions.
+
+
+When food is low, more colonists gravitate toward cooking/scavenging without you micromanaging.
+
+
+When shelter is bad, building tasks become more attractive.
+
+
+No infinite idling where jobs exist but nobody ever picks them.
+
+
+You can still manually toggle job tags per colonist and see the system respect that.
+
+
+
+🗺 Milestone 9 – District-Based World Generation
+Prompt 9 – Upgrade world-gen to have districts, density, and ND flavor
+I want the map to feel like a fractured city instead of random blocks: distinct districts with different resources and hazards.
+Please:
+Update or extend the world generation to create recognizable “districts”, such as:
+
+
+Dense residential blocks
+
+
+Industrial / salvage-heavy zones
+
+
+Overgrown / mineral-rich ruins
+
+
+Echo-hotspot zones with higher interference
+
+
+Vary building density, street layouts, scrap clusters, and raw food placement by district type.
+
+
+Sprinkle our hazard tiles into appropriate districts (e.g., more bio-corruption in overgrown areas, more shards in industrial rubble, more echo static in hotspot zones).
+
+
+Keep the code structured so it’s easy to tweak probabilities and add new district types later.
+
+
+Preserve the existing core scale and performance; don’t explode map size yet.
+
+
+The main goal is to load into a map and immediately feel: “these are different city zones with different risks and rewards.”
+Checklist 9
+On new games, you can visually identify multiple district types on the same map.
+
+
+Resource clusters and hazards feel logically tied to their district.
+
+
+Starting conditions are still playable (you aren’t instantly doomed by spawning in pure hazard hell).
+
+
+Performance remains acceptable on your current map size.
+
+
+
+💡 Milestone 10 – Visual Overhaul Phase 1 (Lighting & Z-Transparency)
+Prompt 10 – Add basic lighting and better Z-level visibility
+For this pass I want a simple but effective lighting + transparency layer so the city feels more alive and multi-level.
+Please:
+Add a basic lighting system where colonists and certain buildings emit a small light radius, and unlit tiles are darker but still visible enough to play.
+
+
+Make interior rooms feel slightly cozier/brighter than the streets when they are enclosed and powered, if that fits easily with the current power system.
+
+
+Improve Z-level handling visually:
+
+
+When I’m on a higher Z level, show lower levels with some transparency or dimming instead of full clutter.
+
+
+Ensure roofs / upper floors don’t completely obscure what’s going on where I’m currently focused.
+
+
+Reuse existing rendering layers and color schemes where possible rather than rewriting the renderer from scratch.
+
+
+Keep this as a Phase 1 visual pass: simple, performant, and legible is more important than fancy shaders.
+
+
+The goal is: dark alleys, cozy interiors, readable vertical stacks, and a bit more atmosphere.
+Checklist 10
+Colonists move with a visible light radius around them.
+
+
+Rooms read as brighter/safer than empty streets (even if only slightly).
+
+
+Switching Z levels feels readable: you can tell what’s on your current level vs below.
+
+
+No severe FPS drops or rendering glitches.
+
+
+UI elements remain readable on top of the new lighting.
