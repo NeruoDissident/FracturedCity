@@ -148,6 +148,10 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
             # Start drag for floor construction (rectangle)
             _drag_start = (gx, gy)
             _drag_mode = "floor"
+        elif build_mode == "roof":
+            # Start drag for roof placement (rectangle) - requires 4 corner walls
+            _drag_start = (gx, gy)
+            _drag_mode = "roof"
         elif build_mode == "fire_escape":
             # Fire escape - single click placement on finished walls (any Z level)
             if place_fire_escape(grid, gx, gy, current_z):
@@ -336,6 +340,19 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                     z_info = f" on z={current_z}" if current_z > 0 else ""
                     print(f"Designated {floors_placed} floor(s) for construction{z_info}")
             
+            elif _drag_mode == "roof":
+                # Place roof over rectangular area - requires 4 corner walls
+                start_x, start_y = _drag_start
+                end_x, end_y = gx, gy
+                
+                from rooms import place_roof_area, can_place_roof_area
+                can_place, reason = can_place_roof_area(grid, start_x, start_y, end_x, end_y, current_z)
+                if can_place:
+                    if place_roof_area(grid, start_x, start_y, end_x, end_y, current_z):
+                        pass  # Success message printed by place_roof_area
+                else:
+                    print(f"[Roof] Cannot place roof: {reason}")
+            
             elif _drag_mode == "stockpile":
                 # Get all tiles in rectangle
                 tiles = get_drag_rect(_drag_start, (gx, gy))
@@ -371,7 +388,7 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                             # Add designation for persistent highlighting
                             jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
                     # Harvest streets (converts to scorched, yields mineral)
-                    elif current_z == 0 and tile == "street":
+                    elif current_z == 0 and tile in ("street", "street_cracked", "street_scar", "street_ripped"):
                         if resources_module.designate_street_for_harvest(grid, tx, ty, jobs_module):
                             streets_designated += 1
                             jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
@@ -664,9 +681,13 @@ def main() -> None:
                         stats = c.get_equipment_stats()
                         print(f"[Debug] {c.name}'s equipment stats:")
                         print(f"  Speed bonus: {stats['speed_bonus']:+.0%}")
-                        print(f"  Work bonus: {stats['work_bonus']:+.0%}")
+                        print(f"  Build speed: {stats['build_speed']:+.0%}")
+                        print(f"  Harvest speed: {stats['harvest_speed']:+.0%}")
+                        print(f"  Craft speed: {stats['craft_speed']:+.0%}")
+                        print(f"  Haul capacity: {stats['haul_capacity']:+.0%}")
                         print(f"  Comfort: {stats['comfort']:+.2f}")
                         print(f"  Hazard resist: {stats['hazard_resist']:+.0%}")
+                        print(f"  Stress resist: {stats['stress_resist']:+.0%}")
                 elif event.key == pygame.K_F8:
                     # Debug: Print construction site status
                     from buildings import get_all_construction_sites, get_missing_materials
@@ -734,7 +755,10 @@ def main() -> None:
             update_doors()  # Auto-close doors after delay
             update_windows()  # Auto-close windows after delay
             tick_count += 1  # Increment game tick
-            update_rooms(grid)  # Detect enclosed rooms
+            
+            # Process batched room updates (dirty tiles from construction)
+            rooms_module.process_dirty_rooms(grid)
+            
             jobs_module.update_job_timers()  # Tick down job wait timers
             
             # Process auto-haul jobs for harvested resources

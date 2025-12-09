@@ -10,8 +10,8 @@ sophisticated scheduler without changing callers.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -27,6 +27,8 @@ class Job:
     progress:       Current work progress.
     required:       Work required to finish the job.
     assigned:       Whether a colonist has claimed this job.
+    pressure:       Urgency level 1-10 (higher = more urgent, overrides normal priority).
+    subtype:        Specific job subtype for priority within category (e.g. "wall", "door", "floor").
     dest_x, dest_y, dest_z: Destination coordinates (for haul/supply jobs).
     """
 
@@ -39,12 +41,19 @@ class Job:
     required: int = 100
     assigned: bool = False
     wait_timer: int = 0  # Ticks to wait before reassigning (e.g., waiting for materials)
+    pressure: int = 1  # Urgency 1-10 (1=baseline, 10=critical)
+    subtype: str | None = None  # Specific type for priority (e.g. "workstation", "door", "wall", "floor")
     # Optional extra data for specific job types (e.g. gathering).
     resource_type: str | None = None
     # Destination for haul/supply jobs
     dest_x: int | None = None
     dest_y: int | None = None
     dest_z: int = 0  # Destination Z-level
+    # Batch delivery queue for supply jobs: list of (x, y, z, amount) tuples
+    # Colonist picks up total amount and delivers to each site in sequence
+    delivery_queue: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    # Total amount to pick up for batch supply jobs
+    pickup_amount: int = 1
     # Additional metadata (faction, priority, etc.) can be added later via
     # new fields.
 
@@ -59,6 +68,61 @@ JOB_QUEUE: List[Job] = []
 _DESIGNATIONS: dict[tuple[int, int, int], dict] = {}
 
 
+# =============================================================================
+# Job Priority System
+# =============================================================================
+# Priority hierarchy (higher = more important):
+#   1. Crafting (workstations) - top priority, someone mans it immediately
+#   2. Construction - building structures
+#      - Within construction: workstation > door > wall > floor
+#   3. Hauling/Supply - only if construction needs materials
+#   4. Harvest - lowest priority, filler work
+#
+# The system uses a base priority score that colonists use to pick jobs.
+# Pressure (1-10) is separate - it controls job INTERRUPTION, not selection.
+
+# Category base priorities (higher = picked first)
+CATEGORY_PRIORITY = {
+    "crafting": 100,      # Workstations always top priority
+    "cooking": 95,        # Cooking is critical
+    "construction": 80,   # Building is important
+    "wall": 80,           # Same as construction
+    "haul": 60,           # Hauling supports construction
+    "supply": 60,         # Supply is hauling
+    "harvest": 40,        # Filler work
+    "salvage": 40,        # Same as harvest
+    "equip": 30,          # Personal tasks
+    "misc": 20,           # Everything else
+}
+
+# Construction subtype priorities (higher = built first)
+CONSTRUCTION_SUBTYPE_PRIORITY = {
+    "workstation": 100,   # Craft stations first
+    "door": 80,           # Doors before walls (access)
+    "wall": 60,           # Walls before floors (enclosure)
+    "floor": 40,          # Floors last
+    "bridge": 50,         # Bridges mid-priority
+    "fire_escape": 70,    # Fire escapes important for access
+    "furniture": 55,      # Furniture mid-priority
+}
+
+
+def get_job_priority(job: Job) -> int:
+    """Calculate priority score for a job (higher = more important).
+    
+    Used by colonists to pick which job to take when idle.
+    Does NOT affect pressure-based interruption.
+    """
+    base = CATEGORY_PRIORITY.get(job.category, 20)
+    
+    # Add subtype bonus for construction jobs
+    if job.category in ("construction", "wall") and job.subtype:
+        subtype_bonus = CONSTRUCTION_SUBTYPE_PRIORITY.get(job.subtype, 0)
+        base += subtype_bonus
+    
+    return base
+
+
 def add_job(
     job_type: str,
     x: int,
@@ -66,12 +130,19 @@ def add_job(
     required: int = 100,
     resource_type: str | None = None,
     category: str | None = None,
+    subtype: str | None = None,
     dest_x: int | None = None,
     dest_y: int | None = None,
     dest_z: int = 0,
     z: int = 0,
+    pressure: int = 1,
 ) -> Job:
     """Create and enqueue a new job.
+
+    Args:
+        pressure: Urgency level 1-10 (1=baseline, 10=critical).
+                  Jobs with pressure > colonist.pressure_score can interrupt.
+        subtype: Specific construction type for priority (workstation, door, wall, floor).
 
     Returns the created Job instance.
     """
@@ -89,6 +160,9 @@ def add_job(
             category = "equip"  # Equip jobs are personal - any colonist can do
         elif job_type == "install_furniture":
             category = "construction"
+            subtype = subtype or "furniture"
+        elif job_type == "crafting":
+            category = "crafting"
         else:
             category = "misc"
     
@@ -98,7 +172,9 @@ def add_job(
         x=x, 
         y=y, 
         z=z,
-        required=required, 
+        required=required,
+        pressure=max(1, min(10, pressure)),  # Clamp to 1-10
+        subtype=subtype,
         resource_type=resource_type,
         dest_x=dest_x,
         dest_y=dest_y,
@@ -195,6 +271,42 @@ def get_all_available_jobs(
         available.append(job)
     
     return available
+
+
+def should_take_job(colonist_pressure_score: int, new_job: Job, current_job: Job | None) -> bool:
+    """Determine if a colonist should take/switch to a new job based on pressure rules.
+    
+    Pressure Decision Rules:
+    - Higher colonist pressure_score = more willing to be interrupted
+    - Job pressure is the threshold required to interrupt
+    - colonist_pressure_score >= job.pressure means colonist CAN be interrupted
+    
+    Example:
+    - Job pressure 5 (cooking) requires score 5+ to interrupt
+    - Colonist with score 10 will always drop work for urgent jobs
+    - Colonist with score 3 won't be interrupted by pressure 5 jobs
+    
+    Args:
+        colonist_pressure_score: Colonist's interruptibility (1-10, higher = more interruptible)
+        new_job: The job being considered
+        current_job: Colonist's current job, or None if idle
+    
+    Returns:
+        True if colonist should take/switch to new_job
+    """
+    # Idle colonists always take jobs (handled by normal priority)
+    if current_job is None:
+        return True
+    
+    # Working colonist: check if they can be interrupted
+    # Colonist score must be >= job pressure to be interruptible
+    if colonist_pressure_score >= new_job.pressure:
+        # Can be interrupted - but only if new job is higher pressure than current
+        if new_job.pressure > current_job.pressure:
+            return True
+    
+    # Either can't be interrupted, or new job isn't more urgent
+    return False
 
 
 def update_job_timers() -> None:

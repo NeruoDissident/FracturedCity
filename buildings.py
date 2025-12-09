@@ -313,7 +313,25 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
     if current_tile == "fire_escape_platform" and building_type in ("wall", "wall_advanced"):
         return False
     
-    # Allow placement on empty tiles, resource nodes, finished floors, or walkable roof tiles (z=1)
+    # Tiles that can NEVER be built on (existing structures)
+    blocked_tiles = {
+        "wall", "finished_wall", "wall_advanced", "finished_wall_advanced",
+        "door", "window", "finished_window", "window_tile",
+        "salvagers_bench", "finished_salvagers_bench",
+        "generator", "finished_generator",
+        "stove", "finished_stove",
+        "gutter_forge", "finished_gutter_forge",
+        "skinshop_loom", "finished_skinshop_loom",
+        "cortex_spindle", "finished_cortex_spindle",
+        "bridge", "finished_bridge",
+        "fire_escape", "fire_escape_platform",
+        "roof",  # Must use Allow tool first
+    }
+    
+    if current_tile in blocked_tiles:
+        return False
+    
+    # Handle resource nodes - clear them for construction
     if current_tile == "resource_node":
         # Clear the resource node - drops items and prevents respawn
         resources.clear_node_for_construction(x, y)
@@ -322,8 +340,12 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
     elif current_tile in ("roof_floor", "roof_access"):
         # Allow building on walkable rooftop surfaces (z=1)
         pass
+    elif z == 0:
+        # Z0: Allow building on any walkable ground tile (weeds, debris, scorched, streets, etc.)
+        if not grid.is_walkable(x, y, z):
+            return False
     elif current_tile not in ("empty", None, "finished_floor"):
-        # Can't build on other occupied tiles
+        # Z>0: Stricter - only empty/floor tiles
         return False
     
     building_def = BUILDING_TYPES.get(building_type)
@@ -348,8 +370,21 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
     tile_type = building_def.get("tile_type", building_type)
     grid.set_tile(x, y, tile_type, z=z)
     
-    # Create construction job with z-level
-    add_job("construction", x, y, required=building_def["construction_work"], category=building_type, z=z)
+    # Determine subtype for job priority
+    # Priority order: workstation > door > wall > floor
+    if building_def.get("workstation", False):
+        subtype = "workstation"
+    elif building_type == "door":
+        subtype = "door"
+    elif building_type in ("wall", "wall_advanced"):
+        subtype = "wall"
+    elif building_type == "floor":
+        subtype = "floor"
+    else:
+        subtype = None
+    
+    # Create construction job with z-level and subtype for priority
+    add_job("construction", x, y, required=building_def["construction_work"], category="construction", subtype=subtype, z=z)
     return True
 
 
@@ -383,22 +418,11 @@ def place_window(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 
 
 def can_place_salvagers_bench(grid: Grid, x: int, y: int, z: int = 0) -> bool:
-    """Check if a Salvager's Bench can be placed at (x, y, z).
-    
-    Requirements:
-    - Must be on a finished floor tile
-    - Must be inside a valid room (has roof above)
-    """
-    import rooms
-    
+    """Check if a Salvager's Bench can be placed at (x, y, z)."""
     tile = grid.get_tile(x, y, z)
     if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] Tile at ({x},{y}) is '{tile}', need floor")
         return False
-    
-    # Must be inside a room (has roof above)
-    if not rooms.has_roof(x, y, z + 1):
-        return False
-    
     return True
 
 
@@ -410,13 +434,12 @@ def place_salvagers_bench(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 
 
 def can_place_generator(grid: Grid, x: int, y: int, z: int = 0) -> bool:
-    """Check if a Generator can be placed at (x, y, z).
-    
-    Same requirements as Salvager's Bench:
-    - Must be on finished floor
-    - Must be inside a room (has roof above)
-    """
-    return can_place_salvagers_bench(grid, x, y, z)
+    """Check if a Generator can be placed at (x, y, z)."""
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] Tile at ({x},{y}) is '{tile}', need floor")
+        return False
+    return True
 
 
 def place_generator(grid: Grid, x: int, y: int, z: int = 0) -> bool:
@@ -427,13 +450,12 @@ def place_generator(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 
 
 def can_place_stove(grid: Grid, x: int, y: int, z: int = 0) -> bool:
-    """Check if a Stove can be placed at (x, y, z).
-    
-    Same requirements as other workstations:
-    - Must be on finished floor
-    - Must be inside a room (has roof above)
-    """
-    return can_place_salvagers_bench(grid, x, y, z)
+    """Check if a Stove can be placed at (x, y, z)."""
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] Tile at ({x},{y}) is '{tile}', need floor")
+        return False
+    return True
 
 
 def place_stove(grid: Grid, x: int, y: int, z: int = 0) -> bool:
@@ -447,7 +469,11 @@ def place_stove(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 
 def can_place_gutter_forge(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     """Check if a Gutter Forge can be placed at (x, y, z)."""
-    return can_place_salvagers_bench(grid, x, y, z)
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] Tile at ({x},{y}) is '{tile}', need floor")
+        return False
+    return True
 
 
 def place_gutter_forge(grid: Grid, x: int, y: int, z: int = 0) -> bool:
@@ -459,7 +485,11 @@ def place_gutter_forge(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 
 def can_place_skinshop_loom(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     """Check if a Skinshop Loom can be placed at (x, y, z)."""
-    return can_place_salvagers_bench(grid, x, y, z)
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] Tile at ({x},{y}) is '{tile}', need floor")
+        return False
+    return True
 
 
 def place_skinshop_loom(grid: Grid, x: int, y: int, z: int = 0) -> bool:
@@ -471,7 +501,11 @@ def place_skinshop_loom(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 
 def can_place_cortex_spindle(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     """Check if a Cortex Spindle can be placed at (x, y, z)."""
-    return can_place_salvagers_bench(grid, x, y, z)
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] Tile at ({x},{y}) is '{tile}', need floor")
+        return False
+    return True
 
 
 def place_cortex_spindle(grid: Grid, x: int, y: int, z: int = 0) -> bool:
@@ -482,17 +516,14 @@ def place_cortex_spindle(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 
 
 def place_workstation_generic(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -> bool:
-    """Generic placement helper for 1x1 workstations.
-    
-    Uses the same placement rules as Salvager's Bench:
-    - Must be on a finished/roof floor
-    - Must be inside a room (has roof above)
-    """
+    """Generic placement helper for 1x1 workstations."""
     building_def = BUILDING_TYPES.get(building_type)
     if building_def is None or not building_def.get("workstation", False):
         return False
     
-    if not can_place_salvagers_bench(grid, x, y, z):
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] {building_type}: tile at ({x},{y}) is '{tile}', need floor")
         return False
     
     return place_building(grid, x, y, building_type, z)
@@ -504,10 +535,13 @@ def request_furniture_install(grid: Grid, dest_x: int, dest_y: int, dest_z: int,
     Creates an install_furniture job that will fetch the item from
     equipment stockpiles and install it at the destination.
     """
-    # For now, require a solid floor/roof-access tile to place furniture on
+    # Allow furniture on any walkable tile
     tile = grid.get_tile(dest_x, dest_y, dest_z)
-    if tile not in ("finished_floor", "roof_floor", "roof_access", "floor"):
-        print(f"[Furniture] Cannot install {item_id} at ({dest_x},{dest_y},z={dest_z}) - needs floor")
+    # Block placement on walls, doors, windows, and other non-walkable structures
+    blocked_tiles = ("wall", "finished_wall", "wall_advanced", "finished_wall_advanced",
+                     "door", "window", "finished_window", "window_tile")
+    if tile in blocked_tiles:
+        print(f"[Furniture] Cannot install {item_id} at ({dest_x},{dest_y},z={dest_z}) - blocked by {tile}")
         return False
     
     # Find stored equipment item matching this furniture ID
@@ -627,7 +661,7 @@ def demolish_tile(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     Returns True if something was demolished.
     """
     from jobs import remove_job_at
-    from rooms import mark_rooms_dirty
+    from rooms import mark_tile_dirty
     
     tile = grid.get_tile(x, y, z)
     
@@ -666,8 +700,8 @@ def demolish_tile(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     # Set tile back to empty
     grid.set_tile(x, y, "empty", z=z)
     
-    # Trigger room re-detection
-    mark_rooms_dirty()
+    # Mark tile dirty for room re-detection (batched at end of tick)
+    mark_tile_dirty(x, y, z)
     
     print(f"[Demolish] Removed {tile} at ({x}, {y}, z={z})")
     return True
@@ -789,7 +823,7 @@ def place_fire_escape(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     
     # Create construction job
     from jobs import add_job
-    add_job("construction", x, y, required=building_def["construction_work"], category="fire_escape", z=z)
+    add_job("construction", x, y, required=building_def["construction_work"], category="construction", subtype="fire_escape", z=z)
     return True
 
 
@@ -912,7 +946,7 @@ def place_bridge(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     
     # Create construction job
     from jobs import add_job
-    add_job("construction", x, y, required=building_def["construction_work"], category="bridge", z=z)
+    add_job("construction", x, y, required=building_def["construction_work"], category="construction", subtype="bridge", z=z)
     
     print(f"[Build] Bridge placed at ({x}, {y}, z={z})")
     return True
@@ -1137,9 +1171,12 @@ def debug_supply_status() -> None:
 
 
 def process_supply_jobs(jobs_module, zones_module) -> int:
-    """Create supply jobs for construction sites that need materials.
+    """Create batch supply jobs for construction sites that need materials.
     
     Called each tick from main loop.
+    Batches multiple construction sites needing the same resource into one job.
+    A colonist will pick up a stack and deliver to multiple sites in sequence.
+    
     Returns number of jobs created.
     """
     # First, clean up stale pending flags for jobs that no longer exist
@@ -1147,46 +1184,117 @@ def process_supply_jobs(jobs_module, zones_module) -> int:
     
     jobs_created = 0
     
+    # Group sites by resource type and Z-level for batching
+    # Key: (resource_type, z_level), Value: list of (x, y, z, amount_needed)
+    sites_by_resource: dict[tuple[str, int], list[tuple[int, int, int, int]]] = {}
+    
     for (x, y, z), site in _CONSTRUCTION_SITES.items():
         missing = get_missing_materials(x, y, z)
         
         for resource_type, amount_needed in missing.items():
-            # Skip if we already have a supply job pending for this
+            # Skip if we already have a supply job pending for this site/resource
             if has_pending_supply_job(x, y, z, resource_type):
                 continue
             
-            # Find stockpile with this resource (prefer same Z-level)
-            source = zones_module.find_stockpile_with_resource(resource_type, z=z)
-            if source is None:
-                # No stockpile has this resource
-                continue
+            key = (resource_type, z)
+            if key not in sites_by_resource:
+                sites_by_resource[key] = []
+            sites_by_resource[key].append((x, y, z, amount_needed))
+    
+    # Create batch supply jobs for each resource type
+    MAX_CARRY_AMOUNT = 20  # Max items a colonist can carry in one trip
+    
+    for (resource_type, z_level), sites in sites_by_resource.items():
+        if not sites:
+            continue
+        
+        # Find stockpile with this resource (prefer same Z-level)
+        source = zones_module.find_stockpile_with_resource(resource_type, z=z_level)
+        if source is None:
+            continue
+        
+        source_x, source_y, source_z = source
+        
+        # Calculate total needed and build delivery queue
+        # Sort sites by distance from source for efficient delivery route
+        sites_sorted = sorted(sites, key=lambda s: abs(s[0] - source_x) + abs(s[1] - source_y))
+        
+        # Build batches that fit within carry limit
+        current_batch = []
+        current_total = 0
+        
+        for site_x, site_y, site_z, amount in sites_sorted:
+            if current_total + amount > MAX_CARRY_AMOUNT and current_batch:
+                # Create job for current batch
+                _create_batch_supply_job(
+                    jobs_module, source_x, source_y, source_z,
+                    resource_type, current_batch, current_total
+                )
+                jobs_created += 1
+                current_batch = []
+                current_total = 0
             
-            source_x, source_y, source_z = source
-            
-            # Create supply job (pickup from stockpile, deliver to construction)
-            jobs_module.add_job(
-                "supply",
-                source_x, source_y,  # Pickup location
-                required=10,  # Quick job
-                resource_type=resource_type,
-                dest_x=x,
-                dest_y=y,
-                dest_z=z,  # Construction site Z-level
-                z=source_z,  # Pickup Z-level
+            current_batch.append((site_x, site_y, site_z, amount))
+            current_total += amount
+        
+        # Create job for remaining batch
+        if current_batch:
+            _create_batch_supply_job(
+                jobs_module, source_x, source_y, source_z,
+                resource_type, current_batch, current_total
             )
-            mark_supply_job_created(x, y, z, resource_type)
             jobs_created += 1
     
     return jobs_created
 
 
+def _create_batch_supply_job(
+    jobs_module, 
+    source_x: int, source_y: int, source_z: int,
+    resource_type: str,
+    delivery_sites: list[tuple[int, int, int, int]],
+    total_amount: int
+) -> None:
+    """Create a batch supply job that delivers to multiple sites."""
+    if not delivery_sites:
+        return
+    
+    # First destination is the primary dest_x/dest_y
+    first_site = delivery_sites[0]
+    
+    job = jobs_module.add_job(
+        "supply",
+        source_x, source_y,  # Pickup location
+        required=10,  # Quick job
+        resource_type=resource_type,
+        dest_x=first_site[0],
+        dest_y=first_site[1],
+        dest_z=first_site[2],
+        z=source_z,
+    )
+    
+    # Set batch delivery data
+    job.delivery_queue = list(delivery_sites)  # [(x, y, z, amount), ...]
+    job.pickup_amount = total_amount
+    
+    # Mark all sites as having pending supply jobs
+    for site_x, site_y, site_z, _ in delivery_sites:
+        mark_supply_job_created(site_x, site_y, site_z, resource_type)
+
+
 def _cleanup_stale_pending_jobs(jobs_module) -> None:
     """Remove pending flags for supply jobs that no longer exist in the queue."""
-    # Build set of actual supply jobs in queue
+    # Build set of actual supply jobs in queue (including all sites in delivery_queue)
     actual_supply_jobs = set()
     for job in jobs_module.JOB_QUEUE:
-        if job.type == "supply" and job.dest_x is not None and job.dest_y is not None:
-            actual_supply_jobs.add((job.dest_x, job.dest_y, job.dest_z, job.resource_type))
+        if job.type == "supply":
+            # Check delivery_queue for batch jobs
+            if job.delivery_queue:
+                for site_x, site_y, site_z, _ in job.delivery_queue:
+                    actual_supply_jobs.add((site_x, site_y, site_z, job.resource_type))
+            elif job.dest_x is not None and job.dest_y is not None:
+                # Legacy single-destination job
+                actual_supply_jobs.add((job.dest_x, job.dest_y, job.dest_z, job.resource_type))
     
     # Find stale pending flags
     stale = _PENDING_SUPPLY_JOBS - actual_supply_jobs

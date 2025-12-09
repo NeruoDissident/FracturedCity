@@ -26,6 +26,9 @@ from config import (
     COLOR_TILE_FINISHED_WALL,
     COLOR_TILE_STREET,
     COLOR_TILE_STREET_DESIGNATED,
+    COLOR_TILE_STREET_CRACKED,
+    COLOR_TILE_STREET_SCAR,
+    COLOR_TILE_STREET_RIPPED,
     COLOR_TILE_SIDEWALK,
     COLOR_TILE_SIDEWALK_DESIGNATED,
     COLOR_TILE_SCORCHED,
@@ -179,7 +182,7 @@ class Grid:
             elif value == "finished_window":
                 # Windows are passable (like doors) - colonists can climb through
                 self.walkable[z][y][x] = True
-            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "street", "street_designated", "sidewalk", "sidewalk_designated", "debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap", "dirt", "grass", "rock", "scorched", "gutter_slab", "crash_bed"):
+            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "street", "street_cracked", "street_scar", "street_ripped", "street_designated", "sidewalk", "sidewalk_designated", "debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap", "dirt", "grass", "rock", "scorched", "gutter_slab", "crash_bed"):
                 # window_tile: passable wall with fire escape window
                 # fire_escape_platform: external platform for fire escape
                 # roof_access: walkable/buildable rooftop tile (player-allowed)
@@ -313,12 +316,155 @@ class Grid:
         
         return (r, g, b)
     
+    def _get_tile_variant(self, x: int, y: int, z: int, max_variant: int, salt: int = 0) -> int:
+        """Return a deterministic variant index for a tile position."""
+        import random
+        if max_variant <= 0:
+            return 0
+        seed = self._get_tile_seed(x, y, z) ^ salt
+        rng = random.Random(seed)
+        return rng.randint(0, max_variant - 1)
+    
     def _get_floor_variant(self, x: int, y: int, z: int) -> int:
         """Get floor pattern variant (0-2) for this tile position."""
+        return self._get_tile_variant(x, y, z, 3, salt=0xF10A4)
+    
+    def _draw_mineral_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
+        """Render a mineral resource node with one of several rock variants."""
         import random
+        
+        base_palette = [
+            (70, 72, 78),
+            (94, 96, 105),
+            (120, 122, 130),
+        ]
+        palette_index = self._get_tile_variant(x, y, z, len(base_palette), salt=0x5B1C3)
+        base_color = base_palette[palette_index]
+        
+        color = self._get_tile_color_variation(base_color, x, y, z, 10)
+        if depleted:
+            color = (color[0] // 3, color[1] // 3, color[2] // 3)
+        shadow = (max(0, color[0] - 35), max(0, color[1] - 35), max(0, color[2] - 35))
+        highlight_delta = 12 if depleted else 45
+        highlight = (
+            min(255, color[0] + highlight_delta),
+            min(255, color[1] + highlight_delta),
+            min(255, color[2] + highlight_delta),
+        )
+        
+        pygame.draw.rect(surface, shadow, rect)
+        
         seed = self._get_tile_seed(x, y, z)
+        rng = random.Random(seed ^ 0x9E3779B9)
+        variant = self._get_tile_variant(x, y, z, 3, salt=0xA713F)
+        
+        if variant == 0:
+            # Jagged shard cluster
+            shard_points = [
+                (rect.left + 4, rect.bottom - 3),
+                (rect.left + 6 + rng.randint(0, 2), rect.top + 10),
+                (rect.centerx, rect.top + 4 + rng.randint(0, 2)),
+                (rect.right - 5, rect.centery - 4),
+                (rect.right - 3, rect.bottom - 6),
+                (rect.centerx - 4, rect.bottom - 2),
+            ]
+            pygame.draw.polygon(surface, color, shard_points)
+            pygame.draw.lines(surface, highlight, False, shard_points[1:-1], 2)
+        elif variant == 1:
+            # Veined slab with mineral streaks
+            slab_rect = pygame.Rect(rect.left + 3, rect.top + 5, rect.width - 6, rect.height - 8)
+            pygame.draw.rect(surface, color, slab_rect)
+            for offset in (-4, 0, 4):
+                start = (slab_rect.left + 2, slab_rect.bottom - 4 + offset)
+                end = (slab_rect.right - 2, slab_rect.top + 6 + offset // 2)
+                pygame.draw.line(surface, highlight if offset == 0 else shadow, start, end, 2)
+        else:
+            # Rounded boulder cluster
+            centers = [
+                (rect.left + 8 + rng.randint(-1, 1), rect.bottom - 8 + rng.randint(-1, 1)),
+                (rect.centerx + rng.randint(-2, 2), rect.centery + rng.randint(-2, 2)),
+                (rect.right - 8 + rng.randint(-1, 1), rect.bottom - 10 + rng.randint(-1, 1)),
+            ]
+            radii = [7, 5, 4]
+            for idx, (cx, cy) in enumerate(centers):
+                radius = max(2, radii[idx])
+                body_color = color if idx == 0 else (
+                    max(0, color[0] - 15 * idx),
+                    max(0, color[1] - 15 * idx),
+                    max(0, color[2] - 15 * idx),
+                )
+                pygame.draw.circle(surface, body_color, (cx, cy), radius)
+                if not depleted:
+                    pygame.draw.circle(surface, highlight, (cx - 2, cy - 2), max(1, radius - 3), 1)
+        
+        if not depleted:
+            # Small glint in top corner
+            glint_center = (rect.right - 6, rect.top + 6)
+            pygame.draw.circle(surface, highlight, glint_center, 2)
+    
+    def _draw_street_tile(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, tile_type: str) -> None:
+        """Render street tiles with damage variations."""
+        import random
+        
+        base_colors = {
+            "street": COLOR_TILE_STREET,
+            "street_cracked": COLOR_TILE_STREET_CRACKED,
+            "street_scar": COLOR_TILE_STREET_SCAR,
+            "street_ripped": COLOR_TILE_STREET_RIPPED,
+        }
+        base_color = base_colors.get(tile_type, COLOR_TILE_STREET)
+        color = self._get_tile_color_variation(base_color, x, y, z, 6)
+        pygame.draw.rect(surface, color, rect)
+        
+        seed = self._get_tile_seed(x, y, z) ^ 0x57F9A
         rng = random.Random(seed)
-        return rng.randint(0, 2)
+        
+        if tile_type == "street":
+            # Subtle cross-hatching to keep base streets interesting
+            if rng.random() < 0.35:
+                pygame.draw.line(surface, (color[0] - 10, color[1] - 10, color[2] - 10),
+                                 (rect.left + 4, rect.top + rng.randint(4, rect.height - 4)),
+                                 (rect.right - 4, rect.top + rng.randint(4, rect.height - 4)), 1)
+            return
+        
+        crack_color = (max(0, color[0] - 25), max(0, color[1] - 25), max(0, color[2] - 25))
+        highlight = (min(255, color[0] + 30), min(255, color[1] + 20), min(255, color[2] + 20))
+        
+        if tile_type == "street_cracked":
+            # Several fine cracks
+            for _ in range(3):
+                start = (rect.left + rng.randint(2, rect.width - 2), rect.top + rng.randint(2, rect.height - 2))
+                end = (start[0] + rng.randint(-6, 6), start[1] + rng.randint(-6, 6))
+                pygame.draw.line(surface, crack_color, start, end, 1)
+        elif tile_type == "street_scar":
+            # One or two deep scars with lighter edges
+            for _ in range(2):
+                scar_rect = pygame.Rect(
+                    rect.left + rng.randint(2, 6),
+                    rect.top + rng.randint(2, 6),
+                    rect.width - rng.randint(6, 12),
+                    3
+                )
+                pygame.draw.rect(surface, crack_color, scar_rect)
+                pygame.draw.line(surface, highlight, scar_rect.topleft, scar_rect.topright, 1)
+        elif tile_type == "street_ripped":
+            # Jagged hole exposing a darker sub-layer
+            rip_points = [
+                (rect.left + rng.randint(2, 6), rect.top + rng.randint(8, rect.height - 4)),
+                (rect.left + rng.randint(rect.width // 3, rect.width // 2), rect.top + rng.randint(2, rect.height - 2)),
+                (rect.right - rng.randint(2, 6), rect.bottom - rng.randint(4, 8)),
+                (rect.centerx, rect.bottom - rng.randint(2, 4)),
+            ]
+            hole_color = (max(0, color[0] - 30), max(0, color[1] - 30), max(0, color[2] - 35))
+            pygame.draw.polygon(surface, hole_color, rip_points)
+            pygame.draw.lines(surface, highlight, True, rip_points, 2)
+            
+            # Mineral flecks
+            from config import COLOR_RESOURCE_NODE_MINERAL
+            for _ in range(3):
+                cx = rect.left + rng.randint(3, rect.width - 4)
+                cy = rect.top + rng.randint(3, rect.height - 4)
+                pygame.draw.circle(surface, COLOR_RESOURCE_NODE_MINERAL, (cx, cy), 2)
     
     # --- Interior Lighting System ---
     
@@ -521,10 +667,9 @@ class Grid:
                             pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_wall":
                     pygame.draw.rect(surface, COLOR_TILE_FINISHED_WALL, rect)
-                elif tile == "street":
-                    # Street tiles - distinct dark gray with subtle variation
-                    color = self._get_tile_color_variation(COLOR_TILE_STREET, x, y, z, 6)
-                    pygame.draw.rect(surface, color, rect)
+                elif tile in ("street", "street_cracked", "street_scar", "street_ripped"):
+                    # Street tiles with damage variations
+                    self._draw_street_tile(surface, rect, x, y, z, tile)
                 elif tile == "street_designated":
                     # Street designated for harvesting - warmer tone with harvest indicator
                     color = self._get_tile_color_variation(COLOR_TILE_STREET_DESIGNATED, x, y, z, 8)
@@ -1355,6 +1500,11 @@ class Grid:
                     node = resources.get_node_at(x, y)
                     if node:
                         resource_type = node.get("resource", "")
+                        node_state = node.get("state")
+                        from resources import NodeState
+                        depleted = node_state == NodeState.DEPLETED
+                        
+                        rendered = False
                         if resource_type == "wood":
                             color = COLOR_RESOURCE_NODE_WOOD
                         elif resource_type == "scrap":
@@ -1362,19 +1512,17 @@ class Grid:
                         elif resource_type == "metal":
                             color = COLOR_RESOURCE_NODE_METAL
                         elif resource_type == "mineral":
-                            color = COLOR_RESOURCE_NODE_MINERAL
+                            self._draw_mineral_node(surface, rect, x, y, z, depleted)
+                            rendered = True
                         elif resource_type == "raw_food":
                             color = COLOR_RESOURCE_NODE_RAW_FOOD
                         else:
                             color = COLOR_RESOURCE_NODE_DEFAULT
                         
-                        # Darken if depleted
-                        node_state = node.get("state")
-                        from resources import NodeState
-                        if node_state == NodeState.DEPLETED:
-                            color = (color[0] // 3, color[1] // 3, color[2] // 3)
-                        
-                        pygame.draw.rect(surface, color, rect)
+                        if not rendered:
+                            if depleted:
+                                color = (color[0] // 3, color[1] // 3, color[2] // 3)
+                            pygame.draw.rect(surface, color, rect)
                         
                         # Draw state symbol overlay
                         if node_state == NodeState.RESERVED:

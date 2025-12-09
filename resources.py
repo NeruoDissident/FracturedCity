@@ -455,7 +455,8 @@ def designate_street_for_harvest(grid, x: int, y: int, jobs_module=None) -> bool
     Returns True if successful.
     """
     tile = grid.get_tile(x, y)
-    if tile != "street":
+    # Accept all street variants (normal, cracked, scar, ripped)
+    if tile not in ("street", "street_cracked", "street_scar", "street_ripped"):
         return False
     
     # Check if already has a node
@@ -1189,6 +1190,73 @@ def _spawn_props(grid, streets: list[tuple[int, int]], lots: list[dict]) -> int:
     return props_count
 
 
+def _spawn_road_damage(grid, streets: list[tuple[int, int]], street_segments: list[dict]) -> tuple[int, int]:
+    """Spawn road damage (cracks, scars, rips) on streets, focused near buildings.
+    
+    More damage appears near dense building areas.
+    Ripped streets may have mineral nodes scattered nearby.
+    
+    Returns (damage_count, mineral_count).
+    """
+    damage_count = 0
+    mineral_count = 0
+    street_set = set(streets)
+    
+    # Build a density map - count buildings near each street tile
+    def count_nearby_buildings(x: int, y: int, radius: int = 8) -> int:
+        """Count building-related tiles near a position."""
+        count = 0
+        for dx in range(-radius, radius + 1):
+            for dy in range(-radius, radius + 1):
+                nx, ny = x + dx, y + dy
+                if grid.in_bounds(nx, ny, 0):
+                    tile = grid.get_tile(nx, ny, 0)
+                    if tile in ("finished_wall", "finished_floor", "salvage_object"):
+                        count += 1
+        return count
+    
+    # Process each street tile
+    for sx, sy in streets:
+        tile = grid.get_tile(sx, sy, 0)
+        if tile != "street":
+            continue  # Already modified
+        
+        # Calculate damage probability based on nearby building density
+        building_density = count_nearby_buildings(sx, sy, 6)
+        
+        # Base chance increases with building density
+        # 0 buildings = 2% chance, 20+ buildings = 25% chance
+        base_chance = 0.02 + min(0.23, building_density * 0.012)
+        
+        if random.random() > base_chance:
+            continue
+        
+        # Choose damage type - more severe damage near more buildings
+        if building_density > 15 and random.random() < 0.3:
+            damage_type = "street_ripped"
+        elif building_density > 8 and random.random() < 0.4:
+            damage_type = "street_scar"
+        else:
+            damage_type = "street_cracked"
+        
+        grid.set_tile(sx, sy, damage_type, z=0)
+        damage_count += 1
+        
+        # Ripped streets have a chance to spawn mineral nodes nearby
+        if damage_type == "street_ripped" and random.random() < 0.4:
+            # Try to place a mineral node on an adjacent empty tile
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)]:
+                nx, ny = sx + dx, sy + dy
+                if grid.in_bounds(nx, ny, 0):
+                    adj_tile = grid.get_tile(nx, ny, 0)
+                    if adj_tile in ("empty", "weeds", "debris") and (nx, ny) not in _RESOURCE_NODES:
+                        if _place_node(grid, nx, ny, "mineral_node"):
+                            mineral_count += 1
+                            break
+    
+    return damage_count, mineral_count
+
+
 def _spawn_wood_clusters(grid, lots: list[dict], colonist_spawn: tuple[int, int]) -> int:
     """Spawn wood clusters in back lots (2x density).
     
@@ -1435,6 +1503,10 @@ def spawn_resource_nodes(grid, count: int = 40) -> tuple[int, int]:
     weeds_count = _spawn_weeds(grid, lots)
     props_count = _spawn_props(grid, streets, lots)
     
+    # Step 8: Add road damage (cracks, scars, rips) focused near buildings
+    road_damage_count, road_mineral_count = _spawn_road_damage(grid, streets, street_segments)
+    mineral_count += road_mineral_count  # Add minerals spawned near ripped streets
+    
     total_scrap = scrap_in_buildings + scrap_exterior
     
     print(f"[WorldGen] ═══════════════════════════════════════")
@@ -1442,13 +1514,14 @@ def spawn_resource_nodes(grid, count: int = 40) -> tuple[int, int]:
     print(f"[WorldGen] ═══════════════════════════════════════")
     print(f"[WorldGen] Streets: {len(street_segments)} segments, {len(streets)} tiles")
     print(f"[WorldGen] Sidewalks: {sidewalk_count} tiles")
+    print(f"[WorldGen] Road Damage: {road_damage_count} damaged tiles")
     print(f"[WorldGen] Buildings: {buildings_count} structures along streets")
     print(f"[WorldGen] Back Lots: {len(lots)} resource zones")
     print(f"[WorldGen] ───────────────────────────────────────")
     print(f"[WorldGen] FOOD: {food_count} nodes (inside buildings only)")
     print(f"[WorldGen] SCRAP: {total_scrap} piles ({scrap_in_buildings} interior, {scrap_exterior} exterior)")
     print(f"[WorldGen] WOOD: {wood_count} nodes in back lots")
-    print(f"[WorldGen] MINERALS: {mineral_count} nodes in back lots")
+    print(f"[WorldGen] MINERALS: {mineral_count} nodes (lots + road damage)")
     print(f"[WorldGen] ───────────────────────────────────────")
     print(f"[WorldGen] Decorative: {debris_count} debris, {weeds_count} weeds, {props_count} props")
     print(f"[WorldGen] Colonist spawn: ({colonist_spawn[0]}, {colonist_spawn[1]})")

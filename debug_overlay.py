@@ -551,21 +551,45 @@ class DebugOverlay:
             if len(world_items) > 3:
                 tooltip_lines.append(f"  +{len(world_items) - 3} more...")
         
-        room_id = env_data.get("room_id")
+        # Check registered room first, then fall back to env_data
+        room_id = None
         room_type_text = None
+        room_exits = 0
+        room_enclosure = None
+        
+        try:
+            import rooms as rooms_module
+            # Check if tile is in a registered room
+            room_id = rooms_module._TILE_TO_ROOM.get((gx, gy, current_z))
+            if room_id is not None:
+                room = rooms_module.get_all_rooms().get(room_id)
+                if room is not None:
+                    # Get room classification (Kitchen, Salvage Bay, etc.)
+                    rt = room.get("room_type")
+                    if rt:
+                        room_type_text = f"Room Type: {rt}"
+                    
+                    # Get room enclosure type (COVERED/ENCLOSED)
+                    room_type_enum = room.get("room_type_enum")
+                    if room_type_enum is not None:
+                        room_enclosure = room_type_enum.value  # "covered" or "enclosed"
+                    
+                    # Get room exits (number of entrances/doors)
+                    entrances = room.get("entrances", [])
+                    room_exits = len(entrances)
+        except Exception:
+            pass
+        
+        # Fall back to env_data room_id if not found in registered rooms
+        if room_id is None:
+            room_id = env_data.get("room_id")
+        
         if room_id is None:
             room_text = "Room: None"
         else:
             room_text = f"Room: R{room_id}"
-            try:
-                import rooms as rooms_module
-                room = rooms_module.get_all_rooms().get(room_id)
-                if room is not None:
-                    rt = room.get("room_type")
-                    if rt:
-                        room_type_text = f"Room Type: {rt}"
-            except Exception:
-                room_type_text = None
+            if room_enclosure:
+                room_text += f" ({room_enclosure})"
 
         tooltip_lines.extend([
             f"─────────────────",
@@ -578,7 +602,7 @@ class DebugOverlay:
         ])
         if room_type_text is not None:
             tooltip_lines.append(room_type_text)
-        tooltip_lines.append(f"Exits (room): {env_data.get('exit_count', 0)}")
+        tooltip_lines.append(f"Exits (room): {room_exits}")
         
         # Calculate tooltip size
         line_height = 14

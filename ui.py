@@ -276,6 +276,7 @@ class ActionBar:
         ],
         "floors": [
             {"id": "floor", "name": "Wood Floor", "cost": "1 wood", "keybind": "1"},
+            {"id": "roof", "name": "Roof", "cost": "free", "keybind": "2"},
         ],
         "movement": [
             {"id": "fire_escape", "name": "Fire Escape", "cost": "1 wood, 1 metal", "keybind": "1"},
@@ -1510,7 +1511,7 @@ class ColonistManagementPanel:
     ]
     
     # Tab definitions
-    TABS = ["Overview", "Stats"]
+    TABS = ["Overview", "Bio", "Relations", "Stats", "Thoughts", "Chat", "Help"]
     
     def __init__(self):
         self.visible = False
@@ -1521,20 +1522,32 @@ class ColonistManagementPanel:
         self.font_large: Optional[pygame.font.Font] = None
         self.font_small: Optional[pygame.font.Font] = None
         
-        # Panel dimensions - centered on screen
-        self.panel_width = 420
-        self.panel_height = 620  # Taller for stats tab
-        self.panel_rect = pygame.Rect(
-            (SCREEN_W - self.panel_width) // 2,
+        # Panel dimensions - larger with external tab sidebar
+        self.tab_sidebar_width = 80
+        self.panel_width = 520
+        self.panel_height = 680
+        
+        # Total width includes sidebar
+        total_width = self.tab_sidebar_width + self.panel_width
+        
+        # Center the whole thing
+        self.sidebar_rect = pygame.Rect(
+            (SCREEN_W - total_width) // 2,
             (SCREEN_H - self.panel_height) // 2 - 20,
+            self.tab_sidebar_width,
+            self.panel_height
+        )
+        self.panel_rect = pygame.Rect(
+            self.sidebar_rect.right,
+            self.sidebar_rect.y,
             self.panel_width,
             self.panel_height
         )
         
         # Navigation button rects
-        self.prev_btn_rect = pygame.Rect(0, 0, 60, 28)
-        self.next_btn_rect = pygame.Rect(0, 0, 60, 28)
-        self.close_btn_rect = pygame.Rect(0, 0, 24, 24)
+        self.prev_btn_rect = pygame.Rect(0, 0, 70, 30)
+        self.next_btn_rect = pygame.Rect(0, 0, 70, 30)
+        self.close_btn_rect = pygame.Rect(0, 0, 28, 28)
         
         # Tab button rects (built dynamically)
         self.tab_rects: List[pygame.Rect] = []
@@ -1644,8 +1657,8 @@ class ColonistManagementPanel:
                         colonist.job_tags[tag_id] = not current
                         return True
         
-        # Consume click if inside panel
-        if self.panel_rect.collidepoint(mouse_pos):
+        # Consume click if inside panel or sidebar
+        if self.panel_rect.collidepoint(mouse_pos) or self.sidebar_rect.collidepoint(mouse_pos):
             return True
         
         return False
@@ -1677,19 +1690,62 @@ class ColonistManagementPanel:
         if colonist is None:
             return
         
-        # Panel background with shadow
+        # === Draw Tab Sidebar (external, left of main panel) ===
+        sx = self.sidebar_rect.x
+        sy = self.sidebar_rect.y
+        sw = self.sidebar_rect.width
+        sh = self.sidebar_rect.height
+        
+        # Sidebar background
+        pygame.draw.rect(surface, (28, 30, 38), self.sidebar_rect, border_radius=8)
+        pygame.draw.rect(surface, (50, 55, 65), self.sidebar_rect, 1, border_radius=8)
+        
+        # Tab buttons in sidebar
+        tab_height = 32
+        tab_gap = 6
+        tab_start_y = sy + 60
+        self.tab_rects = []
+        
+        for i, tab_name in enumerate(self.TABS):
+            tab_y = tab_start_y + i * (tab_height + tab_gap)
+            tab_rect = pygame.Rect(sx + 6, tab_y, sw - 12, tab_height)
+            self.tab_rects.append(tab_rect)
+            
+            is_active = (i == self.current_tab)
+            if is_active:
+                bg_color = (60, 70, 90)
+                border_color = (100, 120, 160)
+                text_color = (240, 240, 255)
+                # Draw connector to main panel
+                pygame.draw.rect(surface, bg_color, 
+                               pygame.Rect(sx + sw - 4, tab_y + 4, 8, tab_height - 8))
+            else:
+                bg_color = (38, 42, 52)
+                border_color = (55, 60, 70)
+                text_color = (140, 145, 160)
+            
+            pygame.draw.rect(surface, bg_color, tab_rect, border_radius=4)
+            pygame.draw.rect(surface, border_color, tab_rect, 1, border_radius=4)
+            
+            tab_surf = self.font.render(tab_name, True, text_color)
+            tab_text_rect = tab_surf.get_rect(center=tab_rect.center)
+            surface.blit(tab_surf, tab_text_rect)
+        
+        # === Draw Main Panel ===
+        # Shadow
         shadow_rect = self.panel_rect.copy()
         shadow_rect.x += 4
         shadow_rect.y += 4
-        pygame.draw.rect(surface, (15, 15, 20), shadow_rect, border_radius=12)
+        pygame.draw.rect(surface, (15, 15, 20), shadow_rect, border_radius=10)
         
-        # Main panel
-        pygame.draw.rect(surface, (35, 38, 45), self.panel_rect, border_radius=12)
-        pygame.draw.rect(surface, (80, 85, 95), self.panel_rect, 2, border_radius=12)
+        # Main panel background
+        pygame.draw.rect(surface, (40, 44, 52), self.panel_rect, border_radius=10)
+        pygame.draw.rect(surface, (70, 75, 85), self.panel_rect, 2, border_radius=10)
         
         x = self.panel_rect.x
         y = self.panel_rect.y
         w = self.panel_rect.width
+        h = self.panel_rect.height
         
         # === Header Section ===
         # Colonist name (large)
@@ -1710,45 +1766,33 @@ class ColonistManagementPanel:
         surface.blit(close_text, close_rect)
         
         # Header separator
-        pygame.draw.line(surface, (60, 65, 75), (x + 15, y + 58), (x + w - 15, y + 58), 1)
+        pygame.draw.line(surface, (60, 65, 75), (x + 15, y + 55), (x + w - 15, y + 55), 1)
         
-        # === Tab Buttons ===
-        tab_y = y + 62
-        tab_width = 80
-        tab_height = 22
-        self.tab_rects = []
-        
-        for i, tab_name in enumerate(self.TABS):
-            tab_x = x + 20 + i * (tab_width + 4)
-            tab_rect = pygame.Rect(tab_x, tab_y, tab_width, tab_height)
-            self.tab_rects.append(tab_rect)
-            
-            is_active = (i == self.current_tab)
-            if is_active:
-                bg_color = (60, 65, 80)
-                border_color = (100, 110, 140)
-                text_color = (220, 220, 240)
-            else:
-                bg_color = (40, 42, 50)
-                border_color = (60, 65, 75)
-                text_color = (140, 140, 150)
-            
-            pygame.draw.rect(surface, bg_color, tab_rect, border_radius=4)
-            pygame.draw.rect(surface, border_color, tab_rect, 1, border_radius=4)
-            
-            tab_surf = self.font_small.render(tab_name, True, text_color)
-            tab_text_rect = tab_surf.get_rect(center=tab_rect.center)
-            surface.blit(tab_surf, tab_text_rect)
-        
-        content_y = y + 90
+        # Content area - full width now (no internal tabs)
+        content_y = y + 62
+        content_h = h - 115  # Leave room for nav buttons
+        content_w = w - 40  # Full width minus padding
         col1_x = x + 20
-        col2_x = x + w // 2 + 10
+        col2_x = x + w // 2 + 10  # Right column for Overview
+        
+        # Store content bounds for clipping
+        self._content_bottom = content_y + content_h - 10
         
         # Draw tab content
         if self.current_tab == 0:
-            self._draw_overview_tab(surface, colonist, x, content_y, w, col1_x, col2_x)
+            self._draw_overview_tab(surface, colonist, x, content_y, content_w, col1_x, col2_x)
         elif self.current_tab == 1:
-            self._draw_stats_tab(surface, colonist, x, content_y, w, col1_x)
+            self._draw_bio_tab(surface, colonist, x, content_y, content_w, col1_x)
+        elif self.current_tab == 2:
+            self._draw_relations_tab(surface, colonist, x, content_y, content_w, col1_x)
+        elif self.current_tab == 3:
+            self._draw_stats_tab(surface, colonist, x, content_y, content_w, col1_x)
+        elif self.current_tab == 4:
+            self._draw_thoughts_tab(surface, colonist, x, content_y, content_w, col1_x)
+        elif self.current_tab == 5:
+            self._draw_chat_tab(surface, colonist, x, content_y, content_w, col1_x)
+        elif self.current_tab == 6:
+            self._draw_help_tab(surface, x, content_y, content_w, col1_x)
         
         # Draw navigation buttons (shared by all tabs)
         self._draw_navigation_buttons(surface)
@@ -1762,11 +1806,11 @@ class ColonistManagementPanel:
         initial_content_y = content_y
         
         # === Left Column: Status & Stats ===
-        # Current Task
         section_color = (180, 200, 220)
         value_color = (220, 220, 230)
         muted_color = (140, 140, 150)
         
+        # Current Task
         self._draw_section_header(surface, "Current Task", col1_x, content_y, section_color)
         content_y += 18
         
@@ -1781,35 +1825,30 @@ class ColonistManagementPanel:
         
         # Hunger
         self._draw_section_header(surface, "Hunger", col1_x, content_y, section_color)
-        content_y += 18
+        content_y += 16
         hunger_val = colonist.hunger
         hunger_color = (100, 200, 100) if hunger_val < 50 else (200, 200, 100) if hunger_val < 70 else (200, 100, 100)
-        self._draw_stat_bar(surface, col1_x + 8, content_y, 160, hunger_val, 100, hunger_color)
-        hunger_text = self.font_small.render(f"{hunger_val:.0f} / 100", True, muted_color)
-        surface.blit(hunger_text, (col1_x + 175, content_y))
-        content_y += 22
+        bar_width = min(140, w // 2 - 60)
+        self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, hunger_val, 100, hunger_color)
+        content_y += 20
         
         # Comfort
         self._draw_section_header(surface, "Comfort", col1_x, content_y, section_color)
-        content_y += 18
+        content_y += 16
         comfort_val = getattr(colonist, 'comfort', 0.0)
         comfort_color = (100, 200, 150) if comfort_val > 0 else (200, 150, 100) if comfort_val < 0 else (150, 150, 150)
         comfort_display = (comfort_val + 10) / 20 * 100  # Map -10..10 to 0..100
-        self._draw_stat_bar(surface, col1_x + 8, content_y, 160, comfort_display, 100, comfort_color)
-        comfort_text = self.font_small.render(f"{comfort_val:+.1f}", True, muted_color)
-        surface.blit(comfort_text, (col1_x + 175, content_y))
-        content_y += 22
+        self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, comfort_display, 100, comfort_color)
+        content_y += 20
         
         # Stress
         self._draw_section_header(surface, "Stress", col1_x, content_y, section_color)
-        content_y += 18
+        content_y += 16
         stress_val = getattr(colonist, 'stress', 0.0)
         stress_color = (200, 100, 100) if stress_val > 2 else (200, 200, 100) if stress_val > 0 else (100, 150, 200)
         stress_display = (stress_val + 10) / 20 * 100  # Map -10..10 to 0..100
-        self._draw_stat_bar(surface, col1_x + 8, content_y, 160, stress_display, 100, stress_color)
-        stress_text = self.font_small.render(f"{stress_val:+.1f}", True, muted_color)
-        surface.blit(stress_text, (col1_x + 175, content_y))
-        content_y += 28
+        self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, stress_display, 100, stress_color)
+        content_y += 24
         
         # === Preferences Section ===
         self._draw_section_header(surface, "Preferences", col1_x, content_y, (150, 200, 255))
@@ -1985,98 +2024,157 @@ class ColonistManagementPanel:
         # Get equipment stats
         equip_stats = colonist.get_equipment_stats()
         
-        # === Base Stats Section ===
-        self._draw_section_header(surface, "=== BASE STATS ===", col1_x, content_y, header_color)
-        content_y += 20
+        # === Traits Section (at top of Stats) ===
+        self._draw_section_header(surface, "=== TRAITS ===", col1_x, content_y, (200, 180, 255))
+        content_y += 18
         
-        # Movement
-        base_move = colonist.move_speed  # 8 = base ticks between moves
+        # Get trait labels
+        from traits import get_trait_labels
+        traits = getattr(colonist, 'traits', {})
+        trait_labels = get_trait_labels(traits)
+        
+        for label in trait_labels:
+            # Major traits (with star) get special color
+            if label.startswith("★"):
+                trait_color = (255, 200, 100)  # Gold for major traits
+            else:
+                trait_color = (180, 200, 220)
+            trait_surf = self.font_small.render(label, True, trait_color)
+            surface.blit(trait_surf, (col1_x + 8, content_y))
+            content_y += 13
+        
+        if not trait_labels:
+            no_traits = self.font_small.render("(no traits)", True, muted_color)
+            surface.blit(no_traits, (col1_x + 8, content_y))
+            content_y += 13
+        
+        content_y += 8
+        
+        # === Movement Section ===
+        self._draw_section_header(surface, "=== MOVEMENT ===", col1_x, content_y, header_color)
+        content_y += 18
+        
+        # Move Delay
+        base_move = colonist.move_speed
         equip_mod = colonist.get_equipment_speed_modifier()
         mood_mod = colonist.get_mood_speed_modifier()
         effective_move = base_move * equip_mod * mood_mod
-        
-        # Show effective ticks (lower = faster)
         speed_bonus = equip_stats.get("speed_bonus", 0)
         move_text = f"{effective_move:.1f} ticks"
         if effective_move < base_move:
-            move_text += " (FASTER)"
+            move_text += " (FAST)"
         elif effective_move > base_move:
-            move_text += " (slower)"
-        
+            move_text += " (slow)"
         self._draw_stat_line(surface, col1_x, content_y, "Move Delay", 
                             move_text, speed_bonus, value_color, bonus_color, penalty_color)
-        content_y += 14
+        content_y += 13
         
+        # Walk Steady
+        walk_steady = equip_stats.get("walk_steady", 0)
+        steady_text = f"{walk_steady:+.0%}" if walk_steady != 0 else "0%"
         self._draw_stat_line(surface, col1_x, content_y, "Walk Steady", 
-                            "1.0 (base)", 0, value_color, bonus_color, penalty_color)
-        content_y += 14
+                            steady_text, walk_steady, value_color, bonus_color, penalty_color)
+        content_y += 13
         
-        # Work speeds - show as percentage
-        work_mod = colonist.get_equipment_work_modifier()
-        work_bonus = equip_stats.get("work_bonus", 0)
+        # Haul Capacity
+        haul_cap = colonist.get_equipment_haul_capacity()
+        haul_bonus = equip_stats.get("haul_capacity", 0)
+        haul_text = f"{haul_cap:.0%}"
+        if haul_cap > 1.0:
+            haul_text += " (MORE)"
+        self._draw_stat_line(surface, col1_x, content_y, "Haul Capacity", 
+                            haul_text, haul_bonus, value_color, bonus_color, penalty_color)
+        content_y += 16
         
-        work_text = f"{work_mod:.0%}"
-        if work_mod > 1.0:
-            work_text += " (FASTER)"
-        elif work_mod < 1.0:
-            work_text += " (slower)"
+        # === Work Speeds Section ===
+        self._draw_section_header(surface, "=== WORK SPEEDS ===", col1_x, content_y, header_color)
+        content_y += 18
         
+        # Build Speed (includes mood/stress effects)
+        build_mod = colonist._calculate_work_modifier("construction")
+        build_bonus = equip_stats.get("build_speed", 0)
+        build_text = f"{build_mod:.0%}"
+        if build_mod > 1.0:
+            build_text += " (FAST)"
+        elif build_mod < 1.0:
+            build_text += " (slow)"
         self._draw_stat_line(surface, col1_x, content_y, "Build Speed", 
-                            work_text, work_bonus, value_color, bonus_color, penalty_color)
-        content_y += 14
+                            build_text, build_bonus, value_color, bonus_color, penalty_color)
+        content_y += 13
         
+        # Harvest Speed
+        harvest_mod = colonist._calculate_work_modifier("gathering")
+        harvest_bonus = equip_stats.get("harvest_speed", 0)
+        harvest_text = f"{harvest_mod:.0%}"
+        if harvest_mod > 1.0:
+            harvest_text += " (FAST)"
+        elif harvest_mod < 1.0:
+            harvest_text += " (slow)"
         self._draw_stat_line(surface, col1_x, content_y, "Harvest Speed", 
-                            work_text, work_bonus, value_color, bonus_color, penalty_color)
-        content_y += 14
+                            harvest_text, harvest_bonus, value_color, bonus_color, penalty_color)
+        content_y += 13
         
+        # Craft Speed
+        craft_mod = colonist._calculate_work_modifier("crafting")
+        craft_bonus = equip_stats.get("craft_speed", 0)
+        craft_text = f"{craft_mod:.0%}"
+        if craft_mod > 1.0:
+            craft_text += " (FAST)"
+        elif craft_mod < 1.0:
+            craft_text += " (slow)"
         self._draw_stat_line(surface, col1_x, content_y, "Craft Speed", 
-                            work_text, work_bonus, value_color, bonus_color, penalty_color)
-        content_y += 20
-        
-        # === Senses Section ===
-        self._draw_section_header(surface, "=== SENSES ===", col1_x, content_y, header_color)
-        content_y += 20
-        
-        self._draw_stat_line(surface, col1_x, content_y, "Vision", "1.0 (base)", 0, value_color, bonus_color, penalty_color)
-        content_y += 14
-        self._draw_stat_line(surface, col1_x, content_y, "Hearing", "1.0 (base)", 0, value_color, bonus_color, penalty_color)
-        content_y += 14
-        self._draw_stat_line(surface, col1_x, content_y, "Echo Sense", "1.0 (base)", 0, value_color, bonus_color, penalty_color)
-        content_y += 20
+                            craft_text, craft_bonus, value_color, bonus_color, penalty_color)
+        content_y += 16
         
         # === Survival Section ===
         self._draw_section_header(surface, "=== SURVIVAL ===", col1_x, content_y, header_color)
-        content_y += 20
+        content_y += 18
         
         hazard = equip_stats.get("hazard_resist", 0)
         self._draw_stat_line(surface, col1_x, content_y, "Hazard Resist", 
                             f"{hazard:.0%}", hazard, value_color, bonus_color, penalty_color)
-        content_y += 14
+        content_y += 13
         
-        self._draw_stat_line(surface, col1_x, content_y, "Warmth", "0 (base)", 0, value_color, bonus_color, penalty_color)
-        content_y += 14
-        self._draw_stat_line(surface, col1_x, content_y, "Cooling", "0 (base)", 0, value_color, bonus_color, penalty_color)
-        content_y += 20
+        warmth = equip_stats.get("warmth", 0)
+        self._draw_stat_line(surface, col1_x, content_y, "Warmth", 
+                            f"{warmth:+.1f}", warmth, value_color, bonus_color, penalty_color)
+        content_y += 13
+        
+        cooling = equip_stats.get("cooling", 0)
+        self._draw_stat_line(surface, col1_x, content_y, "Cooling", 
+                            f"{cooling:+.1f}", cooling, value_color, bonus_color, penalty_color)
+        content_y += 16
         
         # === Mental Section ===
         self._draw_section_header(surface, "=== MENTAL ===", col1_x, content_y, header_color)
-        content_y += 20
+        content_y += 18
         
+        # Mood with color
+        mood_score = getattr(colonist, 'mood_score', 0)
+        mood_state = getattr(colonist, 'mood_state', 'Focused')
+        mood_color = colonist.get_mood_color(mood_state)
+        mood_surf = self.font_small.render(f"Mood: {mood_state} ({mood_score:+.1f})", True, mood_color)
+        surface.blit(mood_surf, (col1_x, content_y))
+        content_y += 13
+        
+        # Stress with color
+        stress = getattr(colonist, 'stress', 0)
+        stress_color = (100, 200, 100) if stress < 3 else (200, 200, 100) if stress < 6 else (200, 100, 100)
+        stress_surf = self.font_small.render(f"Stress: {stress:.1f}", True, stress_color)
+        surface.blit(stress_surf, (col1_x, content_y))
+        content_y += 13
+        
+        # Stress Resist
+        stress_resist = equip_stats.get("stress_resist", 0)
+        self._draw_stat_line(surface, col1_x, content_y, "Stress Resist", 
+                            f"{stress_resist:.0%}", stress_resist, value_color, bonus_color, penalty_color)
+        content_y += 13
+        
+        # Comfort Bonus
         comfort = equip_stats.get("comfort", 0)
         self._draw_stat_line(surface, col1_x, content_y, "Comfort Bonus", 
                             f"{comfort:+.2f}", comfort, value_color, bonus_color, penalty_color)
-        content_y += 14
-        
-        mood_score = getattr(colonist, 'mood_score', 0)
-        mood_state = getattr(colonist, 'mood_state', 'Focused')
-        mood_surf = self.font_small.render(f"Mood: {mood_state} ({mood_score:+.1f})", True, value_color)
-        surface.blit(mood_surf, (col1_x, content_y))
-        content_y += 14
-        
-        stress = getattr(colonist, 'stress', 0)
-        stress_surf = self.font_small.render(f"Stress: {stress:+.1f}", True, value_color)
-        surface.blit(stress_surf, (col1_x, content_y))
-        content_y += 20
+        content_y += 16
         
         # === Equipment Bonuses Section ===
         self._draw_section_header(surface, "=== EQUIPMENT BONUSES ===", col1_x, content_y, (255, 200, 150))
@@ -2121,6 +2219,343 @@ class ColonistManagementPanel:
         if not has_any:
             no_equip = self.font_small.render("(no equipment)", True, muted_color)
             surface.blit(no_equip, (col1_x, content_y))
+    
+    def _draw_bio_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Bio tab - colonist's backstory as flowing prose."""
+        muted_color = (140, 140, 150)
+        header_color = (200, 180, 255)
+        normal_color = (180, 180, 190)
+        
+        # Header
+        self._draw_section_header(surface, "Backstory", col1_x, content_y, header_color)
+        content_y += 18
+        
+        # Get cached rich backstory (generated once at colonist creation)
+        backstory_segments = getattr(colonist, 'rich_backstory', [])
+        
+        if not backstory_segments:
+            no_bio = self.font_small.render("(no backstory)", True, muted_color)
+            surface.blit(no_bio, (col1_x, content_y))
+            return
+        
+        # Render flowing text with inline colored traits
+        max_text_width = w - 40
+        line_x = col1_x + 4
+        line_start_x = col1_x + 4
+        
+        for segment in backstory_segments:
+            text = segment["text"]
+            is_trait = segment.get("is_trait", False)
+            color = segment.get("color", normal_color) if is_trait else normal_color
+            
+            # Split into words to handle wrapping
+            words = text.split() if text.strip() else [text]
+            
+            for word in words:
+                word_with_space = word + " " if word.strip() else word
+                word_width = self.font_small.size(word_with_space)[0]
+                
+                # Check if we need to wrap
+                if line_x + word_width > line_start_x + max_text_width and line_x > line_start_x:
+                    # Move to next line
+                    content_y += 14
+                    line_x = line_start_x
+                
+                # Draw the word
+                word_surf = self.font_small.render(word_with_space, True, color)
+                surface.blit(word_surf, (line_x, content_y))
+                line_x += word_width
+        
+        # Move past the last line
+        content_y += 24
+        
+        # Also show trait labels for quick reference
+        self._draw_section_header(surface, "Traits", col1_x, content_y, (180, 200, 220))
+        content_y += 16
+        
+        from traits import get_trait_labels, TRAIT_COLORS
+        traits = getattr(colonist, 'traits', {})
+        trait_labels = get_trait_labels(traits)
+        
+        for label in trait_labels:
+            if label.startswith("★"):
+                trait_color = TRAIT_COLORS["major"]
+            else:
+                trait_color = (180, 200, 220)
+            trait_surf = self.font_small.render(f"• {label}", True, trait_color)
+            surface.blit(trait_surf, (col1_x + 8, content_y))
+            content_y += 14
+    
+    def _draw_relations_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Relations tab - colonist's relationships with others."""
+        from relationships import (get_all_relationships, get_relationship_label, 
+                                   get_relationship_color, get_family_bonds, find_colonist_by_id)
+        
+        muted_color = (140, 140, 150)
+        header_color = (180, 200, 220)
+        
+        # Age display
+        age = getattr(colonist, 'age', 25)
+        age_surf = self.font.render(f"Age: {age}", True, (200, 200, 210))
+        surface.blit(age_surf, (col1_x, content_y))
+        content_y += 24
+        
+        # Family section
+        self._draw_section_header(surface, "Family", col1_x, content_y, (200, 180, 255))
+        content_y += 16
+        
+        family_bonds = get_family_bonds(colonist)
+        if family_bonds:
+            for other_id, bond in family_bonds:
+                other = find_colonist_by_id(other_id, self.colonists)
+                if other:
+                    bond_name = bond.value.title()
+                    other_name = other.name.split()[0]
+                    bond_text = f"• {other_name} ({bond_name})"
+                    bond_surf = self.font_small.render(bond_text, True, (200, 180, 255))
+                    surface.blit(bond_surf, (col1_x + 8, content_y))
+                    content_y += 14
+        else:
+            no_family = self.font_small.render("(no family in colony)", True, muted_color)
+            surface.blit(no_family, (col1_x + 8, content_y))
+            content_y += 14
+        
+        content_y += 10
+        
+        # Relationships section
+        self._draw_section_header(surface, "Relationships", col1_x, content_y, header_color)
+        content_y += 16
+        
+        relationships = get_all_relationships(colonist, self.colonists)
+        
+        if not relationships:
+            no_rels = self.font_small.render("(no relationships yet)", True, muted_color)
+            surface.blit(no_rels, (col1_x + 8, content_y))
+            return
+        
+        # Show top relationships (sorted by score)
+        shown = 0
+        for other, rel_data in relationships:
+            if shown >= 12:  # Limit display
+                more_text = self.font_small.render("...", True, muted_color)
+                surface.blit(more_text, (col1_x + 8, content_y))
+                break
+            
+            # Skip strangers with 0 interactions
+            if rel_data["interactions"] == 0 and rel_data["score"] == 0:
+                continue
+            
+            other_name = other.name.split()[0]
+            label = get_relationship_label(colonist, other)
+            score = rel_data["score"]
+            color = get_relationship_color(colonist, other)
+            
+            # Format: "Name (Label) +50"
+            score_sign = "+" if score >= 0 else ""
+            rel_text = f"• {other_name} - {label} ({score_sign}{score})"
+            
+            rel_surf = self.font_small.render(rel_text, True, color)
+            surface.blit(rel_surf, (col1_x + 8, content_y))
+            content_y += 14
+            shown += 1
+        
+        if shown == 0:
+            no_rels = self.font_small.render("(no relationships yet)", True, muted_color)
+            surface.blit(no_rels, (col1_x + 8, content_y))
+    
+    def _draw_thoughts_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Thoughts tab - colonist's internal monologue."""
+        from colonist import THOUGHT_TYPES
+        
+        muted_color = (140, 140, 150)
+        header_color = (180, 200, 220)
+        
+        # Header
+        self._draw_section_header(surface, "Recent Thoughts", col1_x, content_y, header_color)
+        content_y += 18
+        
+        # Get recent thoughts
+        thoughts = colonist.get_recent_thoughts(12)  # Show up to 12 thoughts
+        
+        if not thoughts:
+            no_thoughts = self.font_small.render("(no thoughts yet)", True, muted_color)
+            surface.blit(no_thoughts, (col1_x, content_y))
+            return
+        
+        # Draw each thought
+        for thought in thoughts:
+            thought_type = thought.get("type", "idle")
+            text = thought.get("text", "")
+            mood_effect = thought.get("mood_effect", 0.0)
+            
+            # Get color for thought type
+            type_color = THOUGHT_TYPES.get(thought_type, (180, 180, 180))
+            
+            # Draw bullet point with type color
+            pygame.draw.circle(surface, type_color, (col1_x + 4, content_y + 6), 3)
+            
+            # Draw thought text
+            text_surf = self.font_small.render(text, True, (200, 200, 210))
+            surface.blit(text_surf, (col1_x + 14, content_y))
+            
+            # Draw mood effect indicator if significant
+            if abs(mood_effect) >= 0.05:
+                effect_color = (100, 200, 100) if mood_effect > 0 else (200, 100, 100)
+                effect_text = f"+{mood_effect:.1f}" if mood_effect > 0 else f"{mood_effect:.1f}"
+                effect_surf = self.font_small.render(effect_text, True, effect_color)
+                surface.blit(effect_surf, (x + w - 50, content_y))
+            
+            content_y += 14
+            
+            # Stop if we run out of space
+            if content_y > 520:
+                more_text = self.font_small.render("...", True, muted_color)
+                surface.blit(more_text, (col1_x, content_y))
+                break
+        
+        # Draw legend at bottom
+        content_y += 10
+        legend_y = content_y
+        legend_x = col1_x
+        
+        legend_items = [
+            ("environment", "Environment"),
+            ("social", "Social"),
+            ("work", "Work"),
+            ("need", "Need"),
+            ("mood", "Mood"),
+            ("idle", "Idle"),
+        ]
+        
+        for thought_type, label in legend_items:
+            type_color = THOUGHT_TYPES.get(thought_type, (180, 180, 180))
+            pygame.draw.circle(surface, type_color, (legend_x + 4, legend_y + 5), 3)
+            label_surf = self.font_small.render(label, True, muted_color)
+            surface.blit(label_surf, (legend_x + 12, legend_y))
+            legend_x += 60
+            
+            # Wrap to next line if needed
+            if legend_x > x + w - 60:
+                legend_x = col1_x
+                legend_y += 12
+    
+    def _draw_chat_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Chat tab - colony-wide conversation log."""
+        from conversations import get_conversation_log
+        
+        muted_color = (140, 140, 150)
+        header_color = (180, 200, 220)
+        speaker_color = (200, 180, 255)
+        listener_color = (180, 220, 200)
+        
+        # Header
+        self._draw_section_header(surface, "Colony Chat Log", col1_x, content_y, header_color)
+        content_y += 18
+        
+        # Get recent conversations
+        conversations = get_conversation_log(15)  # Show up to 15 conversations
+        
+        if not conversations:
+            no_chat = self.font_small.render("(no conversations yet)", True, muted_color)
+            surface.blit(no_chat, (col1_x, content_y))
+            return
+        
+        # Draw each conversation
+        max_text_width = w - 40
+        for convo in conversations:
+            speaker = convo.get("speaker", "???").split()[0]  # First name
+            listener = convo.get("listener", "???").split()[0]
+            speaker_line = convo.get("speaker_line", "")
+            listener_line = convo.get("listener_line", "")
+            
+            # Speaker line
+            speaker_text = f"{speaker}: {speaker_line}"
+            # Truncate if too long
+            while self.font_small.size(speaker_text)[0] > max_text_width and len(speaker_text) > 20:
+                speaker_text = speaker_text[:-4] + "..."
+            
+            speaker_surf = self.font_small.render(speaker_text, True, speaker_color)
+            surface.blit(speaker_surf, (col1_x + 4, content_y))
+            content_y += 13
+            
+            # Listener response (indented)
+            listener_text = f"{listener}: {listener_line}"
+            while self.font_small.size(listener_text)[0] > max_text_width - 10 and len(listener_text) > 20:
+                listener_text = listener_text[:-4] + "..."
+            
+            listener_surf = self.font_small.render(listener_text, True, listener_color)
+            surface.blit(listener_surf, (col1_x + 14, content_y))
+            content_y += 15
+            
+            # Stop if we run out of space
+            if content_y > 520:
+                more_text = self.font_small.render("...", True, muted_color)
+                surface.blit(more_text, (col1_x, content_y))
+                break
+    
+    def _draw_help_tab(self, surface, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Help tab - compact stat reference."""
+        muted_color = (140, 140, 150)
+        header_color = (180, 200, 220)
+        highlight_color = (100, 200, 150)
+        max_width = w - 20
+        
+        def draw_help_line(name, desc):
+            nonlocal content_y
+            # Truncate description to fit
+            full_text = f"{name}: {desc}"
+            while self.font_small.size(full_text)[0] > max_width and len(full_text) > 30:
+                full_text = full_text[:-4] + "..."
+            name_surf = self.font_small.render(f"{name}:", True, highlight_color)
+            surface.blit(name_surf, (col1_x, content_y))
+            desc_surf = self.font_small.render(f" {desc[:45]}", True, muted_color)
+            surface.blit(desc_surf, (col1_x + name_surf.get_width(), content_y))
+            content_y += 13
+        
+        # === Movement ===
+        self._draw_section_header(surface, "MOVEMENT", col1_x, content_y, header_color)
+        content_y += 14
+        draw_help_line("Move Delay", "Lower = faster movement")
+        draw_help_line("Walk Steady", "Reduces stumble chance")
+        draw_help_line("Haul Capacity", "Carry amount multiplier")
+        content_y += 4
+        
+        # === Work ===
+        self._draw_section_header(surface, "WORK", col1_x, content_y, header_color)
+        content_y += 14
+        draw_help_line("Build", "Construction speed")
+        draw_help_line("Harvest", "Gathering speed")
+        draw_help_line("Craft", "Workstation speed")
+        content_y += 4
+        
+        # === Survival ===
+        self._draw_section_header(surface, "SURVIVAL", col1_x, content_y, header_color)
+        content_y += 14
+        draw_help_line("Hazard Resist", "Reduces env damage")
+        draw_help_line("Warmth/Cooling", "Temperature resistance")
+        content_y += 4
+        
+        # === Mental ===
+        self._draw_section_header(surface, "MENTAL", col1_x, content_y, header_color)
+        content_y += 14
+        draw_help_line("Mood", "Affects work speed")
+        draw_help_line("Stress", ">6 = penalty, >8 = severe")
+        draw_help_line("Stress Resist", "Reduces stress gain")
+        draw_help_line("Comfort", "Equipment mood bonus")
+        content_y += 4
+        
+        # === Mood Effects (compact) ===
+        self._draw_section_header(surface, "MOOD EFFECTS", col1_x, content_y, header_color)
+        content_y += 14
+        
+        mood_line = "Euphoric +15% | Calm +10% | Focused +5%"
+        mood_surf = self.font_small.render(mood_line, True, (100, 200, 150))
+        surface.blit(mood_surf, (col1_x, content_y))
+        content_y += 13
+        
+        mood_line2 = "Uneasy -5% | Stressed -15% | Overwhelmed -30%"
+        mood_surf2 = self.font_small.render(mood_line2, True, (200, 150, 100))
+        surface.blit(mood_surf2, (col1_x, content_y))
     
     def _draw_stat_line(self, surface, x: int, y: int, name: str, value: str, 
                         bonus: float, value_color: tuple, bonus_color: tuple, penalty_color: tuple) -> None:
