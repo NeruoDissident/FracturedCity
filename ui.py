@@ -141,7 +141,9 @@ class SubMenu:
         self.panel_width = SUBMENU_MIN_WIDTH
         self.panel_rect = pygame.Rect(0, 0, self.panel_width, 0)
         self.selected_item: Optional[str] = None
+        self.hovered_item: Optional[str] = None  # Track which item is hovered for tooltip
         self._font = font
+        self._item_ids = []  # Map button index to item id
         self._create_buttons()
     
     def _calculate_width(self) -> int:
@@ -168,6 +170,7 @@ class SubMenu:
     def _create_buttons(self) -> None:
         """Create buttons for menu items."""
         self.buttons = []
+        self._item_ids = []
         padding = 6
         item_spacing = 4
         
@@ -188,6 +191,7 @@ class SubMenu:
                 on_click=lambda item_id=item["id"]: self._select_item(item_id),
             )
             self.buttons.append(btn)
+            self._item_ids.append(item["id"])
         
         # Update panel height
         total_height = len(self.buttons) * (SUBMENU_ITEM_HEIGHT + item_spacing) + padding * 2 - item_spacing
@@ -226,9 +230,14 @@ class SubMenu:
     def update(self, mouse_pos: tuple[int, int]) -> None:
         """Update hover states."""
         if not self.visible:
+            self.hovered_item = None
             return
-        for btn in self.buttons:
+        
+        self.hovered_item = None
+        for i, btn in enumerate(self.buttons):
             btn.update(mouse_pos)
+            if btn.hovered and i < len(self._item_ids):
+                self.hovered_item = self._item_ids[i]
     
     def handle_click(self, mouse_pos: tuple[int, int]) -> bool:
         """Handle click. Returns True if consumed."""
@@ -245,7 +254,7 @@ class SubMenu:
         self.hide()
         return False
     
-    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font, tooltips: Dict[str, str] = None) -> None:
         """Draw the submenu."""
         if not self.visible:
             return
@@ -262,40 +271,235 @@ class SubMenu:
         
         for btn in self.buttons:
             btn.draw(surface, font)
+        
+        # Draw tooltip box for hovered item
+        if self.hovered_item and tooltips:
+            tooltip_data = tooltips.get(self.hovered_item)
+            if tooltip_data:
+                # Support both old string format and new tuple format
+                if isinstance(tooltip_data, str):
+                    title = self.hovered_item.replace("_", " ").title()
+                    desc = tooltip_data
+                    extra = ""
+                else:
+                    title, desc, extra = tooltip_data
+                
+                # Fonts
+                title_font = pygame.font.Font(None, 26)
+                desc_font = pygame.font.Font(None, 22)
+                extra_font = pygame.font.Font(None, 20)
+                
+                # Render text
+                title_surf = title_font.render(title, True, (255, 220, 150))
+                desc_surf = desc_font.render(desc, True, (220, 220, 220))
+                extra_surf = extra_font.render(extra, True, (150, 180, 220)) if extra else None
+                
+                # Calculate box size
+                padding = 16
+                line_spacing = 6
+                box_width = max(title_surf.get_width(), desc_surf.get_width())
+                if extra_surf:
+                    box_width = max(box_width, extra_surf.get_width())
+                box_width += padding * 2
+                box_width = max(box_width, 250)  # Minimum width for readability
+                
+                box_height = padding + title_surf.get_height() + line_spacing
+                box_height += desc_surf.get_height() + line_spacing
+                if extra_surf:
+                    box_height += extra_surf.get_height() + line_spacing
+                box_height += padding
+                
+                # Position tooltip to the right of the menu
+                from config import SCREEN_W, SCREEN_H
+                
+                # Try right side first
+                tooltip_x = self.panel_rect.right + 12
+                tooltip_y = self.panel_rect.top
+                
+                # If it goes off right edge, try left side
+                if tooltip_x + box_width > SCREEN_W - 10:
+                    tooltip_x = self.panel_rect.left - box_width - 12
+                
+                # If left side is also off-screen, just put it at the right edge of screen
+                if tooltip_x < 10:
+                    tooltip_x = SCREEN_W - box_width - 10
+                
+                # Vertical: keep it above the action bar
+                if tooltip_y + box_height > SCREEN_H - 60:
+                    tooltip_y = SCREEN_H - 60 - box_height
+                
+                # Don't go above screen top
+                if tooltip_y < 10:
+                    tooltip_y = 10
+                
+                # Draw box with shadow
+                box_rect = pygame.Rect(tooltip_x, tooltip_y, box_width, box_height)
+                shadow_rect = box_rect.copy()
+                shadow_rect.x += 4
+                shadow_rect.y += 4
+                pygame.draw.rect(surface, (15, 15, 20), shadow_rect, border_radius=8)
+                
+                # Main box with gradient-like effect
+                pygame.draw.rect(surface, (45, 45, 55), box_rect, border_radius=8)
+                pygame.draw.rect(surface, (70, 70, 90), box_rect, 2, border_radius=8)
+                
+                # Draw text
+                y = tooltip_y + padding
+                surface.blit(title_surf, (tooltip_x + padding, y))
+                y += title_surf.get_height() + line_spacing
+                
+                # Draw separator line
+                pygame.draw.line(surface, (80, 80, 100), 
+                               (tooltip_x + padding, y - 2), 
+                               (tooltip_x + box_width - padding, y - 2), 1)
+                
+                surface.blit(desc_surf, (tooltip_x + padding, y))
+                y += desc_surf.get_height() + line_spacing
+                
+                if extra_surf:
+                    surface.blit(extra_surf, (tooltip_x + padding, y))
 
 
 class ActionBar:
     """Bottom action bar with main category buttons and submenus."""
     
-    # Menu structure - base categories. Some entries (workstations, furniture)
-    # are populated at runtime from data definitions.
-    BUILD_MENU = {
-        "walls": [
-            {"id": "wall", "name": "Wall", "cost": "2 wood", "keybind": "1"},
-            {"id": "wall_advanced", "name": "Reinforced Wall", "cost": "2 mineral", "keybind": "2"},
-        ],
-        "floors": [
-            {"id": "floor", "name": "Wood Floor", "cost": "1 wood", "keybind": "1"},
-            {"id": "roof", "name": "Roof", "cost": "free", "keybind": "2"},
-        ],
-        "movement": [
-            {"id": "fire_escape", "name": "Fire Escape", "cost": "1 wood, 1 metal", "keybind": "1"},
-            {"id": "bridge", "name": "Bridge", "cost": "2 wood, 1 metal", "keybind": "2"},
-        ],
-        "entrance": [
-            {"id": "door", "name": "Door", "cost": "1 wood, 1 metal", "keybind": "1"},
-            {"id": "window", "name": "Window", "cost": "1 wood, 1 mineral", "keybind": "2"},
-        ],
-        # Workstations category is populated at runtime from BUILDING_TYPES
-        "workstations": [],
-        # Furniture category is populated at runtime from items tagged as "furniture"
-        "furniture": [],
+    # Tooltips for items - explains what each thing does
+    # Format: {id: (title, description, extra_info)}
+    TOOLTIPS = {
+        # Walls
+        "wall": (
+            "Wooden Wall",
+            "A basic wall made of wood. Blocks movement and line of sight.",
+            "Cost: 2 wood"
+        ),
+        "wall_advanced": (
+            "Reinforced Wall", 
+            "A stronger wall made of minerals. More durable and provides better insulation.",
+            "Cost: 2 mineral"
+        ),
+        # Floors
+        "floor": (
+            "Wood Floor",
+            "Wooden flooring that makes rooms feel complete. Colonists prefer walking on floors.",
+            "Cost: 1 wood"
+        ),
+        # Access
+        "door": (
+            "Door",
+            "Allows colonists to pass through walls. Opens and closes automatically.",
+            "Cost: 1 wood, 1 metal"
+        ),
+        "window": (
+            "Window",
+            "Colonists can pass through like a door. Lets light into rooms and can be opened for ventilation.",
+            "Cost: 1 wood, 1 mineral"
+        ),
+        "fire_escape": (
+            "Fire Escape",
+            "Vertical ladder that provides access between floors. Must be placed on the edge of a building.",
+            "Cost: 1 wood, 1 metal"
+        ),
+        "bridge": (
+            "Bridge",
+            "A horizontal walkway that spans gaps between buildings or over open areas.",
+            "Cost: 2 wood, 1 metal"
+        ),
+        # Zones
+        "stockpile": (
+            "Stockpile Zone",
+            "Designate an area for storing resources. Colonists will haul items here. Click and drag to create.",
+            "Right-click stockpile to set filters"
+        ),
+        "allow": (
+            "Allowed Area",
+            "Mark tiles where colonists are allowed to walk. Use to restrict movement or create paths.",
+            "Drag to paint allowed tiles"
+        ),
+        "roof_zone": (
+            "Roof Zone",
+            "Designate an area to be automatically roofed. Roofs provide shelter from weather.",
+            "Requires enclosed walls"
+        ),
+        "demolish": (
+            "Demolish",
+            "Remove buildings, walls, floors, and other constructions. Resources are lost.",
+            "Click or drag to demolish"
+        ),
+        # Tools
+        "harvest": (
+            "Harvest",
+            "Gather resources from plants, trees, and resource nodes. Colonists will collect the materials.",
+            "Click or drag to mark for harvest"
+        ),
+        "salvage": (
+            "Salvage",
+            "Carefully deconstruct buildings to recover some materials. Better than demolish for reclaiming resources.",
+            "Click buildings to salvage"
+        ),
+        # Workstations
+        "salvagers_bench": (
+            "Salvager's Bench",
+            "Strip down scrap into usable metal. Essential for turning junk into the chrome that keeps your crew alive.",
+            "Processes: Scrap → Metal"
+        ),
+        "generator": (
+            "Generator",
+            "Cranks out power cells to juice your machines. No cells, no craft - keep this thing humming.",
+            "Produces: Power Cells"
+        ),
+        "stove": (
+            "Stove",
+            "Turns raw ingredients into actual food. Hot meals keep morale up and bellies full.",
+            "Produces: Cooked Meals"
+        ),
+        "gutter_forge": (
+            "Gutter Forge",
+            "Where street iron gets hammered into blades and knuckle rigs. Crude but deadly.",
+            "Crafts: Weapons, Gauntlets"
+        ),
+        "skinshop_loom": (
+            "Skinshop Loom",
+            "Stitches together armor from scavenged hides and synth-weave. Protection for the meat underneath.",
+            "Crafts: Armor, Protective Gear"
+        ),
+        "cortex_spindle": (
+            "Cortex Spindle",
+            "Delicate work - neural implants, lucky charms, and trauma patches. Handles the stuff between your ears.",
+            "Crafts: Implants, Charms, Medical"
+        ),
     }
     
+    # Menu structure - flattened, less nesting
+    # Build = walls only
+    BUILD_MENU = [
+        {"id": "wall", "name": "Wall", "cost": "2 wood", "keybind": "1"},
+        {"id": "wall_advanced", "name": "Reinforced Wall", "cost": "2 mineral", "keybind": "2"},
+    ]
+    
+    # Floors - just floor for now, more types later
+    FLOORS_MENU = [
+        {"id": "floor", "name": "Wood Floor", "cost": "1 wood", "keybind": "1"},
+    ]
+    
+    # Access = doors, windows, fire escape, bridge (combined entrance + movement)
+    ACCESS_MENU = [
+        {"id": "door", "name": "Door", "cost": "1 wood, 1 metal", "keybind": "1"},
+        {"id": "window", "name": "Window", "cost": "1 wood, 1 mineral", "keybind": "2"},
+        {"id": "fire_escape", "name": "Fire Escape", "cost": "1 wood, 1 metal", "keybind": "3"},
+        {"id": "bridge", "name": "Bridge", "cost": "2 wood, 1 metal", "keybind": "4"},
+    ]
+    
+    # Workstations - populated at runtime
+    STATIONS_MENU = []
+    
+    # Furniture - populated at runtime
+    FURNITURE_MENU = []
+    
+    # Zones = stockpile, allow, roof (no demolish)
     ZONE_MENU = [
         {"id": "stockpile", "name": "Stockpile", "keybind": "1"},
         {"id": "allow", "name": "Allow", "keybind": "2"},
-        {"id": "demolish", "name": "Demolish", "keybind": "3"},
+        {"id": "roof", "name": "Roof", "keybind": "3"},
     ]
     
     def __init__(self):
@@ -304,7 +508,6 @@ class ActionBar:
         # Main action buttons
         self.main_buttons: Dict[str, Button] = {}
         self.submenus: Dict[str, SubMenu] = {}
-        self.build_submenus: Dict[str, SubMenu] = {}
         
         # State
         self.active_menu: Optional[str] = None  # "build", "zone", "harvest"
@@ -317,15 +520,11 @@ class ActionBar:
         self._create_ui()
     
     def _build_workstation_menu_items(self) -> None:
-        """Populate the Workstations build submenu from BUILDING_TYPES.
-        
-        Any building definition with workstation=True will appear here. This
-        makes adding new stations mostly data-only (edit buildings.py).
-        """
+        """Populate the Workstations submenu from BUILDING_TYPES."""
         try:
             import buildings as buildings_module
         except ImportError:
-            ActionBar.BUILD_MENU["workstations"] = []
+            ActionBar.STATIONS_MENU = []
             return
         
         ws_defs = []
@@ -338,11 +537,14 @@ class ActionBar:
                 parts = [f"{amount} {res}" for res, amount in materials.items()]
                 cost = ", ".join(parts)
             else:
-                cost = ""
-            ws_defs.append((b_id, name, cost))
+                cost = "Free"
+            # Get description and power requirement
+            desc = b_def.get("description", "A workstation for crafting.")
+            power = b_def.get("power_required", 0)
+            ws_defs.append((b_id, name, cost, desc, power))
         
         menu_items: List[dict] = []
-        for idx, (b_id, display_name, cost) in enumerate(ws_defs):
+        for idx, (b_id, display_name, cost, desc, power) in enumerate(ws_defs):
             keybind = str(idx + 1) if idx < 9 else ""
             menu_items.append({
                 "id": b_id,
@@ -350,25 +552,26 @@ class ActionBar:
                 "cost": cost,
                 "keybind": keybind,
             })
+            # Only add tooltip if not already defined (custom tooltips take priority)
+            if b_id not in ActionBar.TOOLTIPS:
+                extra = f"Cost: {cost}"
+                if power > 0:
+                    extra += f" | Requires {power} power"
+                ActionBar.TOOLTIPS[b_id] = (display_name, desc, extra)
         
-        ActionBar.BUILD_MENU["workstations"] = menu_items
+        ActionBar.STATIONS_MENU = menu_items
     
     def _build_furniture_menu_items(self) -> None:
-        """Populate the Furniture build submenu from items tagged as furniture.
-        
-        Each furniture item becomes a tool id of the form "furn_<item_id>" so
-        placement logic can treat all furniture generically.
-        """
+        """Populate the Furniture submenu from items tagged as furniture."""
         try:
             import items as items_module
         except ImportError:
-            # If items registry is not available yet, leave furniture menu empty
-            ActionBar.BUILD_MENU["furniture"] = []
+            ActionBar.FURNITURE_MENU = []
             return
         
         furniture_defs = items_module.get_items_with_tag("furniture")
         if not furniture_defs:
-            ActionBar.BUILD_MENU["furniture"] = []
+            ActionBar.FURNITURE_MENU = []
             return
         
         # Stable ordering by display name
@@ -383,88 +586,76 @@ class ActionBar:
                 "keybind": keybind,
             })
         
-        ActionBar.BUILD_MENU["furniture"] = menu_items
+        ActionBar.FURNITURE_MENU = menu_items
     
     def _create_ui(self) -> None:
         """Create all UI elements."""
-        # Main buttons - centered in bar (4 buttons now)
-        button_width = 90
-        num_buttons = 4
-        total_width = button_width * num_buttons + BUTTON_SPACING * (num_buttons - 1)
-        start_x = (SCREEN_W - total_width) // 2
-        button_y = SCREEN_H - BAR_HEIGHT + (BAR_HEIGHT - BUTTON_HEIGHT) // 2
-        
-        # Build button
-        self.main_buttons["build"] = Button(
-            x=start_x,
-            y=button_y,
-            width=button_width,
-            height=BUTTON_HEIGHT,
-            text="Build",
-            keybind="B",
-        )
-        
-        # Zone button
-        self.main_buttons["zone"] = Button(
-            x=start_x + (button_width + BUTTON_SPACING),
-            y=button_y,
-            width=button_width,
-            height=BUTTON_HEIGHT,
-            text="Zone",
-            keybind="Z",
-        )
-        
-        # Salvage button (new core action)
-        self.main_buttons["salvage"] = Button(
-            x=start_x + (button_width + BUTTON_SPACING) * 2,
-            y=button_y,
-            width=button_width,
-            height=BUTTON_HEIGHT,
-            text="Salvage",
-            keybind="",  # No keybind - conflicts with WASD camera
-        )
-        
-        # Harvest button
-        self.main_buttons["harvest"] = Button(
-            x=start_x + (button_width + BUTTON_SPACING) * 3,
-            y=button_y,
-            width=button_width,
-            height=BUTTON_HEIGHT,
-            text="Harvest",
-            keybind="H",
-        )
-        
-        # Build category submenu (Walls, Floors, Movement, Entrance, Workstations, Furniture)
-        build_categories = [
-            {"id": "walls", "name": "Walls", "keybind": "1"},
-            {"id": "floors", "name": "Floors", "keybind": "2"},
-            {"id": "movement", "name": "Movement", "keybind": "3"},
-            {"id": "entrance", "name": "Entrance", "keybind": "4"},
-            {"id": "workstations", "name": "Workstations", "keybind": "5"},
-            {"id": "furniture", "name": "Furniture", "keybind": "6"},
-        ]
-        self.submenus["build"] = SubMenu(build_categories, self.main_buttons["build"])
-        
-        # Zone submenu
-        self.submenus["zone"] = SubMenu(self.ZONE_MENU, self.main_buttons["zone"])
-        
-        # Build sub-submenus (one for each category)
-        # Populate dynamic menus (workstations, furniture) from data definitions
+        # Populate dynamic menus first
         self._build_workstation_menu_items()
         self._build_furniture_menu_items()
-        for cat_id, items in self.BUILD_MENU.items():
-            # Create a temporary parent for positioning
-            self.build_submenus[cat_id] = SubMenu(items, self.main_buttons["build"])
+        
+        # Main buttons - auto-sized to fit text
+        button_y = SCREEN_H - BAR_HEIGHT + (BAR_HEIGHT - BUTTON_HEIGHT) // 2
+        
+        # Define buttons with their labels
+        # NOTE: Cannot use W, A, S, D - reserved for camera movement
+        button_defs = [
+            ("build", "Build", "B"),
+            ("floors", "Floor", "F"),
+            ("access", "Access", "E"),  # E for Entry/Exit points
+            ("stations", "Stations", "T"),
+            ("furniture", "Furniture", "R"),  # R for fुRniture
+            ("zone", "Zone", "Z"),
+            ("demolish", "Demolish", "X"),
+            ("salvage", "Salvage", "V"),  # V for salVage
+            ("harvest", "Harvest", "H"),
+        ]
+        
+        # Calculate widths based on text - use temp font
+        temp_font = pygame.font.Font(None, 22)
+        button_widths = []
+        for btn_id, text, keybind in button_defs:
+            # Width = keybind + text + padding
+            kb_width = temp_font.size(f"[{keybind}] ")[0] if keybind else 0
+            text_width = temp_font.size(text)[0]
+            width = kb_width + text_width + 24  # padding
+            width = max(width, 70)  # minimum width
+            button_widths.append(width)
+        
+        # Calculate total width and center
+        total_width = sum(button_widths) + BUTTON_SPACING * (len(button_defs) - 1)
+        start_x = (SCREEN_W - total_width) // 2
+        
+        # Create buttons
+        current_x = start_x
+        for i, (btn_id, text, keybind) in enumerate(button_defs):
+            self.main_buttons[btn_id] = Button(
+                x=current_x,
+                y=button_y,
+                width=button_widths[i],
+                height=BUTTON_HEIGHT,
+                text=text,
+                keybind=keybind,
+            )
+            current_x += button_widths[i] + BUTTON_SPACING
+        
+        # Create submenus for each category
+        self.submenus["build"] = SubMenu(self.BUILD_MENU, self.main_buttons["build"])
+        self.submenus["floors"] = SubMenu(self.FLOORS_MENU, self.main_buttons["floors"])
+        self.submenus["access"] = SubMenu(self.ACCESS_MENU, self.main_buttons["access"])
+        self.submenus["stations"] = SubMenu(self.STATIONS_MENU, self.main_buttons["stations"])
+        self.submenus["furniture"] = SubMenu(self.FURNITURE_MENU, self.main_buttons["furniture"])
+        self.submenus["zone"] = SubMenu(self.ZONE_MENU, self.main_buttons["zone"])
+        
+        # No submenus needed for demolish/salvage/harvest - they're direct tools
     
     def init_font(self) -> None:
         """Initialize font after pygame.init()."""
-        self.font = pygame.font.Font(None, 22)
+        self.font = pygame.font.Font(None, 22)  # Normal readable font
     
     def _close_all_menus(self) -> None:
         """Close all open menus."""
         for menu in self.submenus.values():
-            menu.hide()
-        for menu in self.build_submenus.values():
             menu.hide()
         self.active_menu = None
         self.active_submenu = None
@@ -480,35 +671,14 @@ class ActionBar:
         if menu_id == "harvest":
             # Harvest is a direct tool, no submenu
             self.current_tool = "harvest"
+        elif menu_id == "demolish":
+            # Demolish is a direct tool, no submenu
+            self.current_tool = "demolish"
         elif menu_id == "salvage":
             # Salvage is a direct tool, no submenu
             self.current_tool = "salvage"
         elif menu_id in self.submenus:
             self.submenus[menu_id].show()
-    
-    def _open_build_submenu(self, category: str) -> None:
-        """Open a build category submenu."""
-        # Close the main build menu
-        self.submenus["build"].hide()
-        self.active_submenu = category
-        
-        # Position and show the category submenu
-        submenu = self.build_submenus[category]
-        submenu.panel_rect.x = self.main_buttons["build"].rect.x
-        submenu.panel_rect.bottom = self.main_buttons["build"].rect.top - 6
-        
-        # Ensure menu doesn't go off-screen to the right
-        if submenu.panel_rect.right > SCREEN_W - 10:
-            submenu.panel_rect.right = SCREEN_W - 10
-        
-        # Update button positions
-        padding = 6
-        item_spacing = 4
-        for i, btn in enumerate(submenu.buttons):
-            btn.rect.x = submenu.panel_rect.x + padding
-            btn.rect.y = submenu.panel_rect.y + padding + i * (SUBMENU_ITEM_HEIGHT + item_spacing)
-        
-        submenu.visible = True
     
     def get_current_tool(self) -> Optional[str]:
         """Get the currently selected tool."""
@@ -521,7 +691,7 @@ class ActionBar:
     
     def handle_key(self, key: int) -> bool:
         """Handle keyboard input. Returns True if consumed."""
-        # Main menu shortcuts
+        # Main menu shortcuts - new flattened structure
         if key == pygame.K_b:
             if self.active_menu == "build":
                 self.cancel_tool()
@@ -529,15 +699,47 @@ class ActionBar:
                 self._open_menu("build")
             return True
         
+        if key == pygame.K_f:
+            if self.active_menu == "floors":
+                self.cancel_tool()
+            else:
+                self._open_menu("floors")
+            return True
+        
+        if key == pygame.K_e:
+            if self.active_menu == "access":
+                self.cancel_tool()
+            else:
+                self._open_menu("access")
+            return True
+        
+        if key == pygame.K_t:
+            if self.active_menu == "stations":
+                self.cancel_tool()
+            else:
+                self._open_menu("stations")
+            return True
+        
+        if key == pygame.K_r:
+            if self.active_menu == "furniture":
+                self.cancel_tool()
+            else:
+                self._open_menu("furniture")
+            return True
+        
         if key == pygame.K_z:
-            if self.current_tool == "zone":
+            if self.active_menu == "zone":
                 self.cancel_tool()
             else:
                 self._open_menu("zone")
             return True
         
-        # K_s keybinding removed - conflicts with camera movement (WASD)
-        # Use UI button to access salvage tool
+        if key == pygame.K_x:
+            if self.current_tool == "demolish":
+                self.cancel_tool()
+            else:
+                self._open_menu("demolish")
+            return True
         
         if key == pygame.K_h:
             if self.current_tool == "harvest":
@@ -546,33 +748,44 @@ class ActionBar:
                 self._open_menu("harvest")
             return True
         
+        if key == pygame.K_v:
+            if self.current_tool == "salvage":
+                self.cancel_tool()
+            else:
+                self._open_menu("salvage")
+            return True
+        
         # Number keys for submenu selection
-        if key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6):
+        if key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9):
             num = key - pygame.K_1  # 0-based index
             
-            if self.active_menu == "build" and self.active_submenu is None:
-                # Select build category
-                categories = ["walls", "floors", "movement", "entrance", "workstations", "furniture"]
-                if num < len(categories):
-                    self._open_build_submenu(categories[num])
-                    return True
-            
-            elif self.active_menu == "build" and self.active_submenu:
-                # Select item from build category
-                items = self.BUILD_MENU.get(self.active_submenu, [])
-                if num < len(items):
-                    self.current_tool = items[num]["id"]
-                    self._close_all_menus()
-                    self.main_buttons["build"].active = True
-                    return True
-            
+            # Get the active submenu items
+            menu_items = None
+            menu_key = None
+            if self.active_menu == "build":
+                menu_items = self.BUILD_MENU
+                menu_key = "build"
+            elif self.active_menu == "floors":
+                menu_items = self.FLOORS_MENU
+                menu_key = "floors"
+            elif self.active_menu == "access":
+                menu_items = self.ACCESS_MENU
+                menu_key = "access"
+            elif self.active_menu == "stations":
+                menu_items = self.STATIONS_MENU
+                menu_key = "stations"
+            elif self.active_menu == "furniture":
+                menu_items = self.FURNITURE_MENU
+                menu_key = "furniture"
             elif self.active_menu == "zone":
-                # Select zone item
-                if num < len(self.ZONE_MENU):
-                    self.current_tool = self.ZONE_MENU[num]["id"]
-                    self._close_all_menus()
-                    self.main_buttons["zone"].active = True
-                    return True
+                menu_items = self.ZONE_MENU
+                menu_key = "zone"
+            
+            if menu_items and num < len(menu_items):
+                self.current_tool = menu_items[num]["id"]
+                self._close_all_menus()
+                self.main_buttons[menu_key].active = True
+                return True
         
         # Escape to cancel
         if key == pygame.K_ESCAPE:
@@ -590,40 +803,21 @@ class ActionBar:
         for menu in self.submenus.values():
             menu.update(mouse_pos)
         
-        for menu in self.build_submenus.values():
-            menu.update(mouse_pos)
-        
-        # Check for submenu selections
-        if self.active_menu == "build" and self.active_submenu is None:
-            submenu = self.submenus["build"]
-            if submenu.selected_item:
-                self._open_build_submenu(submenu.selected_item)
-                submenu.selected_item = None
-        
-        elif self.active_menu == "build" and self.active_submenu:
-            submenu = self.build_submenus[self.active_submenu]
-            if submenu.selected_item:
-                self.current_tool = submenu.selected_item
-                submenu.selected_item = None
-                self._close_all_menus()
-                self.main_buttons["build"].active = True
-        
-        elif self.active_menu == "zone":
-            submenu = self.submenus["zone"]
-            if submenu.selected_item:
-                self.current_tool = submenu.selected_item
-                submenu.selected_item = None
-                self._close_all_menus()
-                self.main_buttons["zone"].active = True
+        # Check for submenu selections - now flat structure
+        for menu_id in ["build", "floors", "access", "stations", "furniture", "zone"]:
+            if self.active_menu == menu_id and menu_id in self.submenus:
+                submenu = self.submenus[menu_id]
+                if submenu.selected_item:
+                    self.current_tool = submenu.selected_item
+                    submenu.selected_item = None
+                    self._close_all_menus()
+                    self.main_buttons[menu_id].active = True
+                    break
     
     def handle_click(self, mouse_pos: tuple[int, int], button: int) -> bool:
         """Handle mouse click. Returns True if consumed."""
         if button == 1:  # Left click
             # Check submenus first (they're on top)
-            for menu in self.build_submenus.values():
-                if menu.handle_click(mouse_pos):
-                    return True
-            
             for menu in self.submenus.values():
                 if menu.handle_click(mouse_pos):
                     return True
@@ -664,18 +858,32 @@ class ActionBar:
         
         # Draw current tool indicator on LEFT side (before buttons)
         if self.current_tool:
-            tool_name = self.current_tool.replace("_", " ").title()
+            # Get tooltip data
+            tooltip_data = self.TOOLTIPS.get(self.current_tool)
+            if isinstance(tooltip_data, tuple):
+                tool_name, tool_desc, tool_extra = tooltip_data
+            else:
+                tool_name = self.current_tool.replace("_", " ").title()
+                tool_desc = tooltip_data if tooltip_data else ""
+                tool_extra = ""
             
             # Tool name with colored background pill
-            tool_text = f" {tool_name} "
-            tool_surface = self.font.render(tool_text, True, (255, 255, 255))
-            tool_rect = tool_surface.get_rect(midleft=(12, self.bar_rect.centery))
+            title_font = pygame.font.Font(None, 24)
+            tool_surface = title_font.render(f" {tool_name} ", True, (255, 255, 255))
+            tool_rect = tool_surface.get_rect(midleft=(12, self.bar_rect.centery - 10))
             
             # Background pill
-            pill_rect = tool_rect.inflate(8, 6)
-            pygame.draw.rect(surface, (80, 120, 160), pill_rect, border_radius=4)
-            pygame.draw.rect(surface, (100, 150, 200), pill_rect, 1, border_radius=4)
+            pill_rect = tool_rect.inflate(10, 8)
+            pygame.draw.rect(surface, (80, 120, 160), pill_rect, border_radius=6)
+            pygame.draw.rect(surface, (100, 150, 200), pill_rect, 2, border_radius=6)
             surface.blit(tool_surface, tool_rect)
+            
+            # Description below tool name
+            if tool_desc:
+                desc_font = pygame.font.Font(None, 20)
+                desc_surface = desc_font.render(tool_desc, True, (180, 180, 190))
+                desc_rect = desc_surface.get_rect(midleft=(12, self.bar_rect.centery + 12))
+                surface.blit(desc_surface, desc_rect)
             
             # Cancel hint on RIGHT side
             hint_text = "[ESC] Cancel"
@@ -687,12 +895,9 @@ class ActionBar:
         for btn in self.main_buttons.values():
             btn.draw(surface, self.font)
         
-        # Draw submenus
+        # Draw submenus with tooltips
         for menu in self.submenus.values():
-            menu.draw(surface, self.font)
-        
-        for menu in self.build_submenus.values():
-            menu.draw(surface, self.font)
+            menu.draw(surface, self.font, self.TOOLTIPS)
 
 
 # ============================================================================

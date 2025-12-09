@@ -275,6 +275,23 @@ class Grid:
         self.camera_x = max(0, min(self.camera_x, max_camera_x))
         self.camera_y = max(0, min(self.camera_y, max_camera_y))
     
+    def center_camera_on(self, tile_x: int, tile_y: int) -> None:
+        """Center the camera on a specific tile coordinate."""
+        # Calculate world size in pixels
+        world_width_px = self.width * TILE_SIZE
+        world_height_px = self.height * TILE_SIZE
+        
+        # Calculate target camera position (tile center - half screen)
+        target_x = tile_x * TILE_SIZE + TILE_SIZE // 2 - SCREEN_W // 2
+        target_y = tile_y * TILE_SIZE + TILE_SIZE // 2 - SCREEN_H // 2
+        
+        # Clamp to world bounds
+        max_camera_x = max(0, world_width_px - SCREEN_W)
+        max_camera_y = max(0, world_height_px - SCREEN_H)
+        
+        self.camera_x = max(0, min(target_x, max_camera_x))
+        self.camera_y = max(0, min(target_y, max_camera_y))
+    
     def screen_to_world(self, screen_x: int, screen_y: int) -> tuple[int, int]:
         """Convert screen coordinates to world tile coordinates.
         

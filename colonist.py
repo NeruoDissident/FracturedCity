@@ -325,6 +325,7 @@ THOUGHT_TYPES = {
     "need": (255, 150, 150),          # Red - needs/wants
     "mood": (200, 150, 255),          # Purple - mood changes
     "idle": (180, 180, 180),          # Gray - idle musings
+    "combat": (255, 80, 80),          # Bright red - combat/violence
 }
 
 # Environment thought templates - keyed by preference direction
@@ -690,6 +691,14 @@ class Colonist:
         self.age: int = random.randint(18, 55)  # Starting colonists are adults
         self.birth_tick: int = 0  # Set when born in colony (0 = arrived as adult)
         
+        # Combat/faction system
+        self.faction: str = "colony"  # Which group this colonist belongs to
+        self.is_hostile: bool = False  # If True, attacks non-hostiles
+        self.hostile_to_factions: set = set()  # Factions this colonist will attack
+        self.in_combat: bool = False  # Currently fighting
+        self.combat_target: "Colonist" = None  # Who they're fighting
+        self.last_combat_tick: int = 0  # Cooldown between attacks
+        
         # Trait system - generates backstory and modifies affinities/job speeds
         from traits import (generate_traits, generate_backstory, get_combined_affinities,
                            get_combined_job_mods, get_combined_stat_mods, get_rich_backstory)
@@ -737,6 +746,12 @@ class Colonist:
         self.last_environment_thought_tick: int = 0  # Track environment thoughts separately
         self.last_mood_state: str = "Focused"  # Track mood changes
         self.last_hunger_threshold: str = "none"  # Track hunger state changes
+        
+        # Sleep/tiredness system
+        self.tiredness: float = random.uniform(0, 30)  # 0-100, starts low
+        self.is_sleeping: bool = False
+        self.sleep_target: tuple = None  # (x, y, z) of bed or sleep spot
+        self.last_sleep_tick: int = 0
     
     # =========================================================================
     # Thought System - Internal monologue and observations
@@ -2738,6 +2753,10 @@ class Colonist:
                 item_data = self.carrying.get("item", {})
                 item_name = item_data.get("name", furniture_item_id or "furniture")
                 print(f"[Furniture] Installed {item_name} at ({dest_x},{dest_y},z={dest_z})")
+                # Register bed if this is a bed (crash_bed is the craftable bed item)
+                if furniture_item_id == "crash_bed":
+                    from beds import register_bed
+                    register_bed(dest_x, dest_y, dest_z)
                 # Furniture can change room classification (e.g., Kitchen)
                 from rooms import mark_tile_dirty
                 mark_tile_dirty(dest_x, dest_y, dest_z)
@@ -3313,6 +3332,208 @@ class Colonist:
             # Path blocked - recalculate
             self.current_path = []
 
+    def _update_tiredness(self, grid: Grid, all_colonists: list, game_tick: int) -> None:
+        """Update tiredness and handle sleeping."""
+        from beds import get_colonist_bed, get_sleep_thoughts, calculate_sleep_quality
+        
+        if self.is_dead:
+            return
+        
+        # Increase tiredness over time (slower than hunger)
+        if not self.is_sleeping:
+            self.tiredness = min(100.0, self.tiredness + 0.003)  # ~5 hours to get tired
+        
+        # Generate tiredness thoughts
+        if self.tiredness >= 90 and game_tick - self.last_sleep_tick > 600:
+            self.add_thought("need", "I can barely keep my eyes open...", -0.2, game_tick=game_tick)
+        elif self.tiredness >= 70 and game_tick - self.last_sleep_tick > 600:
+            self.add_thought("need", "Getting tired...", -0.1, game_tick=game_tick)
+        
+        # If sleeping, process sleep
+        if self.is_sleeping:
+            # Calculate sleep quality
+            quality = calculate_sleep_quality(self, all_colonists)
+            
+            # Reduce tiredness based on quality
+            self.tiredness = max(0, self.tiredness - (0.05 * quality))
+            
+            # Slowly restore health while sleeping
+            if self.health < 100:
+                self.health = min(100, self.health + 0.01 * quality)
+            
+            # Wake up when rested
+            if self.tiredness <= 10:
+                self.is_sleeping = False
+                self.sleep_target = None
+                self.state = "idle"
+                self.last_sleep_tick = game_tick
+                
+                # Sleep thoughts
+                for thought_text, mood_effect in get_sleep_thoughts(self, all_colonists):
+                    self.add_thought("need", thought_text, mood_effect, game_tick=game_tick)
+                
+                print(f"[Sleep] {self.name} woke up feeling {'rested' if quality > 1 else 'okay' if quality > 0.5 else 'tired'}")
+            return
+        
+        # Very tired and idle - try to sleep
+        # Lower threshold at night (colonists want to sleep when it's dark)
+        from time_system import is_sleep_time
+        sleep_threshold = 50 if is_sleep_time() else 80
+        
+        if self.tiredness > sleep_threshold and self.state == "idle" and not self.in_combat:
+            self._try_go_to_sleep(grid, all_colonists, game_tick)
+    
+    def _try_go_to_sleep(self, grid: Grid, all_colonists: list, game_tick: int) -> None:
+        """Try to find a bed and go to sleep."""
+        from beds import get_colonist_bed
+        
+        # Check if we have an assigned bed
+        bed_pos = get_colonist_bed(id(self))
+        
+        if bed_pos:
+            bx, by, bz = bed_pos
+            # Check if we're at the bed
+            dist = abs(self.x - bx) + abs(self.y - by)
+            if dist <= 1 and self.z == bz:
+                # Sleep!
+                self.is_sleeping = True
+                self.state = "sleeping"
+                self.add_thought("need", "Time to rest.", 0.05, game_tick=game_tick)
+                print(f"[Sleep] {self.name} went to sleep in their bed")
+                return
+            else:
+                # Walk to bed
+                self.current_path = self._calculate_path(grid, bx, by, bz)
+                if self.current_path:
+                    self.sleep_target = bed_pos
+                    self.state = "moving_to_sleep"
+                    return
+        
+        # No bed - sleep on ground (with penalty)
+        if self.tiredness > 95:
+            self.is_sleeping = True
+            self.state = "sleeping"
+            self.add_thought("need", "Sleeping on the ground...", -0.15, game_tick=game_tick)
+            print(f"[Sleep] {self.name} collapsed to sleep on the ground (no bed)")
+
+    def _update_combat(self, all_colonists: list, game_tick: int) -> None:
+        """Process combat behavior for this colonist."""
+        from combat import (is_hostile_to_anyone, find_hostile_target, perform_attack,
+                           get_potential_defenders, log_combat_event, is_hostile_to,
+                           try_start_social_conflict)
+        
+        # Check for social conflicts (jealousy, rivalry, trait clashes)
+        if not self.in_combat and self.state == "idle":
+            conflict_target = try_start_social_conflict(self, all_colonists, game_tick)
+            if conflict_target:
+                self.in_combat = True
+                self.combat_target = conflict_target
+                # The target fights back
+                if not conflict_target.in_combat:
+                    conflict_target.in_combat = True
+                    conflict_target.combat_target = self
+                print(f"[Combat] {self.name} started a fight with {conflict_target.name}!")
+                
+                # Notification with reason
+                from notifications import notify_fight_start
+                reason = getattr(self, '_conflict_reason', "")
+                notify_fight_start(self.name.split()[0], conflict_target.name.split()[0], reason)
+        
+        # Attack cooldown (can only attack every ~1 second)
+        if game_tick - self.last_combat_tick < 60:
+            return
+        
+        # If hostile, look for targets
+        if is_hostile_to_anyone(self):
+            target = find_hostile_target(self, all_colonists)
+            if target:
+                # Check if in melee range
+                dx = abs(self.x - target.x)
+                dy = abs(self.y - target.y)
+                if self.z == target.z and max(dx, dy) <= 1:
+                    # Attack!
+                    result = perform_attack(self, target, game_tick)
+                    self.last_combat_tick = game_tick
+                    self.in_combat = True
+                    self.combat_target = target
+                    
+                    # Log the event
+                    log_combat_event({
+                        "tick": game_tick,
+                        "attacker": self.name,
+                        "defender": target.name,
+                        "hit": result["hit"],
+                        "damage": result["damage"],
+                        "killed": result["killed"],
+                        "message": result["message"],
+                    })
+                    
+                    # If we killed them, check for defenders joining
+                    if result["killed"]:
+                        self.in_combat = False
+                        self.combat_target = None
+                        from notifications import notify_death
+                        notify_death(target.name, f"Killed by {self.name.split()[0]}")
+                    elif result.get("retreated"):
+                        from notifications import notify_fight_end
+                        notify_fight_end(target.name.split()[0], "retreated")
+                    else:
+                        # Defenders may join
+                        defenders = get_potential_defenders(target, self, all_colonists)
+                        for defender in defenders:
+                            if not defender.in_combat:
+                                defender.in_combat = True
+                                defender.combat_target = self
+                                defender.add_thought("combat", 
+                                    f"Rushing to help {target.name.split()[0]}!", 
+                                    -0.1, game_tick=game_tick)
+                else:
+                    # Not in range - move toward target (handled by normal pathfinding)
+                    self.in_combat = True
+                    self.combat_target = target
+        
+        # If we're defending someone (in_combat but not hostile)
+        elif self.in_combat and self.combat_target:
+            target = self.combat_target
+            if target.is_dead:
+                # Target died, stop fighting
+                self.in_combat = False
+                self.combat_target = None
+                self.add_thought("combat", "The fight is over.", 0.0, game_tick=game_tick)
+                return
+            
+            # Check if in melee range
+            dx = abs(self.x - target.x)
+            dy = abs(self.y - target.y)
+            if self.z == target.z and max(dx, dy) <= 1:
+                # Counter-attack!
+                result = perform_attack(self, target, game_tick)
+                self.last_combat_tick = game_tick
+                
+                log_combat_event({
+                    "tick": game_tick,
+                    "attacker": self.name,
+                    "defender": target.name,
+                    "hit": result["hit"],
+                    "damage": result["damage"],
+                    "killed": result["killed"],
+                    "message": result["message"],
+                })
+                
+                if result["killed"]:
+                    self.in_combat = False
+                    self.combat_target = None
+                    self.add_thought("combat", 
+                        f"I... I killed {target.name.split()[0]}.", 
+                        -0.5, game_tick=game_tick)
+                    # Death notification
+                    from notifications import notify_death
+                    notify_death(target.name, f"Killed by {self.name.split()[0]}")
+                
+                if result.get("retreated"):
+                    from notifications import notify_fight_end
+                    notify_fight_end(target.name.split()[0], "retreated")
+
     def update(self, grid: Grid, all_colonists: list = None, game_tick: int = 0) -> None:
         """Advance colonist behavior for one simulation tick."""
         
@@ -3365,8 +3586,18 @@ class Colonist:
         else:
             self.fidget_offset = 0
         
+        # Process combat
+        self._update_combat(all_colonists or [], game_tick)
+        
         # Update hunger system
         self._update_hunger(grid)
+        
+        # Update tiredness/sleep system
+        self._update_tiredness(grid, all_colonists or [], game_tick)
+        
+        # If sleeping, skip other updates
+        if self.is_sleeping:
+            return
         
         # Failsafe: unstick colonist if they're in a wall
         # If teleported, we're now in recovery state

@@ -372,6 +372,38 @@ All workstations require:
 
 ---
 
+## Combat
+
+### Combat Power
+Base power (1.0) modified by:
+- **Health** - Wounded colonists fight weaker
+- **Mood** - Stressed = weaker, Euphoric = stronger
+- **Traits** - Former mercenary = +30%, Rustborn = +15%
+- **Equipment** - Future: weapons and armor
+
+### Combat Stances
+| Stance | Behavior |
+|--------|----------|
+| **Aggressive** | Seeks fights, joins readily |
+| **Defensive** | Fights when attacked or to protect others |
+| **Passive** | Avoids combat, flees |
+| **Berserk** | Attacks everyone (high stress + certain traits) |
+
+### Joining Fights
+When a colonist is attacked, others may join to help. Decision based on:
+- **Relationship with victim** - Friends more likely to help
+- **Relationship with attacker** - Enemies of attacker join eagerly
+- **Family bonds** - Almost certain to help family
+- **Combat stance** - Passive colonists rarely join
+- **Own health/stress** - Wounded/stressed less heroic
+
+### Factions
+- `colony` - Player's colonists
+- Future: raiders, traders, refugees
+- Colonists attack members of hostile factions
+
+---
+
 ## Debug Commands
 
 ### Keyboard Shortcuts

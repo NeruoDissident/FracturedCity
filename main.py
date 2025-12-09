@@ -622,6 +622,12 @@ def main() -> None:
                 running = False
 
             if event.type == pygame.KEYDOWN:
+                # Let lists panel handle keys first
+                from lists_ui import get_lists_panel
+                lists_panel = get_lists_panel()
+                if lists_panel.handle_event(event):
+                    continue  # Lists panel consumed the event
+                
                 # Let management panel handle keys first (for arrow navigation)
                 from ui import get_colonist_management_panel
                 mgmt_panel = get_colonist_management_panel()
@@ -725,13 +731,42 @@ def main() -> None:
                         mgmt_panel.close()
                     else:
                         mgmt_panel.open(colonists)
+                elif event.key == pygame.K_l:
+                    # Toggle lists panel
+                    from lists_ui import toggle_lists_panel, get_lists_panel
+                    toggle_lists_panel()
+                    panel = get_lists_panel()
+                    if panel.visible:
+                        panel.update_data(colonists, grid)
+                        # Set up callbacks (use default args to capture current values)
+                        def jump_to(x, y, z, g=grid):
+                            g.center_camera_on(x, y)
+                        def open_colonist(c, cols=colonists):
+                            from ui import get_colonist_management_panel
+                            mgmt = get_colonist_management_panel()
+                            mgmt.open_for_colonist(cols, c)  # Note: colonists first, then colonist
+                        panel.on_jump_to = jump_to
+                        panel.on_open_colonist = open_colonist
                 # ESC keybinding removed - use window close button to quit
 
             if event.type == pygame.MOUSEBUTTONDOWN:
+                # Let lists panel handle mouse first
+                from lists_ui import get_lists_panel
+                lists_panel = get_lists_panel()
+                if lists_panel.handle_event(event):
+                    continue  # Lists panel consumed the event
                 handle_mouse_down(grid, event, colonists)
             
             if event.type == pygame.MOUSEBUTTONUP:
+                from lists_ui import get_lists_panel
+                lists_panel = get_lists_panel()
+                lists_panel.handle_event(event)  # For scrollbar release
                 handle_mouse_up(grid, event)
+            
+            if event.type == pygame.MOUSEMOTION:
+                from lists_ui import get_lists_panel
+                lists_panel = get_lists_panel()
+                lists_panel.handle_event(event)  # For hover and scrollbar drag
         
         # Camera controls (WASD or Arrow keys)
         keys = pygame.key.get_pressed()
@@ -748,8 +783,16 @@ def main() -> None:
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
             grid.pan_camera(camera_speed, 0)
 
+        # Update notifications (even when paused so they fade)
+        from notifications import update_notifications
+        update_notifications()
+        
         # Only update simulation when not paused
         if not paused:
+            # Advance game time
+            from time_system import tick_time
+            tick_time()
+            
             update_colonists(colonists, grid, tick_count)
             update_resource_nodes(grid)
             update_doors()  # Auto-close doors after delay
@@ -801,15 +844,32 @@ def main() -> None:
         
         draw_colonists(screen, colonists, ether_mode=ether_mode, current_z=grid.current_z, camera_x=grid.camera_x, camera_y=grid.camera_y)
         
+        # Draw day/night tint overlay
+        from time_system import get_screen_tint, get_display_string
+        tint = get_screen_tint()
+        if tint[3] > 0:  # Only draw if alpha > 0
+            tint_overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            tint_overlay.fill(tint)
+            screen.blit(tint_overlay, (0, 0))
+        
         # Draw UI overlay
         draw_stockpile_ui(screen)
         
-        # Draw Z-level indicator
-        z_name = "Ground" if grid.current_z == 0 else f"Floor {grid.current_z}"
+        # Draw time display (top right)
         font = pygame.font.Font(None, 28)
+        time_str = get_display_string()
+        time_surface = font.render(time_str, True, (220, 220, 180))
+        screen.blit(time_surface, (SCREEN_W - time_surface.get_width() - 10, 10))
+        
+        # Draw Z-level indicator (below time)
+        z_name = "Ground" if grid.current_z == 0 else f"Floor {grid.current_z}"
         z_text = f"Z: {grid.current_z} ({z_name})"
         z_surface = font.render(z_text, True, (200, 200, 255))
-        screen.blit(z_surface, (SCREEN_W - z_surface.get_width() - 10, 10))
+        screen.blit(z_surface, (SCREEN_W - z_surface.get_width() - 10, 35))
+        
+        # Draw notifications (top-left)
+        from notifications import draw_notifications
+        draw_notifications(screen)
         
         # Draw construction UI
         ui.draw(screen)
@@ -834,6 +894,17 @@ def main() -> None:
         mgmt_panel = get_colonist_management_panel()
         mgmt_panel.update(pygame.mouse.get_pos())  # Update tooltip
         mgmt_panel.draw(screen)
+        
+        # Draw lists panel (if open)
+        from lists_ui import get_lists_panel
+        lists_panel = get_lists_panel()
+        if lists_panel.visible:
+            try:
+                lists_panel.update_data(colonists, grid)
+                lists_panel.draw(screen)
+            except Exception as e:
+                print(f"[Lists] Error: {e}")
+                lists_panel.visible = False
         
         # Draw debug overlay (toggle with 'I' key)
         draw_debug(screen, grid, colonists, jobs_module, resources_module, zones_module, buildings_module, rooms_module)

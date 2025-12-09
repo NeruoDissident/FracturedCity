@@ -271,7 +271,7 @@ def get_friends(colonist: "Colonist", all_colonists: list) -> List["Colonist"]:
     """Get all friends (score >= 30) of a colonist."""
     friends = []
     for other in all_colonists:
-        if other is colonist:
+        if other is colonist or getattr(other, 'is_dead', False):
             continue
         rel = get_relationship(colonist, other)
         if rel["score"] >= 30:
@@ -283,7 +283,7 @@ def get_rivals(colonist: "Colonist", all_colonists: list) -> List["Colonist"]:
     """Get all rivals/enemies (score <= -30) of a colonist."""
     rivals = []
     for other in all_colonists:
-        if other is colonist:
+        if other is colonist or getattr(other, 'is_dead', False):
             continue
         rel = get_relationship(colonist, other)
         if rel["score"] <= -30:
@@ -294,7 +294,7 @@ def get_rivals(colonist: "Colonist", all_colonists: list) -> List["Colonist"]:
 def get_romantic_partner(colonist: "Colonist", all_colonists: list) -> Optional["Colonist"]:
     """Get the romantic partner of a colonist, if any."""
     for other in all_colonists:
-        if other is colonist:
+        if other is colonist or getattr(other, 'is_dead', False):
             continue
         rel = get_relationship(colonist, other)
         if rel["type"] == RelationType.ROMANTIC:
@@ -323,11 +323,21 @@ COMPATIBLE_TRAITS = {
 CONFLICTING_TRAITS = {
     # Personality clashes
     ("mild_paranoia", "overexplains"),  # Paranoid hates talkers
+    ("mild_paranoia", "gives_nicknames"),  # Paranoid hates familiarity
     ("afraid_of_sky", "topside_sprawl"),  # Fears vs loves outside
     ("afraid_of_tight_spaces", "deep_shelters"),  # Claustrophobic vs underground
+    ("sleeps_lightly", "hums_when_thinking"),  # Light sleeper vs noisy
+    ("keeps_inventory", "scavenges_trinkets"),  # Organizer vs hoarder
+    ("takes_long_path", "former_mercenary"),  # Slow vs efficient
     
     # Philosophical differences
     ("last_light_disciple", "gravemind_listener"),  # Different beliefs
+    ("echo_touched", "unlinked"),  # Connected vs isolated
+    ("static_soul", "silent_commune_raised"),  # Needs noise vs silence
+    
+    # Origin tensions
+    ("rust_warrens", "deep_shelters"),  # Surface scavenger vs underground
+    ("topside_sprawl", "fringe_settlements"),  # City vs wilderness
 }
 
 
