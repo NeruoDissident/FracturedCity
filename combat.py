@@ -103,6 +103,10 @@ def get_combat_stance(colonist: "Colonist") -> CombatStance:
     
     Influenced by traits, mood, and stress.
     """
+    # Debug berserk mode (F12 toggle)
+    if getattr(colonist, '_debug_berserk', False):
+        return CombatStance.BERSERK
+    
     traits = getattr(colonist, 'traits', {})
     stress = getattr(colonist, 'stress', 0.0)
     mood = colonist.mood_state
@@ -310,6 +314,31 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
         result["hit"] = True
         result["damage"] = damage
         
+        # Apply body damage if defender has body system
+        from body import Body
+        body = getattr(defender, 'body', None)
+        if body is None:
+            body = Body()
+            defender.body = body
+        
+        # Pick a random body part and damage it
+        target_part = body.get_random_external_part()
+        if target_part:
+            body_damage = damage * 1.5  # Scale damage for body parts
+            is_fatal, body_log = body.damage_part(
+                target_part, body_damage, "blunt", attacker_name, game_tick
+            )
+            result["body_part"] = target_part
+            result["body_log"] = body_log
+            
+            # If vital organ destroyed, colonist dies
+            if is_fatal:
+                defender.health = 0
+                defender.is_dead = True
+                result["killed"] = True
+                result["message"] = f"{attacker_name} killed {defender_name}! ({body_log})"
+                return result
+        
         # Check for retreat (fistfights usually non-lethal)
         if defender.health <= 30 and defender.health > 0:
             # Retreat check - most colonists flee at low health
@@ -348,7 +377,12 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
             result["killed"] = True
             result["message"] = f"{attacker_name} killed {defender_name}!"
         else:
-            result["message"] = f"{attacker_name} hit {defender_name} for {damage:.0f} damage"
+            # Include body part in message if available
+            body_log = result.get("body_log", "")
+            if body_log:
+                result["message"] = body_log
+            else:
+                result["message"] = f"{attacker_name} hit {defender_name} for {damage:.0f} damage"
         
         # Add thoughts
         attacker.add_thought("combat", f"Fighting {defender_name}.", -0.1, game_tick=game_tick)

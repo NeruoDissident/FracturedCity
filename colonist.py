@@ -3562,6 +3562,43 @@ class Colonist:
             self.add_thought("need", "Sleeping on the cold ground...", -0.2, game_tick=game_tick)
             print(f"[Sleep] {self.name} collapsed to sleep on the ground (no bed)")
 
+    def _heal_body(self) -> None:
+        """Natural healing of body parts over time."""
+        from body import Body, PartStatus
+        
+        body = getattr(self, 'body', None)
+        if body is None:
+            return
+        
+        # Heal each part slowly
+        heal_amount = 0.5  # 0.5% per tick (every ~10 seconds)
+        
+        # Heal faster when sleeping
+        if self.is_sleeping:
+            heal_amount = 2.0
+        
+        # Heal faster when well-fed
+        if self.hunger < 30:
+            heal_amount *= 1.5
+        
+        for part_id, part in body.parts.items():
+            if part.status in (PartStatus.MISSING, PartStatus.CYBERNETIC, PartStatus.MANGLED):
+                continue  # Can't heal these naturally
+            
+            if part.health < 100:
+                part.health = min(100, part.health + heal_amount)
+                
+                # Update status based on new health
+                if part.health >= 90:
+                    part.status = PartStatus.HEALTHY
+                elif part.health >= 70:
+                    part.status = PartStatus.BRUISED
+                elif part.health >= 50:
+                    if part.status in (PartStatus.FRACTURED, PartStatus.BROKEN):
+                        part.status = PartStatus.FRACTURED
+                    else:
+                        part.status = PartStatus.CUT
+
     def _move_to_sleep(self, grid: Grid) -> None:
         """Move towards sleep target (bed)."""
         if self.sleep_target is None:
@@ -3631,9 +3668,25 @@ class Colonist:
                     conflict_target.combat_target = self
                 print(f"[Combat] {self.name} started a fight with {conflict_target.name}!")
                 
+                # Log fight start to both colonists' body combat logs
+                from body import Body
+                reason = getattr(self, '_conflict_reason', "")
+                fight_start_msg = f"FIGHT STARTED: {self.name.split()[0]} vs {conflict_target.name.split()[0]}"
+                if reason:
+                    fight_start_msg += f" ({reason})"
+                
+                # Add to attacker's log
+                if not hasattr(self, 'body') or self.body is None:
+                    self.body = Body()
+                self.body.combat_log.append((game_tick, fight_start_msg))
+                
+                # Add to defender's log
+                if not hasattr(conflict_target, 'body') or conflict_target.body is None:
+                    conflict_target.body = Body()
+                conflict_target.body.combat_log.append((game_tick, fight_start_msg))
+                
                 # Notification with reason
                 from notifications import notify_fight_start
-                reason = getattr(self, '_conflict_reason', "")
                 notify_fight_start(self.name.split()[0], conflict_target.name.split()[0], reason)
         
         # Attack cooldown (can only attack every ~1 second)
@@ -3669,9 +3722,19 @@ class Colonist:
                     if result["killed"]:
                         self.in_combat = False
                         self.combat_target = None
+                        # Log death to attacker's combat log
+                        death_msg = f"KILLED: {target.name.split()[0]}"
+                        if hasattr(self, 'body') and self.body:
+                            self.body.combat_log.append((game_tick, death_msg))
                         from notifications import notify_death
                         notify_death(target.name, f"Killed by {self.name.split()[0]}")
                     elif result.get("retreated"):
+                        # Log retreat to both combat logs
+                        retreat_msg = f"RETREATED: {target.name.split()[0]} fled"
+                        if hasattr(self, 'body') and self.body:
+                            self.body.combat_log.append((game_tick, retreat_msg))
+                        if hasattr(target, 'body') and target.body:
+                            target.body.combat_log.append((game_tick, retreat_msg))
                         from notifications import notify_fight_end
                         notify_fight_end(target.name.split()[0], "retreated")
                     else:
@@ -3723,11 +3786,21 @@ class Colonist:
                     self.add_thought("combat", 
                         f"I... I killed {target.name.split()[0]}.", 
                         -0.5, game_tick=game_tick)
+                    # Log death to combat log
+                    death_msg = f"KILLED: {target.name.split()[0]}"
+                    if hasattr(self, 'body') and self.body:
+                        self.body.combat_log.append((game_tick, death_msg))
                     # Death notification
                     from notifications import notify_death
                     notify_death(target.name, f"Killed by {self.name.split()[0]}")
                 
                 if result.get("retreated"):
+                    # Log retreat to both combat logs
+                    retreat_msg = f"RETREATED: {target.name.split()[0]} fled"
+                    if hasattr(self, 'body') and self.body:
+                        self.body.combat_log.append((game_tick, retreat_msg))
+                    if hasattr(target, 'body') and target.body:
+                        target.body.combat_log.append((game_tick, retreat_msg))
                     from notifications import notify_fight_end
                     notify_fight_end(target.name.split()[0], "retreated")
 
@@ -3791,6 +3864,10 @@ class Colonist:
         
         # Update tiredness/sleep system
         self._update_tiredness(grid, all_colonists or [], game_tick)
+        
+        # Natural body healing (slow, every ~10 seconds)
+        if game_tick % 600 == 0:
+            self._heal_body()
         
         # If sleeping, skip other updates
         if self.is_sleeping:

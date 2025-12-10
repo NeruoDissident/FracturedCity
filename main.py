@@ -102,8 +102,16 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
         ui.action_bar._close_all_menus()
         return
     
-    # Check if click was in sidebar area (consumed but no action)
+    # Check colonist management panel first (only if visible)
+    from ui import get_colonist_management_panel
+    mgmt_panel = get_colonist_management_panel()
+    if mgmt_panel.visible and mgmt_panel.handle_click((mx, my)):
+        return
+    
+    # Check if click was in sidebar or bottom bar area (consumed but no action)
     if ui_layout.left_sidebar.rect.collidepoint(mx, my):
+        return
+    if ui_layout.bottom_bar.rect.collidepoint(mx, my):
         return
     
     # If click is in UI panels, don't process as map click
@@ -111,12 +119,6 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
         # Still let existing UI handle it for bottom bar
         if ui.handle_click((mx, my), event.button):
             return
-        return
-    
-    # Check colonist management panel first (highest priority)
-    from ui import get_colonist_management_panel
-    mgmt_panel = get_colonist_management_panel()
-    if mgmt_panel.handle_click((mx, my)):
         return
     
     # Check colonist panel
@@ -442,13 +444,18 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                 start_x, start_y = _drag_start
                 end_x, end_y = gx, gy
                 
-                from rooms import place_roof_area, can_place_roof_area
-                can_place, reason = can_place_roof_area(grid, start_x, start_y, end_x, end_y, current_z)
-                if can_place:
-                    if place_roof_area(grid, start_x, start_y, end_x, end_y, current_z):
-                        pass  # Success message printed by place_roof_area
-                else:
-                    print(f"[Roof] Cannot place roof: {reason}")
+                try:
+                    from rooms import place_roof_area, can_place_roof_area
+                    can_place, reason = can_place_roof_area(grid, start_x, start_y, end_x, end_y, current_z)
+                    if can_place:
+                        if place_roof_area(grid, start_x, start_y, end_x, end_y, current_z):
+                            pass  # Success message printed by place_roof_area
+                    else:
+                        print(f"[Roof] Cannot place roof: {reason}")
+                except Exception as e:
+                    import traceback
+                    print(f"[Roof] ERROR: {e}")
+                    traceback.print_exc()
             
             elif _drag_mode == "stockpile":
                 # Get all tiles in rectangle
@@ -864,29 +871,46 @@ def main() -> None:
                         recipe = get_workstation_recipe(x, y, z)
                         recipe_name = recipe.get("name", "?") if recipe else "None"
                         print(f"  ({x},{y},z={z}) type={ws.get('type')} recipe={recipe_name} reserved={ws.get('reserved')} working={ws.get('working')}")
+                elif event.key == pygame.K_F12:
+                    # Debug: Toggle BERSERK MODE - everyone fights everyone
+                    from combat import CombatStance
+                    alive = [c for c in colonists if not c.is_dead]
+                    if alive:
+                        # Check if already berserk (toggle off)
+                        if getattr(alive[0], '_debug_berserk', False):
+                            # Turn off berserk
+                            for c in alive:
+                                c._debug_berserk = False
+                                c.is_hostile = False
+                                c.in_combat = False
+                                c.combat_target = None
+                            print("[Debug] BERSERK MODE OFF - peace restored")
+                            from notifications import add_notification, NotificationType
+                            add_notification(NotificationType.INFO,
+                                           "// PEACE PROTOCOL //",
+                                           "Combat systems disengaged",
+                                           duration=180)
+                        else:
+                            # UNLEASH HELL
+                            for c in alive:
+                                c._debug_berserk = True
+                                c.is_hostile = True
+                                c.state = "idle"
+                                c.current_job = None
+                            print(f"[Debug] BERSERK MODE ON - {len(alive)} colonists going wild!")
+                            from notifications import add_notification, NotificationType
+                            add_notification(NotificationType.FIGHT_START,
+                                           "// BERSERK PROTOCOL //",
+                                           f"All {len(alive)} colonists hostile!",
+                                           duration=300)
                 elif event.key == pygame.K_TAB:
-                    # Toggle colonist management panel
+                    # TAB cycles to next colonist in right panel
                     from ui import get_colonist_management_panel
                     mgmt_panel = get_colonist_management_panel()
-                    if mgmt_panel.visible:
-                        mgmt_panel.close()
-                    else:
-                        mgmt_panel.open(colonists)
+                    mgmt_panel._next_colonist()
                 elif event.key == pygame.K_l:
-                    # L key now switches to COLONISTS tab in sidebar (lists panel deprecated)
-                    ui_layout.left_sidebar.current_tab = 1  # COLONISTS tab
-                    panel = get_lists_panel()
-                    if panel.visible:
-                        panel.update_data(colonists, grid)
-                        # Set up callbacks (use default args to capture current values)
-                        def jump_to(x, y, z, g=grid):
-                            g.center_camera_on(x, y)
-                        def open_colonist(c, cols=colonists):
-                            from ui import get_colonist_management_panel
-                            mgmt = get_colonist_management_panel()
-                            mgmt.open_for_colonist(cols, c)  # Note: colonists first, then colonist
-                        panel.on_jump_to = jump_to
-                        panel.on_open_colonist = open_colonist
+                    # L key switches to COLONISTS tab in sidebar
+                    ui_layout.left_sidebar.current_tab = 0  # COLONISTS is now tab 0
                 # ESC keybinding removed - use window close button to quit
 
             if event.type == pygame.MOUSEBUTTONDOWN:
@@ -1124,9 +1148,12 @@ def main() -> None:
         colonist_panel = get_colonist_panel()
         colonist_panel.draw(screen)
         
-        # Draw colonist management panel (if open)
+        # Draw colonist management panel (always visible in right panel)
         from ui import get_colonist_management_panel
         mgmt_panel = get_colonist_management_panel()
+        # Always keep colonists list updated and panel visible
+        if not mgmt_panel.visible or not mgmt_panel.colonists:
+            mgmt_panel.open(colonists, 0)
         mgmt_panel.update(pygame.mouse.get_pos())  # Update tooltip
         mgmt_panel.draw(screen)
         
@@ -1148,8 +1175,10 @@ def main() -> None:
         if paused:
             font_pause = pygame.font.Font(None, 48)
             pause_text = font_pause.render("PAUSED", True, (255, 255, 100))
-            # Center in viewport area (accounting for sidebar and top bar)
-            pause_x = LEFT_SIDEBAR_WIDTH + (SCREEN_W - LEFT_SIDEBAR_WIDTH) // 2
+            # Center in viewport area (accounting for sidebars and bars)
+            from ui_layout import RIGHT_PANEL_WIDTH, BOTTOM_BAR_HEIGHT
+            viewport_center_x = LEFT_SIDEBAR_WIDTH + (SCREEN_W - LEFT_SIDEBAR_WIDTH - RIGHT_PANEL_WIDTH) // 2
+            pause_x = viewport_center_x
             pause_y = TOP_BAR_HEIGHT + 40
             pause_rect = pause_text.get_rect(center=(pause_x, pause_y))
             # Draw background for visibility

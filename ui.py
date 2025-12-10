@@ -26,6 +26,7 @@ from config import (
     COLOR_UI_TEXT,
     COLOR_UI_PANEL,
 )
+from ui_layout import RIGHT_PANEL_WIDTH, TOP_BAR_HEIGHT
 
 # UI Layout constants
 BAR_HEIGHT = 54
@@ -2244,8 +2245,8 @@ class ColonistManagementPanel:
         ("can_scavenge", "Scavenge", "Harvest"),
     ]
     
-    # Tab definitions
-    TABS = ["Overview", "Bio", "Relations", "Stats", "Thoughts", "Chat", "Help"]
+    # Tab definitions - short cyberpunk names to fit
+    TABS = ["Status", "Bio", "Body", "Links", "Stats", "Mind", "Chat", "Help"]
     
     def __init__(self):
         self.visible = False
@@ -2259,18 +2260,15 @@ class ColonistManagementPanel:
         # Callback for camera centering when switching colonists
         self.on_colonist_changed: Optional[Callable] = None  # (colonist) -> None
         
-        # Panel dimensions - right sidebar style (not centered modal)
-        self.tab_sidebar_width = 80
-        self.panel_width = 420
-        self.panel_height = SCREEN_H - 50  # Almost full height, leave room for top bar
+        # Panel dimensions - fits in right panel area (always visible)
+        self.tab_sidebar_width = 70
+        self.panel_width = RIGHT_PANEL_WIDTH - self.tab_sidebar_width
+        self.panel_height = SCREEN_H - TOP_BAR_HEIGHT
         
-        # Total width includes tab sidebar
-        total_width = self.tab_sidebar_width + self.panel_width
-        
-        # Pin to right edge of screen
+        # Pin to right edge of screen, below top bar
         self.sidebar_rect = pygame.Rect(
-            SCREEN_W - total_width,
-            40,  # Below top bar
+            SCREEN_W - RIGHT_PANEL_WIDTH,
+            TOP_BAR_HEIGHT,
             self.tab_sidebar_width,
             self.panel_height
         )
@@ -2300,9 +2298,10 @@ class ColonistManagementPanel:
         self.tooltip_pos: tuple[int, int] = (0, 0)
     
     def init_font(self) -> None:
-        self.font = pygame.font.Font(None, 20)
-        self.font_large = pygame.font.Font(None, 28)
-        self.font_small = pygame.font.Font(None, 16)
+        from ui_layout import get_cyber_font
+        self.font = get_cyber_font(15)
+        self.font_large = get_cyber_font(20, bold=True)
+        self.font_small = get_cyber_font(12)
     
     def open(self, colonists: List, start_index: int = 0) -> None:
         """Open the panel with a list of colonists."""
@@ -2429,6 +2428,9 @@ class ColonistManagementPanel:
         if self.font is None:
             self.init_font()
         
+        # Ensure button positions are updated
+        self._update_button_positions()
+        
         colonist = self.current_colonist
         if colonist is None:
             return
@@ -2439,9 +2441,9 @@ class ColonistManagementPanel:
         sw = self.sidebar_rect.width
         sh = self.sidebar_rect.height
         
-        # Sidebar background
-        pygame.draw.rect(surface, (28, 30, 38), self.sidebar_rect, border_radius=8)
-        pygame.draw.rect(surface, (50, 55, 65), self.sidebar_rect, 1, border_radius=8)
+        # Sidebar background - cyberpunk dark
+        pygame.draw.rect(surface, (14, 18, 24), self.sidebar_rect, border_radius=8)
+        pygame.draw.rect(surface, (0, 100, 110), self.sidebar_rect, 1, border_radius=8)
         
         # Tab buttons in sidebar
         tab_height = 32
@@ -2456,16 +2458,16 @@ class ColonistManagementPanel:
             
             is_active = (i == self.current_tab)
             if is_active:
-                bg_color = (60, 70, 90)
-                border_color = (100, 120, 160)
-                text_color = (240, 240, 255)
+                bg_color = (180, 40, 90)  # Hot pink active
+                border_color = (255, 80, 140)
+                text_color = (255, 255, 255)
                 # Draw connector to main panel
                 pygame.draw.rect(surface, bg_color, 
                                pygame.Rect(sx + sw - 4, tab_y + 4, 8, tab_height - 8))
             else:
-                bg_color = (38, 42, 52)
-                border_color = (55, 60, 70)
-                text_color = (140, 145, 160)
+                bg_color = (25, 30, 38)
+                border_color = (0, 80, 90)
+                text_color = (100, 180, 180)
             
             pygame.draw.rect(surface, bg_color, tab_rect, border_radius=4)
             pygame.draw.rect(surface, border_color, tab_rect, 1, border_radius=4)
@@ -2479,11 +2481,11 @@ class ColonistManagementPanel:
         shadow_rect = self.panel_rect.copy()
         shadow_rect.x += 4
         shadow_rect.y += 4
-        pygame.draw.rect(surface, (15, 15, 20), shadow_rect, border_radius=10)
+        pygame.draw.rect(surface, (8, 10, 14), shadow_rect, border_radius=10)
         
-        # Main panel background
-        pygame.draw.rect(surface, (40, 44, 52), self.panel_rect, border_radius=10)
-        pygame.draw.rect(surface, (70, 75, 85), self.panel_rect, 2, border_radius=10)
+        # Main panel background - darker cyberpunk
+        pygame.draw.rect(surface, (18, 22, 28), self.panel_rect, border_radius=10)
+        pygame.draw.rect(surface, (0, 180, 180), self.panel_rect, 1, border_radius=10)
         
         x = self.panel_rect.x
         y = self.panel_rect.y
@@ -2491,25 +2493,25 @@ class ColonistManagementPanel:
         h = self.panel_rect.height
         
         # === Header Section ===
-        # Colonist name (large)
+        # Colonist name (large, neon pink)
         name = getattr(colonist, 'name', f'Colonist {self.current_index + 1}')
-        name_surf = self.font_large.render(name, True, (255, 230, 180))
+        name_surf = self.font_large.render(name, True, (255, 100, 160))
         surface.blit(name_surf, (x + 20, y + 15))
         
-        # Colonist counter
+        # Colonist counter (cyan)
         counter_text = f"{self.current_index + 1} / {len(self.colonists)}"
-        counter_surf = self.font_small.render(counter_text, True, (140, 140, 150))
+        counter_surf = self.font_small.render(counter_text, True, (0, 200, 200))
         surface.blit(counter_surf, (x + 20, y + 42))
         
-        # Close button
-        pygame.draw.rect(surface, (80, 50, 50), self.close_btn_rect, border_radius=4)
-        pygame.draw.rect(surface, (120, 70, 70), self.close_btn_rect, 1, border_radius=4)
-        close_text = self.font.render("X", True, (200, 150, 150))
+        # Close button (neon red)
+        pygame.draw.rect(surface, (80, 20, 30), self.close_btn_rect, border_radius=4)
+        pygame.draw.rect(surface, (255, 60, 80), self.close_btn_rect, 1, border_radius=4)
+        close_text = self.font.render("X", True, (255, 100, 100))
         close_rect = close_text.get_rect(center=self.close_btn_rect.center)
         surface.blit(close_text, close_rect)
         
-        # Header separator
-        pygame.draw.line(surface, (60, 65, 75), (x + 15, y + 55), (x + w - 15, y + 55), 1)
+        # Header separator (cyan glow)
+        pygame.draw.line(surface, (0, 120, 130), (x + 15, y + 55), (x + w - 15, y + 55), 1)
         
         # Content area - full width now (no internal tabs)
         content_y = y + 62
@@ -2527,14 +2529,16 @@ class ColonistManagementPanel:
         elif self.current_tab == 1:
             self._draw_bio_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 2:
-            self._draw_relations_tab(surface, colonist, x, content_y, content_w, col1_x)
+            self._draw_body_tab(surface, colonist, x, content_y, content_w, col1_x, col2_x)
         elif self.current_tab == 3:
-            self._draw_stats_tab(surface, colonist, x, content_y, content_w, col1_x)
+            self._draw_relations_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 4:
-            self._draw_thoughts_tab(surface, colonist, x, content_y, content_w, col1_x)
+            self._draw_stats_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 5:
-            self._draw_chat_tab(surface, colonist, x, content_y, content_w, col1_x)
+            self._draw_thoughts_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 6:
+            self._draw_chat_tab(surface, colonist, x, content_y, content_w, col1_x)
+        elif self.current_tab == 7:
             self._draw_help_tab(surface, x, content_y, content_w, col1_x)
         
         # Draw navigation buttons (shared by all tabs)
@@ -2544,7 +2548,11 @@ class ColonistManagementPanel:
         self._draw_equipment_tooltip(surface)
     
     def _draw_overview_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int, col2_x: int) -> None:
-        """Draw the Overview tab content."""
+        """Draw the Overview tab content - USE FULL VERTICAL SPACE."""
+        # Calculate available height for content
+        panel_bottom = self.panel_rect.bottom - 60  # Leave room for nav buttons
+        available_height = panel_bottom - content_y
+        
         # Save initial content_y for right column
         initial_content_y = content_y
         
@@ -2555,7 +2563,7 @@ class ColonistManagementPanel:
         
         # Current Task
         self._draw_section_header(surface, "Current Task", col1_x, content_y, section_color)
-        content_y += 18
+        content_y += 22
         
         state = colonist.state
         job_desc = state
@@ -2564,38 +2572,38 @@ class ColonistManagementPanel:
             job_desc = f"{state} ({job_type})"
         task_surf = self.font_small.render(job_desc[:28], True, value_color)
         surface.blit(task_surf, (col1_x + 8, content_y))
-        content_y += 22
+        content_y += 36
         
         # Hunger
         self._draw_section_header(surface, "Hunger", col1_x, content_y, section_color)
-        content_y += 16
+        content_y += 20
         hunger_val = colonist.hunger
         hunger_color = (100, 200, 100) if hunger_val < 50 else (200, 200, 100) if hunger_val < 70 else (200, 100, 100)
-        bar_width = min(140, w // 2 - 60)
+        bar_width = min(120, w // 2 - 80)
         self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, hunger_val, 100, hunger_color)
-        content_y += 20
+        content_y += 32
         
         # Comfort
         self._draw_section_header(surface, "Comfort", col1_x, content_y, section_color)
-        content_y += 16
+        content_y += 20
         comfort_val = getattr(colonist, 'comfort', 0.0)
         comfort_color = (100, 200, 150) if comfort_val > 0 else (200, 150, 100) if comfort_val < 0 else (150, 150, 150)
         comfort_display = (comfort_val + 10) / 20 * 100  # Map -10..10 to 0..100
         self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, comfort_display, 100, comfort_color)
-        content_y += 20
+        content_y += 32
         
         # Stress
         self._draw_section_header(surface, "Stress", col1_x, content_y, section_color)
-        content_y += 16
+        content_y += 20
         stress_val = getattr(colonist, 'stress', 0.0)
         stress_color = (200, 100, 100) if stress_val > 2 else (200, 200, 100) if stress_val > 0 else (100, 150, 200)
         stress_display = (stress_val + 10) / 20 * 100  # Map -10..10 to 0..100
         self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, stress_display, 100, stress_color)
-        content_y += 24
+        content_y += 40
         
         # === Preferences Section ===
         self._draw_section_header(surface, "Preferences", col1_x, content_y, (150, 200, 255))
-        content_y += 18
+        content_y += 26
         
         preferences = getattr(colonist, 'preferences', {})
         pref_items = [
@@ -2611,20 +2619,20 @@ class ColonistManagementPanel:
             pref_color = (100, 200, 100) if pref_val > 0.5 else (200, 100, 100) if pref_val < -0.5 else (150, 150, 150)
             pref_text = self.font_small.render(f"{pref_name}: {pref_val:+.1f}", True, pref_color)
             surface.blit(pref_text, (col1_x + 8, content_y))
-            content_y += 14
+            content_y += 24
         
-        content_y += 10
+        content_y += 28
         
         # === Personality Drift Section ===
         self._draw_section_header(surface, "Personality Drift", col1_x, content_y, (200, 180, 255))
-        content_y += 18
+        content_y += 26
         
         total_drift = getattr(colonist, 'last_total_drift', 0.0)
         drift_strongest = getattr(colonist, 'last_drift_strongest', ('none', 0.0))
         
         drift_text = self.font_small.render(f"Rate: {total_drift:.6f}", True, muted_color)
         surface.blit(drift_text, (col1_x + 8, content_y))
-        content_y += 14
+        content_y += 24
         
         drift_param, drift_val = drift_strongest
         if abs(drift_val) > 0.000001:
@@ -2634,76 +2642,39 @@ class ColonistManagementPanel:
             strongest_text = "Strongest: (none)"
         strongest_surf = self.font_small.render(strongest_text, True, muted_color)
         surface.blit(strongest_surf, (col1_x + 8, content_y))
+        content_y += 36
         
-        # === Right Column: Equipment Slots ===
-        equip_y = initial_content_y
+        # Track where left column ends for equipment placement
+        left_col_end_y = content_y
         
-        self._draw_section_header(surface, "Equipment", col2_x, equip_y, (255, 200, 150))
-        equip_y += 18
+        # === Right Column: Carrying, Mood, Work Assignments ===
+        right_y = initial_content_y
         
-        # Get equipment data from colonist
-        equipment = getattr(colonist, 'equipment', {})
+        # Carrying Section - use smaller slots that fit
+        self._draw_section_header(surface, "Carrying", col2_x, right_y, (200, 180, 255))
+        right_y += 22
         
-        # Equipment slots in 2 columns, 3 rows
-        slot_width = 82
-        slot_height = 32
-        slot_gap = 4
-        
-        equipment_layout = [
-            ("Head", "head"),
-            ("Body", "body"),
-            ("Hands", "hands"),
-            ("Feet", "feet"),
-            ("Implant", "implant"),
-            ("Charm", "charm"),
-        ]
-        
-        # Clear equipment slot rects for tooltip tracking
-        self.equipment_slot_rects.clear()
-        
-        for i, (display_name, slot_key) in enumerate(equipment_layout):
-            row = i // 2
-            col = i % 2
-            slot_x = col2_x + col * (slot_width + slot_gap)
-            slot_y = equip_y + row * (slot_height + slot_gap)
-            item = equipment.get(slot_key)
-            self._draw_equipment_slot(surface, slot_x, slot_y, slot_width, slot_height, display_name, item)
-            
-            # Store rect for tooltip
-            self.equipment_slot_rects[slot_key] = (
-                pygame.Rect(slot_x, slot_y, slot_width, slot_height),
-                item
-            )
-        
-        equip_y += 3 * (slot_height + slot_gap) + 8
-        
-        # === Inventory Section (shows carried items) ===
-        self._draw_section_header(surface, "Carrying", col2_x, equip_y, (200, 180, 255))
-        equip_y += 18
-        
-        # Get carried items from colonist (resource type -> amount)
         carried_items = getattr(colonist, 'carried_items', {})
-        
-        # Convert to list of items for display (up to 6 slots)
         carried_list = []
         for res_type, amount in carried_items.items():
             if amount > 0:
                 carried_list.append({"type": res_type, "amount": amount})
         
-        # 6 inventory slots in a row
-        inv_slot_size = 26
-        inv_gap = 4
-        
+        # Smaller slots, 2 rows of 3 to fit width
+        inv_slot_size = 24
+        inv_gap = 3
         for i in range(6):
-            slot_x = col2_x + i * (inv_slot_size + inv_gap)
+            row = i // 3
+            col = i % 3
+            slot_x = col2_x + col * (inv_slot_size + inv_gap)
+            slot_y = right_y + row * (inv_slot_size + inv_gap)
             item = carried_list[i] if i < len(carried_list) else None
-            self._draw_inventory_slot(surface, slot_x, equip_y, inv_slot_size, item)
-        
-        equip_y += inv_slot_size + 12
+            self._draw_inventory_slot(surface, slot_x, slot_y, inv_slot_size, item)
+        right_y += 2 * (inv_slot_size + inv_gap) + 20
         
         # Mood display
-        self._draw_section_header(surface, "Mood", col2_x, equip_y, (255, 180, 220))
-        equip_y += 18
+        self._draw_section_header(surface, "Mood", col2_x, right_y, (255, 180, 220))
+        right_y += 22
         
         mood_state = getattr(colonist, 'mood_state', 'Focused')
         mood_score = getattr(colonist, 'mood_score', 0.0)
@@ -2711,34 +2682,29 @@ class ColonistManagementPanel:
         mood_color = Colonist.get_mood_color(mood_state)
         
         mood_surf = self.font.render(mood_state, True, mood_color)
-        surface.blit(mood_surf, (col2_x + 8, equip_y))
+        surface.blit(mood_surf, (col2_x + 8, right_y))
         
         score_surf = self.font_small.render(f"({mood_score:+.1f})", True, muted_color)
-        surface.blit(score_surf, (col2_x + 8 + mood_surf.get_width() + 8, equip_y + 2))
-        equip_y += 24
+        surface.blit(score_surf, (col2_x + 8 + mood_surf.get_width() + 8, right_y + 2))
+        right_y += 40
         
-        # === Job Tags Section ===
-        self._draw_section_header(surface, "Work Assignments", col2_x, equip_y, (180, 220, 180))
-        equip_y += 20
+        # === Job Tags Section - spread out vertically ===
+        self._draw_section_header(surface, "Work Assignments", col2_x, right_y, (180, 220, 180))
+        right_y += 26
         
-        # Draw job tag toggles
-        tag_width = 80
-        tag_height = 22
-        tags_per_row = 2
+        tag_width = 90
+        tag_height = 32
+        tag_gap = 10  # More gap between buttons
         
         for i, (tag_id, tag_name, tag_desc) in enumerate(self.JOB_TAGS):
-            row = i // tags_per_row
-            col = i % tags_per_row
-            
-            tag_x = col2_x + col * (tag_width + 6)
-            tag_y = equip_y + row * (tag_height + 4)
+            tag_x = col2_x
+            tag_y = right_y + i * (tag_height + tag_gap)
             
             rect = pygame.Rect(tag_x, tag_y, tag_width, tag_height)
             self.job_tag_rects[tag_id] = rect
             
             enabled = colonist.job_tags.get(tag_id, True)
             
-            # Toggle background
             if enabled:
                 bg_color = (50, 90, 60)
                 border_color = (80, 140, 90)
@@ -2751,10 +2717,48 @@ class ColonistManagementPanel:
             pygame.draw.rect(surface, bg_color, rect, border_radius=4)
             pygame.draw.rect(surface, border_color, rect, 1, border_radius=4)
             
-            # Tag label centered
             tag_surf = self.font_small.render(tag_name, True, text_color)
             tag_rect = tag_surf.get_rect(center=rect.center)
             surface.blit(tag_surf, tag_rect)
+        
+        right_y += len(self.JOB_TAGS) * (tag_height + tag_gap) + 20
+        
+        # === Equipment Section (BOTTOM - full width, spread out) ===
+        equip_y = max(left_col_end_y, right_y) + 20
+        
+        self._draw_section_header(surface, "Equipment", col1_x, equip_y, (255, 200, 150))
+        equip_y += 28
+        
+        equipment = getattr(colonist, 'equipment', {})
+        
+        # Equipment slots - larger with more spacing
+        slot_width = 80
+        slot_height = 42
+        slot_gap = 10
+        
+        equipment_layout = [
+            ("Head", "head"),
+            ("Body", "body"),
+            ("Hands", "hands"),
+            ("Feet", "feet"),
+            ("Implant", "implant"),
+            ("Charm", "charm"),
+        ]
+        
+        self.equipment_slot_rects.clear()
+        
+        for i, (display_name, slot_key) in enumerate(equipment_layout):
+            row = i // 2
+            col = i % 2
+            slot_x = col1_x + col * (slot_width + slot_gap)
+            slot_y = equip_y + row * (slot_height + slot_gap)
+            item = equipment.get(slot_key)
+            self._draw_equipment_slot(surface, slot_x, slot_y, slot_width, slot_height, display_name, item)
+            
+            self.equipment_slot_rects[slot_key] = (
+                pygame.Rect(slot_x, slot_y, slot_width, slot_height),
+                item
+            )
     
     def _draw_stats_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
         """Draw the Stats tab - D&D style wall of text with all stats."""
@@ -3028,6 +3032,167 @@ class ColonistManagementPanel:
             trait_surf = self.font_small.render(f"• {label}", True, trait_color)
             surface.blit(trait_surf, (col1_x + 8, content_y))
             content_y += 14
+    
+    def _draw_body_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int, col2_x: int) -> None:
+        """Draw the Body tab - detailed body part status like Dwarf Fortress."""
+        from body import Body, PartCategory, PartStatus
+        
+        muted_color = (120, 130, 145)
+        header_color = (255, 100, 160)  # Pink for headers
+        healthy_color = (50, 255, 120)
+        
+        # Get or create body
+        body = getattr(colonist, 'body', None)
+        if body is None:
+            body = Body()
+            colonist.body = body
+        
+        # Tighter layout - use panel width properly
+        panel_right = self.panel_rect.right - 15
+        col_width = (panel_right - col1_x) // 2 - 5
+        col2_start = col1_x + col_width + 10
+        line_h = 11  # Tighter line spacing
+        
+        # Overall health header
+        overall = body.get_overall_health()
+        if overall >= 90:
+            health_color = healthy_color
+        elif overall >= 70:
+            health_color = (180, 220, 100)
+        elif overall >= 50:
+            health_color = (220, 180, 60)
+        else:
+            health_color = (255, 80, 80)
+        
+        health_text = f"INTEGRITY: {overall:.0f}%"
+        health_surf = self.font.render(health_text, True, health_color)
+        surface.blit(health_surf, (col1_x, content_y))
+        content_y += 18
+        
+        # Helper to get short status
+        def short_status(part, part_id=""):
+            if part.status == PartStatus.MISSING:
+                return "GONE"
+            if part.status == PartStatus.CYBERNETIC:
+                return f"CYB {part.health:.0f}%"
+            # Special case for teeth - show as count out of 32
+            if part_id == "teeth":
+                teeth_count = int(32 * part.health / 100)
+                return f"{teeth_count}/32"
+            if part.health >= 95:
+                return "OK"
+            elif part.health >= 70:
+                return f"{part.health:.0f}%"
+            else:
+                return f"{part.health:.0f}%"
+        
+        # Helper to draw a part line compactly
+        def draw_part(part_name, part, px, py, part_id=""):
+            color = part.get_color()
+            # Shorten part names
+            short_name = part_name.replace("Left ", "L ").replace("Right ", "R ")
+            short_name = short_name.replace("Upper ", "Up ").replace("Lower ", "Lo ")
+            text = f"{short_name}: {short_status(part, part_id)}"
+            surf = self.font_small.render(text, True, color)
+            surface.blit(surf, (px, py))
+        
+        # LEFT COLUMN
+        left_y = content_y
+        
+        # HEAD
+        self._draw_section_header(surface, "HEAD", col1_x, left_y, header_color)
+        left_y += 14
+        head_parts = body.get_parts_by_category(PartCategory.HEAD)
+        for part_id, part in head_parts:
+            if not part.is_internal:
+                draw_part(part.name, part, col1_x + 4, left_y, part_id)
+                left_y += line_h
+        left_y += 4
+        
+        # TORSO
+        self._draw_section_header(surface, "TORSO", col1_x, left_y, header_color)
+        left_y += 14
+        torso_parts = body.get_parts_by_category(PartCategory.TORSO)
+        for part_id, part in torso_parts:
+            draw_part(part.name, part, col1_x + 4, left_y, part_id)
+            left_y += line_h
+        left_y += 4
+        
+        # LEFT ARM
+        self._draw_section_header(surface, "L ARM", col1_x, left_y, header_color)
+        left_y += 14
+        for part_id, part in body.get_parts_by_category(PartCategory.ARM_LEFT):
+            name = part.name.replace("Left ", "")
+            draw_part(name, part, col1_x + 4, left_y, part_id)
+            left_y += line_h
+        left_y += 4
+        
+        # LEFT LEG
+        self._draw_section_header(surface, "L LEG", col1_x, left_y, header_color)
+        left_y += 14
+        for part_id, part in body.get_parts_by_category(PartCategory.LEG_LEFT):
+            name = part.name.replace("Left ", "")
+            draw_part(name, part, col1_x + 4, left_y, part_id)
+            left_y += line_h
+        
+        # RIGHT COLUMN
+        right_y = content_y
+        
+        # RIGHT ARM
+        self._draw_section_header(surface, "R ARM", col2_start, right_y, header_color)
+        right_y += 14
+        for part_id, part in body.get_parts_by_category(PartCategory.ARM_RIGHT):
+            name = part.name.replace("Right ", "")
+            draw_part(name, part, col2_start + 4, right_y, part_id)
+            right_y += line_h
+        right_y += 4
+        
+        # RIGHT LEG
+        self._draw_section_header(surface, "R LEG", col2_start, right_y, header_color)
+        right_y += 14
+        for part_id, part in body.get_parts_by_category(PartCategory.LEG_RIGHT):
+            name = part.name.replace("Right ", "")
+            draw_part(name, part, col2_start + 4, right_y, part_id)
+            right_y += line_h
+        
+        # BOTTOM SECTION - below both columns
+        bottom_y = max(left_y, right_y) + 12
+        full_width = panel_right - col1_x
+        
+        # COMBAT LOG - full width
+        self._draw_section_header(surface, "COMBAT LOG", col1_x, bottom_y, (255, 80, 80))
+        bottom_y += 14
+        combat_log = body.get_recent_combat_log(5)
+        if combat_log:
+            for entry in combat_log:
+                # More room now - allow longer entries
+                display = entry[:50] + ".." if len(entry) > 52 else entry
+                surf = self.font_small.render(display, True, muted_color)
+                surface.blit(surf, (col1_x + 4, bottom_y))
+                bottom_y += line_h
+        else:
+            surf = self.font_small.render("No injuries recorded", True, muted_color)
+            surface.blit(surf, (col1_x + 4, bottom_y))
+            bottom_y += line_h
+        bottom_y += 8
+        
+        # INJURY EFFECTS - full width
+        self._draw_section_header(surface, "EFFECTS", col1_x, bottom_y, (220, 180, 100))
+        bottom_y += 14
+        modifiers = body.get_stat_modifiers()
+        if modifiers:
+            shown = 0
+            for stat, penalty in sorted(modifiers.items()):
+                if abs(penalty) > 0.1 and shown < 6:
+                    text = f"{stat}: {penalty:+.0f}%"
+                    color = (255, 100, 100) if penalty < 0 else (100, 255, 100)
+                    surf = self.font_small.render(text, True, color)
+                    surface.blit(surf, (col1_x + 4, bottom_y))
+                    bottom_y += line_h
+                    shown += 1
+        else:
+            surf = self.font_small.render("None", True, healthy_color)
+            surface.blit(surf, (col1_x + 4, bottom_y))
     
     def _draw_relations_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
         """Draw the Relations tab - colonist's relationships with others."""
@@ -3336,7 +3501,7 @@ class ColonistManagementPanel:
         surface.blit(next_text, next_rect)
         
         # Hotkey hint
-        hint_text = self.font_small.render("TAB to close | Arrow keys to switch", True, (100, 100, 110))
+        hint_text = self.font_small.render("TAB / Arrows to switch colonists", True, (100, 100, 110))
         hint_rect = hint_text.get_rect(centerx=self.panel_rect.centerx, y=self.panel_rect.bottom - 18)
         surface.blit(hint_text, hint_rect)
     
@@ -3610,6 +3775,25 @@ class VisitorPanel(ColonistManagementPanel):
     def __init__(self):
         super().__init__()
         self.wanderer: Optional[dict] = None
+        
+        # Override panel position - center screen popup (like trader)
+        self.panel_width = 450
+        self.panel_height = 550
+        self.tab_sidebar_width = 70
+        
+        # Center on screen
+        self.panel_rect = pygame.Rect(
+            (SCREEN_W - self.panel_width - self.tab_sidebar_width) // 2 + self.tab_sidebar_width,
+            (SCREEN_H - self.panel_height) // 2,
+            self.panel_width,
+            self.panel_height
+        )
+        self.sidebar_rect = pygame.Rect(
+            self.panel_rect.x - self.tab_sidebar_width,
+            self.panel_rect.y,
+            self.tab_sidebar_width,
+            self.panel_height
+        )
         
         # Accept/Deny button rects
         self.accept_btn_rect = pygame.Rect(0, 0, 150, 36)

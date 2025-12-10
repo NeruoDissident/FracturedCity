@@ -15,49 +15,86 @@ from typing import Optional, List, Dict, Tuple, Callable
 from config import SCREEN_W, SCREEN_H
 
 # ============================================================================
-# CYBERPUNK COLOR PALETTE (matching reference image)
+# CYBERPUNK COLOR PALETTE
 # ============================================================================
 
-# Base colors - dark blue-gray tones
-COLOR_BG_DARK = (18, 22, 28)           # Darkest background
-COLOR_BG_PANEL = (24, 30, 38)          # Panel background
-COLOR_BG_PANEL_LIGHT = (32, 40, 50)    # Lighter panel areas
-COLOR_BG_HEADER = (28, 35, 45)         # Header backgrounds
+# Base colors - deep dark backgrounds
+COLOR_BG_DARK = (12, 14, 18)           # Darkest background
+COLOR_BG_PANEL = (18, 22, 28)          # Panel background
+COLOR_BG_PANEL_LIGHT = (28, 34, 42)    # Lighter panel areas
+COLOR_BG_HEADER = (22, 28, 36)         # Header backgrounds
 
-# Accent colors - cyan/teal highlights
-COLOR_ACCENT_CYAN = (0, 200, 200)      # Primary accent (borders, highlights)
-COLOR_ACCENT_CYAN_DIM = (0, 120, 130)  # Dimmed cyan
+# Accent colors - neon cyan/teal
+COLOR_ACCENT_CYAN = (0, 220, 220)      # Primary accent (borders, highlights)
+COLOR_ACCENT_CYAN_DIM = (0, 100, 110)  # Dimmed cyan
 COLOR_ACCENT_CYAN_GLOW = (0, 255, 255) # Bright glow
 
+# Accent colors - neon pink/magenta
+COLOR_ACCENT_PINK = (255, 50, 130)     # Hot pink accent
+COLOR_ACCENT_PINK_DIM = (180, 40, 90)  # Dimmed pink
+COLOR_ACCENT_PURPLE = (180, 80, 220)   # Purple accent
+
 # Alert colors
-COLOR_ALERT_RED = (220, 60, 60)        # Danger/critical
-COLOR_ALERT_YELLOW = (220, 180, 60)    # Warning
-COLOR_ALERT_GREEN = (60, 200, 100)     # Good/success
+COLOR_ALERT_RED = (255, 60, 80)        # Danger/critical (neon red)
+COLOR_ALERT_YELLOW = (255, 200, 50)    # Warning (neon yellow)
+COLOR_ALERT_GREEN = (50, 255, 120)     # Good/success (neon green)
 
 # Text colors
-COLOR_TEXT_BRIGHT = (220, 230, 240)    # Primary text
-COLOR_TEXT_DIM = (140, 150, 160)       # Secondary text
-COLOR_TEXT_ACCENT = (100, 220, 220)    # Highlighted text
+COLOR_TEXT_BRIGHT = (230, 240, 250)    # Primary text
+COLOR_TEXT_DIM = (120, 130, 145)       # Secondary text
+COLOR_TEXT_ACCENT = (0, 240, 240)      # Cyan highlighted text
+COLOR_TEXT_PINK = (255, 100, 160)      # Pink highlighted text
 
 # Tab colors
-COLOR_TAB_ACTIVE = (180, 60, 90)       # Active tab (pink/magenta)
-COLOR_TAB_INACTIVE = (40, 50, 60)      # Inactive tab
+COLOR_TAB_ACTIVE = (255, 50, 130)      # Active tab (hot pink)
+COLOR_TAB_INACTIVE = (35, 42, 52)      # Inactive tab
+
+# ============================================================================
+# CYBERPUNK FONTS
+# ============================================================================
+
+# Font paths - will try system fonts, fallback to default
+FONT_MONO = None  # Will be initialized
+FONT_DIGITAL = None  # For numbers
+
+def get_cyber_font(size: int, bold: bool = False) -> pygame.font.Font:
+    """Get a monospace/cyber style font."""
+    # Try various monospace fonts in order of preference
+    mono_fonts = ['Consolas', 'Source Code Pro', 'Fira Code', 'Courier New', 'monospace']
+    for font_name in mono_fonts:
+        try:
+            return pygame.font.SysFont(font_name, size, bold=bold)
+        except:
+            continue
+    return pygame.font.Font(None, size)
+
+def get_digital_font(size: int) -> pygame.font.Font:
+    """Get a digital clock style font for numbers."""
+    # Try digital-style fonts
+    digital_fonts = ['DSEG7 Classic', 'Digital-7', 'LCD', 'Consolas', 'monospace']
+    for font_name in digital_fonts:
+        try:
+            return pygame.font.SysFont(font_name, size)
+        except:
+            continue
+    return pygame.font.Font(None, size)
 
 # ============================================================================
 # LAYOUT CONSTANTS
 # ============================================================================
 
 TOP_BAR_HEIGHT = 36
-LEFT_SIDEBAR_WIDTH = 280  # Wider for more info
-BOTTOM_BAR_HEIGHT = 0  # Removed - using sidebar instead
+LEFT_SIDEBAR_WIDTH = 200  # Narrower - build menu moved to bottom
+RIGHT_PANEL_WIDTH = 380   # Colonist management panel (narrower, taller)
+BOTTOM_BAR_HEIGHT = 44    # Build tools bar (thinner)
 PANEL_PADDING = 8
 BORDER_WIDTH = 2
 
-# Calculate viewport area
+# Calculate viewport area (map is between left sidebar and right panel, above bottom bar)
 VIEWPORT_X = LEFT_SIDEBAR_WIDTH
 VIEWPORT_Y = TOP_BAR_HEIGHT
-VIEWPORT_W = SCREEN_W - LEFT_SIDEBAR_WIDTH
-VIEWPORT_H = SCREEN_H - TOP_BAR_HEIGHT
+VIEWPORT_W = SCREEN_W - LEFT_SIDEBAR_WIDTH - RIGHT_PANEL_WIDTH
+VIEWPORT_H = SCREEN_H - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
 
 
 # ============================================================================
@@ -119,8 +156,9 @@ class TopBar:
         
     def init_fonts(self) -> None:
         if self.font is None:
-            self.font = pygame.font.Font(None, 26)
-            self.font_small = pygame.font.Font(None, 20)
+            self.font = get_cyber_font(18)
+            self.font_small = get_cyber_font(14)
+            self.font_digital = get_cyber_font(20, bold=True)  # For time display
     
     def handle_click(self, mouse_pos: tuple[int, int], game_data: dict) -> tuple[bool, int]:
         """Handle click on top bar. Returns (consumed, new_speed) or (consumed, -1) for pause toggle."""
@@ -158,21 +196,22 @@ class TopBar:
         
         x_cursor = 8
         
-        # Time display (left side with icon-like box)
+        # Time display (left side with digital clock style) - wider box
         time_str = game_data.get("time_str", "Day 1, 00:00")
-        time_box = pygame.Rect(x_cursor, 4, 130, TOP_BAR_HEIGHT - 8)
+        time_box = pygame.Rect(x_cursor, 4, 180, TOP_BAR_HEIGHT - 8)
         pygame.draw.rect(surface, COLOR_BG_DARK, time_box, border_radius=4)
         pygame.draw.rect(surface, COLOR_ACCENT_CYAN, time_box, 1, border_radius=4)
         
-        # Clock icon (simple circle)
+        # Neon clock icon
         clock_x = x_cursor + 14
-        pygame.draw.circle(surface, COLOR_ACCENT_CYAN, (clock_x, TOP_BAR_HEIGHT // 2), 8, 1)
-        pygame.draw.line(surface, COLOR_ACCENT_CYAN, (clock_x, TOP_BAR_HEIGHT // 2), (clock_x, TOP_BAR_HEIGHT // 2 - 4), 1)
-        pygame.draw.line(surface, COLOR_ACCENT_CYAN, (clock_x, TOP_BAR_HEIGHT // 2), (clock_x + 4, TOP_BAR_HEIGHT // 2), 1)
+        pygame.draw.circle(surface, COLOR_ACCENT_PINK, (clock_x, TOP_BAR_HEIGHT // 2), 8, 1)
+        pygame.draw.line(surface, COLOR_ACCENT_PINK, (clock_x, TOP_BAR_HEIGHT // 2), (clock_x, TOP_BAR_HEIGHT // 2 - 5), 2)
+        pygame.draw.line(surface, COLOR_ACCENT_CYAN, (clock_x, TOP_BAR_HEIGHT // 2), (clock_x + 4, TOP_BAR_HEIGHT // 2 + 1), 2)
         
-        time_surf = self.font.render(time_str, True, COLOR_TEXT_BRIGHT)
+        # Digital-style time text
+        time_surf = self.font_digital.render(time_str, True, COLOR_ACCENT_CYAN_GLOW)
         surface.blit(time_surf, (x_cursor + 28, (TOP_BAR_HEIGHT - time_surf.get_height()) // 2))
-        x_cursor += 140
+        x_cursor += 195
         
         # Game speed controls
         paused = game_data.get("paused", False)
@@ -272,11 +311,11 @@ class TopBar:
                 
                 x_cursor += 22
                 
-                # Name: Amount with neon glow text
+                # Name: Amount with neon glow text - more spacing
                 text = f"{name}: {amount}"
                 text_surf = self.font_small.render(text, True, neon_color)
                 surface.blit(text_surf, (x_cursor, TOP_BAR_HEIGHT // 2 - text_surf.get_height() // 2))
-                x_cursor += text_surf.get_width() + 14
+                x_cursor += text_surf.get_width() + 24  # More gap between resources
         
         # Z-level indicator (right side)
         z_level = game_data.get("z_level", 0)
@@ -291,9 +330,9 @@ class TopBar:
 # ============================================================================
 
 class LeftSidebar:
-    """Left sidebar with tabbed panels and cascading submenus."""
+    """Left sidebar with tabbed panels (build menu moved to bottom bar)."""
     
-    TABS = ["BUILD", "COLONISTS", "JOBS", "ITEMS", "ROOMS"]
+    TABS = ["COLONISTS", "JOBS", "ITEMS", "ROOMS"]  # BUILD moved to bottom bar
     
     # Submenu definitions - items that have submenus
     SUBMENUS = {
@@ -319,7 +358,7 @@ class LeftSidebar:
     
     def __init__(self):
         self.rect = pygame.Rect(0, TOP_BAR_HEIGHT, LEFT_SIDEBAR_WIDTH, 
-                               SCREEN_H - TOP_BAR_HEIGHT)
+                               SCREEN_H - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT)
         self.current_tab = 0
         self.font = None
         self.font_small = None
@@ -355,9 +394,9 @@ class LeftSidebar:
         
     def init_fonts(self) -> None:
         if self.font is None:
-            self.font = pygame.font.Font(None, 22)
-            self.font_small = pygame.font.Font(None, 18)
-            self.font_tiny = pygame.font.Font(None, 14)
+            self.font = get_cyber_font(16)
+            self.font_small = get_cyber_font(13)
+            self.font_tiny = get_cyber_font(11)
     
     def load_dynamic_menus(self) -> None:
         """Load stations and furniture menus from game data."""
@@ -432,29 +471,8 @@ class LeftSidebar:
                 self.current_tab = i
                 return None
         
-        # Check item clicks (BUILD tab)
+        # Check colonist clicks (COLONISTS tab - now tab 0)
         if self.current_tab == 0:
-            for i, item_rect in enumerate(self.item_rects):
-                if item_rect.collidepoint(pos) and i < len(self.build_items):
-                    item_id = self.build_items[i].get("id")
-                    # Check if this item has a submenu
-                    submenu_items = self.get_submenu_items(item_id)
-                    if submenu_items:
-                        # Toggle submenu
-                        if self.active_submenu == item_id:
-                            self.active_submenu = None
-                        else:
-                            self.active_submenu = item_id
-                            self.submenu_items = submenu_items
-                            # Position submenu to the right of the item
-                            self._build_submenu_rects(item_rect)
-                        return None
-                    else:
-                        # Direct action (no submenu)
-                        return item_id
-        
-        # Check colonist clicks (COLONISTS tab)
-        if self.current_tab == 1:
             for i, col_rect in enumerate(self.colonist_rects):
                 if col_rect.collidepoint(pos) and i < len(self.colonist_refs):
                     colonist = self.colonist_refs[i]
@@ -585,18 +603,16 @@ class LeftSidebar:
         pygame.draw.line(surface, COLOR_ACCENT_CYAN_DIM, (8, sep_y), (LEFT_SIDEBAR_WIDTH - 8, sep_y), 1)
         
         # Draw content based on current tab
-        # TABS = ["BUILD", "COLONISTS", "JOBS", "ITEMS", "ROOMS"]
+        # TABS = ["COLONISTS", "JOBS", "ITEMS", "ROOMS"] - BUILD moved to bottom bar
         content_y = sep_y + 8
         
         if self.current_tab == 0:
-            self._draw_build_content(surface, content_y, game_data)
-        elif self.current_tab == 1:
             self._draw_colonists_content(surface, content_y, game_data)
-        elif self.current_tab == 2:
+        elif self.current_tab == 1:
             self._draw_jobs_content(surface, content_y, game_data)
-        elif self.current_tab == 3:
+        elif self.current_tab == 2:
             self._draw_items_content(surface, content_y, game_data)
-        elif self.current_tab == 4:
+        elif self.current_tab == 3:
             self._draw_rooms_content(surface, content_y, game_data)
         
         # Draw current tool indicator at bottom of sidebar
@@ -1018,94 +1034,307 @@ class LeftSidebar:
 
 
 # ============================================================================
-# BOTTOM BAR
+# BOTTOM BUILD BAR
 # ============================================================================
 
-class BottomBar:
-    """Bottom info bar showing tile info, colonist stats, tooltips."""
+class BottomBuildBar:
+    """Bottom bar with build tool buttons (horizontal layout)."""
+    
+    # Build categories - same as old sidebar BUILD tab
+    BUILD_CATEGORIES = [
+        ("Build", "B", "build"),
+        ("Floor", "F", "floors"),
+        ("Access", "E", "access"),
+        ("Stations", "T", "stations"),
+        ("Furniture", "R", "furniture"),
+        ("Zone", "Z", "zone"),
+        ("Demolish", "X", "demolish"),
+        ("Salvage", "V", "salvage"),
+        ("Harvest", "H", "harvest"),
+    ]
+    
+    # Submenu definitions - copied from LeftSidebar
+    SUBMENUS = {
+        "build": [
+            {"id": "wall", "name": "Wall", "cost": "2 wood"},
+            {"id": "wall_advanced", "name": "Reinforced Wall", "cost": "2 mineral"},
+        ],
+        "floors": [
+            {"id": "floor", "name": "Wood Floor", "cost": "1 wood"},
+        ],
+        "access": [
+            {"id": "door", "name": "Door", "cost": "1 wood, 1 metal"},
+            {"id": "window", "name": "Window", "cost": "1 wood, 1 mineral"},
+            {"id": "fire_escape", "name": "Fire Escape", "cost": "1 wood, 1 metal"},
+            {"id": "bridge", "name": "Bridge", "cost": "2 wood, 1 metal"},
+        ],
+        "zone": [
+            {"id": "stockpile", "name": "Stockpile", "cost": ""},
+            {"id": "allow", "name": "Allow Area", "cost": ""},
+            {"id": "roof", "name": "Roof Zone", "cost": ""},
+        ],
+    }
     
     def __init__(self):
-        self.rect = pygame.Rect(0, SCREEN_H - BOTTOM_BAR_HEIGHT, SCREEN_W, BOTTOM_BAR_HEIGHT)
+        self.rect = pygame.Rect(LEFT_SIDEBAR_WIDTH, SCREEN_H - BOTTOM_BAR_HEIGHT, 
+                               SCREEN_W - LEFT_SIDEBAR_WIDTH - RIGHT_PANEL_WIDTH, BOTTOM_BAR_HEIGHT)
         self.font = None
         self.font_small = None
         
+        # Button state
+        self.button_rects: List[pygame.Rect] = []
+        self.hovered_button = -1
+        
+        # Submenu state
+        self.active_submenu: Optional[str] = None
+        self.submenu_items: List[dict] = []
+        self.submenu_rects: List[pygame.Rect] = []
+        self.submenu_rect: Optional[pygame.Rect] = None
+        self.hovered_submenu_item = -1
+        
+        # Dynamic menus
+        self.stations_menu: List[dict] = []
+        self.furniture_menu: List[dict] = []
+        
     def init_fonts(self) -> None:
         if self.font is None:
-            self.font = pygame.font.Font(None, 24)
-            self.font_small = pygame.font.Font(None, 20)
+            self.font = get_cyber_font(15)
+            self.font_small = get_cyber_font(12)
+    
+    def load_dynamic_menus(self) -> None:
+        """Load stations and furniture menus from game data."""
+        try:
+            from buildings import BUILDING_TYPES
+            self.stations_menu = []
+            for bld_id, bld_data in BUILDING_TYPES.items():
+                # Only include workstations
+                if not bld_data.get("workstation", False):
+                    continue
+                cost_parts = []
+                for res, amt in bld_data.get("materials", {}).items():
+                    cost_parts.append(f"{amt} {res}")
+                cost_str = ", ".join(cost_parts) if cost_parts else ""
+                self.stations_menu.append({
+                    "id": bld_id,  # Use raw ID, not prefixed
+                    "name": bld_data.get("name", bld_id.replace("_", " ").title()),
+                    "cost": cost_str,
+                })
+        except Exception as e:
+            print(f"[UI] Failed to load stations menu: {e}")
+        
+        try:
+            import items as items_module
+            self.furniture_menu = []
+            furniture_defs = items_module.get_items_with_tag("furniture")
+            for item_def in furniture_defs:
+                self.furniture_menu.append({
+                    "id": f"furn_{item_def.id}",
+                    "name": item_def.name,
+                    "cost": "From stockpile",
+                })
+        except:
+            pass
+    
+    def get_submenu_items(self, category: str) -> List[dict]:
+        """Get submenu items for a category."""
+        if category == "stations":
+            if not self.stations_menu:
+                self.load_dynamic_menus()
+            return self.stations_menu
+        elif category == "furniture":
+            if not self.furniture_menu:
+                self.load_dynamic_menus()
+            return self.furniture_menu
+        return self.SUBMENUS.get(category, [])
+    
+    def close_submenu(self) -> None:
+        """Close any open submenu."""
+        self.active_submenu = None
+        self.submenu_items = []
+        self.submenu_rects = []
+        self.submenu_rect = None
+    
+    def update(self, mouse_pos: Tuple[int, int]) -> None:
+        """Update hover states."""
+        self.hovered_button = -1
+        self.hovered_submenu_item = -1
+        
+        # Check button hovers
+        for i, btn_rect in enumerate(self.button_rects):
+            if btn_rect.collidepoint(mouse_pos):
+                self.hovered_button = i
+                break
+        
+        # Check submenu hovers
+        if self.submenu_rect and self.submenu_rect.collidepoint(mouse_pos):
+            for i, sub_rect in enumerate(self.submenu_rects):
+                if sub_rect.collidepoint(mouse_pos):
+                    self.hovered_submenu_item = i
+                    break
+    
+    def handle_click(self, pos: Tuple[int, int]) -> Optional[str]:
+        """Handle mouse click. Returns selected item ID or None."""
+        # Check submenu clicks first
+        if self.active_submenu and self.submenu_rect and self.submenu_rect.collidepoint(pos):
+            for i, sub_rect in enumerate(self.submenu_rects):
+                if sub_rect.collidepoint(pos) and i < len(self.submenu_items):
+                    item_id = self.submenu_items[i].get("id")
+                    self.active_submenu = None
+                    return item_id
+            return None
+        
+        # Click outside submenu closes it
+        if self.active_submenu:
+            self.active_submenu = None
+        
+        # Check button clicks
+        for i, btn_rect in enumerate(self.button_rects):
+            if btn_rect.collidepoint(pos) and i < len(self.BUILD_CATEGORIES):
+                _, _, item_id = self.BUILD_CATEGORIES[i]
+                submenu_items = self.get_submenu_items(item_id)
+                if submenu_items:
+                    if self.active_submenu == item_id:
+                        self.active_submenu = None
+                    else:
+                        self.active_submenu = item_id
+                        self.submenu_items = submenu_items
+                        self._build_submenu_rects(btn_rect)
+                    return None
+                else:
+                    return item_id
+        
+        return None
+    
+    def _build_submenu_rects(self, parent_rect: pygame.Rect) -> None:
+        """Build submenu item rectangles (pops up above the button)."""
+        self.submenu_rects.clear()
+        
+        item_height = 32
+        padding = 8
+        
+        # Calculate width
+        max_name_width = 100
+        for item in self.submenu_items:
+            name = item.get("name", "")
+            cost = item.get("cost", "")
+            test_width = len(name) * 8 + len(cost) * 6 + 40
+            max_name_width = max(max_name_width, test_width)
+        
+        submenu_width = max_name_width + padding * 2
+        submenu_height = len(self.submenu_items) * item_height + padding * 2
+        
+        # Position above the button
+        submenu_x = parent_rect.centerx - submenu_width // 2
+        submenu_y = parent_rect.top - submenu_height - 4
+        
+        # Keep on screen
+        if submenu_x < LEFT_SIDEBAR_WIDTH:
+            submenu_x = LEFT_SIDEBAR_WIDTH
+        if submenu_x + submenu_width > SCREEN_W - RIGHT_PANEL_WIDTH:
+            submenu_x = SCREEN_W - RIGHT_PANEL_WIDTH - submenu_width
+        
+        self.submenu_rect = pygame.Rect(submenu_x, submenu_y, submenu_width, submenu_height)
+        
+        # Build item rects
+        y = submenu_y + padding
+        for _ in self.submenu_items:
+            item_rect = pygame.Rect(submenu_x + padding, y, submenu_width - padding * 2, item_height - 4)
+            self.submenu_rects.append(item_rect)
+            y += item_height
     
     def draw(self, surface: pygame.Surface, game_data: dict) -> None:
-        """Draw the bottom bar.
-        
-        game_data should contain:
-        - tile_info: Dict with tile details
-        - selected_colonist: Colonist info dict or None
-        - current_tool: Current tool name or None
-        - tooltip: Tooltip text or None
-        """
+        """Draw the bottom build bar."""
         self.init_fonts()
+        self.button_rects.clear()
+        
+        current_tool = game_data.get("current_tool")
         
         # Background
         pygame.draw.rect(surface, COLOR_BG_PANEL, self.rect)
-        
-        # Top border with glow
         pygame.draw.line(surface, COLOR_ACCENT_CYAN_DIM,
-                        (0, self.rect.top), (SCREEN_W, self.rect.top), 1)
+                        (self.rect.left, self.rect.top), (self.rect.right, self.rect.top), 1)
         
-        # Divide into sections
-        section_width = SCREEN_W // 3
+        # Calculate button layout - compact for thinner bar
+        num_buttons = len(self.BUILD_CATEGORIES)
+        total_width = self.rect.width - 16
+        button_width = min(110, total_width // num_buttons - 6)
+        button_height = 32
+        start_x = self.rect.left + 8
+        button_y = self.rect.top + (BOTTOM_BAR_HEIGHT - button_height) // 2
         
-        # Left section: Tile info
-        tile_info = game_data.get("tile_info", {})
-        if tile_info:
-            tile_type = tile_info.get("type", "Unknown")
-            tile_pos = tile_info.get("pos", (0, 0))
+        for i, (name, key, item_id) in enumerate(self.BUILD_CATEGORIES):
+            btn_x = start_x + i * (button_width + 6)
+            btn_rect = pygame.Rect(btn_x, button_y, button_width, button_height)
+            self.button_rects.append(btn_rect)
             
-            tile_text = f"{tile_type.replace('_', ' ').title()}"
-            tile_surf = self.font.render(tile_text, True, COLOR_TEXT_BRIGHT)
-            surface.blit(tile_surf, (12, self.rect.top + 12))
+            # Check if active
+            is_active = (current_tool == item_id or 
+                        (current_tool and current_tool.startswith(item_id)) or
+                        self.active_submenu == item_id)
             
-            pos_text = f"({tile_pos[0]}, {tile_pos[1]})"
-            pos_surf = self.font_small.render(pos_text, True, COLOR_TEXT_DIM)
-            surface.blit(pos_surf, (12, self.rect.top + 36))
-        
-        # Center section: Current tool / colonist
-        current_tool = game_data.get("current_tool")
-        if current_tool:
-            tool_name = current_tool.replace("_", " ").title()
+            # Background
+            if is_active:
+                pygame.draw.rect(surface, COLOR_TAB_ACTIVE, btn_rect, border_radius=4)
+                pygame.draw.rect(surface, COLOR_ACCENT_CYAN, btn_rect, 2, border_radius=4)
+            elif i == self.hovered_button:
+                pygame.draw.rect(surface, COLOR_BG_PANEL_LIGHT, btn_rect, border_radius=4)
+                pygame.draw.rect(surface, COLOR_ACCENT_CYAN, btn_rect, 1, border_radius=4)
+            else:
+                pygame.draw.rect(surface, COLOR_BG_DARK, btn_rect, border_radius=4)
+                pygame.draw.rect(surface, COLOR_ACCENT_CYAN_DIM, btn_rect, 1, border_radius=4)
             
-            # Tool indicator box
-            tool_box = pygame.Rect(section_width + 20, self.rect.top + 8, 200, 32)
-            pygame.draw.rect(surface, COLOR_BG_DARK, tool_box, border_radius=6)
-            pygame.draw.rect(surface, COLOR_ACCENT_CYAN, tool_box, 1, border_radius=6)
+            # Keybind badge
+            kb_rect = pygame.Rect(btn_rect.x + 4, btn_rect.y + 4, 18, 16)
+            kb_color = COLOR_ACCENT_CYAN if is_active else COLOR_BG_PANEL
+            pygame.draw.rect(surface, kb_color, kb_rect, border_radius=2)
             
-            tool_surf = self.font.render(tool_name, True, COLOR_TEXT_ACCENT)
-            tool_x = tool_box.centerx - tool_surf.get_width() // 2
-            surface.blit(tool_surf, (tool_x, tool_box.centery - tool_surf.get_height() // 2))
+            kb_text_color = COLOR_BG_DARK if is_active else COLOR_TEXT_ACCENT
+            kb_surf = self.font_small.render(key, True, kb_text_color)
+            surface.blit(kb_surf, (kb_rect.centerx - kb_surf.get_width() // 2, 
+                                   kb_rect.centery - kb_surf.get_height() // 2))
             
-            # Cancel hint
-            hint_surf = self.font_small.render("[ESC] Cancel", True, COLOR_TEXT_DIM)
-            surface.blit(hint_surf, (section_width + 20, self.rect.top + 50))
+            # Button name
+            text_color = COLOR_TEXT_BRIGHT if is_active else COLOR_TEXT_DIM
+            name_surf = self.font.render(name, True, text_color)
+            name_x = btn_rect.x + 26
+            name_y = btn_rect.centery - name_surf.get_height() // 2
+            surface.blit(name_surf, (name_x, name_y))
+    
+    def draw_submenu(self, surface: pygame.Surface) -> None:
+        """Draw the submenu popup (above buttons)."""
+        if not self.active_submenu or not self.submenu_rect:
+            return
         
-        # Right section: Colonist count and job queue
-        colonists = game_data.get("colonists", [])
-        alive_count = len(colonists)
+        self.init_fonts()
         
-        # Colonist count box
-        col_box = pygame.Rect(section_width * 2 + 20, self.rect.top + 8, 120, 28)
-        pygame.draw.rect(surface, COLOR_BG_DARK, col_box, border_radius=4)
-        pygame.draw.rect(surface, COLOR_ACCENT_CYAN_DIM, col_box, 1, border_radius=4)
+        # Shadow
+        shadow_rect = self.submenu_rect.copy()
+        shadow_rect.x += 4
+        shadow_rect.y += 4
+        pygame.draw.rect(surface, (10, 12, 16), shadow_rect, border_radius=6)
         
-        col_text = f"👤 {alive_count} Colonists"
-        col_surf = self.font_small.render(col_text, True, COLOR_TEXT_BRIGHT)
-        surface.blit(col_surf, (col_box.x + 8, col_box.centery - col_surf.get_height() // 2))
+        # Background
+        pygame.draw.rect(surface, COLOR_BG_PANEL, self.submenu_rect, border_radius=6)
+        draw_panel_border(surface, self.submenu_rect, COLOR_ACCENT_CYAN_DIM, corner_size=6)
         
-        # Job count
-        job_count = game_data.get("job_count", 0)
-        job_text = f"⚙ {job_count} jobs"
-        job_color = COLOR_ALERT_YELLOW if job_count > 10 else COLOR_TEXT_DIM
-        job_surf = self.font_small.render(job_text, True, job_color)
-        surface.blit(job_surf, (section_width * 2 + 20, self.rect.top + 48))
+        # Draw items
+        for i, (item, rect) in enumerate(zip(self.submenu_items, self.submenu_rects)):
+            if i == self.hovered_submenu_item:
+                pygame.draw.rect(surface, COLOR_BG_PANEL_LIGHT, rect, border_radius=4)
+                pygame.draw.rect(surface, COLOR_ACCENT_CYAN, rect, 1, border_radius=4)
+                text_color = COLOR_TEXT_BRIGHT
+            else:
+                text_color = COLOR_TEXT_DIM
+            
+            name = item.get("name", "Unknown")
+            name_surf = self.font.render(name, True, text_color)
+            surface.blit(name_surf, (rect.x + 8, rect.centery - name_surf.get_height() // 2))
+            
+            cost = item.get("cost", "")
+            if cost:
+                cost_surf = self.font_small.render(cost, True, COLOR_TEXT_DIM)
+                cost_x = rect.right - cost_surf.get_width() - 8
+                surface.blit(cost_surf, (cost_x, rect.centery - cost_surf.get_height() // 2))
 
 
 # ============================================================================
@@ -1118,24 +1347,37 @@ class UILayoutManager:
     def __init__(self):
         self.top_bar = TopBar()
         self.left_sidebar = LeftSidebar()
+        self.bottom_bar = BottomBuildBar()
         
         # Viewport rect (where the map is drawn)
         self.viewport_rect = pygame.Rect(VIEWPORT_X, VIEWPORT_Y, VIEWPORT_W, VIEWPORT_H)
+        
+        # Right panel rect (for colonist management - drawn by ui.py)
+        self.right_panel_rect = pygame.Rect(SCREEN_W - RIGHT_PANEL_WIDTH, TOP_BAR_HEIGHT,
+                                            RIGHT_PANEL_WIDTH, SCREEN_H - TOP_BAR_HEIGHT)
     
     def update(self, mouse_pos: Tuple[int, int]) -> None:
         """Update UI hover states."""
         self.left_sidebar.update(mouse_pos)
+        self.bottom_bar.update(mouse_pos)
     
     def close_submenu(self) -> None:
         """Close any open submenu."""
         self.left_sidebar.close_submenu()
+        self.bottom_bar.close_submenu()
     
     def handle_click(self, pos: Tuple[int, int]) -> Optional[str]:
         """Handle mouse click. Returns action ID or None."""
-        # Check sidebar (including submenu)
+        # Check bottom bar first (build tools)
+        result = self.bottom_bar.handle_click(pos)
+        if result:
+            return result
+        
+        # Check sidebar
         result = self.left_sidebar.handle_click(pos)
         if result:
             return result
+        
         return None
     
     def is_point_in_ui(self, x: int, y: int) -> bool:
@@ -1144,8 +1386,14 @@ class UILayoutManager:
             return True
         if x < LEFT_SIDEBAR_WIDTH:
             return True
-        # Check if in active submenu
+        # NOTE: Right panel clicks are handled by colonist/visitor panels themselves
+        # Don't block world clicks in that area - panels check their own visibility
+        if y > SCREEN_H - BOTTOM_BAR_HEIGHT:
+            return True
+        # Check if in active submenus
         if self.left_sidebar.submenu_rect and self.left_sidebar.submenu_rect.collidepoint(x, y):
+            return True
+        if self.bottom_bar.submenu_rect and self.bottom_bar.submenu_rect.collidepoint(x, y):
             return True
         return False
     
@@ -1153,12 +1401,27 @@ class UILayoutManager:
         """Draw all UI panels."""
         self.top_bar.draw(surface, game_data)
         self.left_sidebar.draw(surface, game_data)
+        self.bottom_bar.draw(surface, game_data)
+        
+        # Fill bottom-left corner (where sidebar meets bottom bar)
+        corner_rect = pygame.Rect(0, SCREEN_H - BOTTOM_BAR_HEIGHT, LEFT_SIDEBAR_WIDTH, BOTTOM_BAR_HEIGHT)
+        pygame.draw.rect(surface, COLOR_BG_PANEL, corner_rect)
+        pygame.draw.line(surface, COLOR_ACCENT_CYAN_DIM,
+                        (corner_rect.right, corner_rect.top),
+                        (corner_rect.right, corner_rect.bottom), 1)
+        
+        # Draw right panel background (colonist panel draws its own content)
+        pygame.draw.rect(surface, COLOR_BG_PANEL, self.right_panel_rect)
+        pygame.draw.line(surface, COLOR_ACCENT_CYAN_DIM,
+                        (self.right_panel_rect.left, self.right_panel_rect.top),
+                        (self.right_panel_rect.left, self.right_panel_rect.bottom), 1)
         
         # Draw viewport border
         draw_panel_border(surface, self.viewport_rect)
         
-        # Draw cascading submenu on top
+        # Draw cascading submenus on top
         self.left_sidebar.draw_submenu(surface)
+        self.bottom_bar.draw_submenu(surface)
 
 
 # Global instance
