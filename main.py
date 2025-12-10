@@ -911,7 +911,11 @@ def main() -> None:
                 elif event.key == pygame.K_l:
                     # L key switches to COLONISTS tab in sidebar
                     ui_layout.left_sidebar.current_tab = 0  # COLONISTS is now tab 0
-                # ESC keybinding removed - use window close button to quit
+                elif event.key == pygame.K_ESCAPE:
+                    # ESC clears current tool/action
+                    ui.action_bar.current_tool = None
+                    ui.action_bar._close_all_menus()
+                    ui.clear_build_mode()
 
             if event.type == pygame.MOUSEBUTTONDOWN:
                 # Ignore scroll wheel (4, 5) and middle mouse (2) - not used

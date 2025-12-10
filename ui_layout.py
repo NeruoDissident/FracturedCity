@@ -255,6 +255,7 @@ class TopBar:
             ("mineral", "Mineral", (80, 220, 200), (120, 255, 240)), # Cyan crystal
             ("power", "Power", (255, 220, 60), (255, 255, 120)),    # Electric yellow
             ("raw_food", "Food", (140, 200, 100), (180, 255, 140)), # Bio green
+            ("cooked_meal", "Meals", (220, 160, 80), (255, 200, 120)), # Orange-brown
         ]
         
         for res_type, name, neon_color, glow_color in resource_display:
@@ -757,12 +758,12 @@ class LeftSidebar:
             # Background
             pygame.draw.rect(surface, (40, 40, 50), (bar_x, bar_y, bar_w, bar_h), border_radius=2)
             # Fill
-            hunger_color = COLOR_ALERT_GREEN if hunger_pct > 0.5 else (COLOR_ALERT_YELLOW if hunger_pct > 0.25 else COLOR_ALERT_RED)
+            hunger_color = COLOR_ALERT_RED if hunger_pct > 0.5 else (COLOR_ALERT_YELLOW if hunger_pct > 0.25 else COLOR_ALERT_GREEN)
             fill_w = int(bar_w * hunger_pct)
             if fill_w > 0:
                 pygame.draw.rect(surface, hunger_color, (bar_x, bar_y, fill_w, bar_h), border_radius=2)
             # Label
-            hunger_label = self.font_tiny.render("FOOD", True, COLOR_TEXT_DIM)
+            hunger_label = self.font_tiny.render("STARVE", True, COLOR_TEXT_DIM)
             surface.blit(hunger_label, (bar_x, bar_y + bar_h + 1))
             
             # Tiredness bar
@@ -775,7 +776,7 @@ class LeftSidebar:
             fill_w2 = int(bar_w * tired_pct)
             if fill_w2 > 0:
                 pygame.draw.rect(surface, tired_color, (bar_x, bar_y2, fill_w2, bar_h), border_radius=2)
-            tired_label = self.font_tiny.render("REST", True, COLOR_TEXT_DIM)
+            tired_label = self.font_tiny.render("DRAIN", True, COLOR_TEXT_DIM)
             surface.blit(tired_label, (bar_x, bar_y2 + bar_h + 1))
             
             y += row_height

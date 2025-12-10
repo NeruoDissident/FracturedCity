@@ -1692,7 +1692,14 @@ class WorkstationPanel:
             # Toggle auto mode between infinite and target
             if self.button_auto_rect and self.button_auto_rect.collidepoint(mouse_pos):
                 current_mode = ws.get("auto_mode", "infinite")
-                ws["auto_mode"] = "target" if current_mode == "infinite" else "infinite"
+                if current_mode == "infinite":
+                    ws["auto_mode"] = "target"
+                    # Set default target of 5 if switching to target mode with 0
+                    if ws.get("target_count", 0) == 0:
+                        ws["target_count"] = 5
+                else:
+                    ws["auto_mode"] = "infinite"
+                print(f"[Workstation] Mode: {ws['auto_mode']}, Target: {ws.get('target_count', 0)}")
                 return True
             
             # Adjust target count (used when auto_mode == "target")
@@ -3055,6 +3062,8 @@ class ColonistManagementPanel:
         
         # Overall health header
         overall = body.get_overall_health()
+        blood_loss = getattr(body, 'blood_loss', 0.0)
+        
         if overall >= 90:
             health_color = healthy_color
         elif overall >= 70:
@@ -3067,6 +3076,21 @@ class ColonistManagementPanel:
         health_text = f"INTEGRITY: {overall:.0f}%"
         health_surf = self.font.render(health_text, True, health_color)
         surface.blit(health_surf, (col1_x, content_y))
+        
+        # Blood loss indicator (only show if bleeding)
+        if blood_loss > 0:
+            if blood_loss >= 70:
+                blood_color = (255, 50, 50)
+                blood_text = f"BLOOD: CRITICAL ({100 - blood_loss:.0f}%)"
+            elif blood_loss >= 40:
+                blood_color = (255, 100, 80)
+                blood_text = f"BLOOD: LOW ({100 - blood_loss:.0f}%)"
+            else:
+                blood_color = (255, 150, 100)
+                blood_text = f"BLOOD: {100 - blood_loss:.0f}%"
+            blood_surf = self.font.render(blood_text, True, blood_color)
+            surface.blit(blood_surf, (col1_x + 140, content_y))
+        
         content_y += 18
         
         # Helper to get short status

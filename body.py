@@ -445,6 +445,8 @@ class Body:
     def __init__(self):
         self.parts: Dict[str, BodyPart] = {}
         self.combat_log: List[Tuple[float, str]] = []  # (game_time, message)
+        self.blood_loss: float = 0.0  # 0-100, death at 100
+        self.cause_of_death: str = ""  # Set when fatal damage occurs
         self._init_body()
     
     def _init_body(self) -> None:
@@ -479,6 +481,7 @@ class Body:
         Damage a body part.
         
         Returns (is_fatal, log_message)
+        - Fatal from: vital organ destruction, or blood loss reaching 100
         """
         import random
         part = self.parts.get(part_id)
@@ -488,6 +491,21 @@ class Body:
         # Apply damage
         old_health = part.health
         part.health = max(0, part.health - amount)
+        
+        # Blood loss from cuts and severe damage
+        # More blood from: cuts, major arteries (neck, torso), severe wounds
+        bleed_amount = 0.0
+        if damage_type != "blunt":
+            # Cuts always bleed
+            bleed_amount = amount * 0.3
+        if part.health < 25:
+            # Severe wounds bleed more
+            bleed_amount += amount * 0.2
+        # Major blood vessels
+        if part_id in ("chest", "stomach", "heart", "lungs", "liver"):
+            bleed_amount *= 2.0
+        
+        self.blood_loss = min(100, self.blood_loss + bleed_amount)
         
         # Vicious attack verbs based on body part and damage type
         part_lower = part.name.lower()
@@ -524,11 +542,21 @@ class Body:
             attack_verb = random.choice(cut_attacks)
         
         # Damage result descriptions
+        is_fatal = False
         if part.health <= 0:
             if part.is_vital:
                 part.status = PartStatus.MANGLED
-                results = [f"{part.name} destroyed!", f"{part.name} crushed!", f"{part.name} ruptured!"]
-                log_msg = random.choice(results)
+                # Specific death causes for vital organs
+                death_causes = {
+                    "brain": ["brain destroyed", "skull crushed", "head caved in"],
+                    "heart": ["heart ruptured", "heart destroyed", "cardiac rupture"],
+                    "lungs": ["lungs collapsed", "chest cavity destroyed", "suffocated"],
+                }
+                if part_id in death_causes:
+                    self.cause_of_death = random.choice(death_causes[part_id])
+                else:
+                    self.cause_of_death = f"{part.name} destroyed"
+                log_msg = self.cause_of_death.capitalize() + "!"
                 if attacker_name:
                     log_msg = f"{attacker_name} {attack_verb} {part_lower} - {log_msg}"
                 self.combat_log.append((game_time, log_msg))
@@ -573,6 +601,12 @@ class Body:
         
         self.combat_log.append((game_time, full_log))
         part.damage_log.append(full_log)
+        
+        # Check for death by blood loss
+        if self.blood_loss >= 100:
+            self.cause_of_death = "bled out"
+            self.combat_log.append((game_time, "Bled out from wounds"))
+            return True, full_log
         
         return False, full_log
     

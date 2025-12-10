@@ -468,6 +468,40 @@ Fractured City/
 
 ---
 
+## TL;DR - Quick Start Guide
+
+### Controls
+- **SPACE** - Pause/Unpause
+- **WASD** - Pan camera
+- **Mouse Wheel** - Zoom
+- **1-5** - Game speed
+- **TAB** - Cycle colonists in right panel
+- **Left Click** - Select / Place
+- **Right Click** - Cancel / Context menu
+- **Click + Drag** - Area selection for zones and construction
+
+### Build Order (First 10 Minutes)
+1. **Create a Stockpile** - Click the stockpile tool in left sidebar, drag an area
+2. **Salvage & Harvest** - Use gather tools to mark resources:
+   - **Harvest** (green): Trees (wood) and crystal nodes (minerals)
+   - **Salvage** (brown): Rubble piles scattered around (gives scrap)
+3. **Build a Salvager's Bench** - Converts scrap into metal (needed for advanced builds)
+4. **Build a Generator** - Produces power (some stations require it)
+5. **Build a Stove** - Cook raw food into meals
+
+### Workstations & Rooms
+- Some workstations need a **floor** (build floor tiles first)
+- Some need a **covered room** (walls + roof)
+- To make a room: Build walls in a rectangle, then **drag a roof** over the enclosed area
+- Click a built workstation to **choose recipes**
+
+### Colonist Needs
+- **STARVE bar** - Higher = more hungry (feed them!)
+- **DRAIN bar** - Higher = more tired (let them sleep!)
+- Colonists auto-eat and auto-sleep when needs are critical
+
+---
+
 ## Credits
 
 Developed with love for colony sims, Dwarf Fortress, and the beauty of emergent storytelling.

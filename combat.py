@@ -309,12 +309,12 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
     if random.random() < hit_chance:
         # Hit!
         damage = calculate_damage(attacker, defender)
-        defender.health -= damage
+        # NO LONGER reduce defender.health - death comes from body system only
         
         result["hit"] = True
         result["damage"] = damage
         
-        # Apply body damage if defender has body system
+        # Apply body damage - this is now the ONLY way to die
         from body import Body
         body = getattr(defender, 'body', None)
         if body is None:
@@ -325,23 +325,29 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
         target_part = body.get_random_external_part()
         if target_part:
             body_damage = damage * 1.5  # Scale damage for body parts
+            # Randomly choose blunt or cut damage
+            damage_type = random.choice(["blunt", "blunt", "blunt", "cut"])  # 75% blunt, 25% cut
             is_fatal, body_log = body.damage_part(
-                target_part, body_damage, "blunt", attacker_name, game_tick
+                target_part, body_damage, damage_type, attacker_name, game_tick
             )
             result["body_part"] = target_part
             result["body_log"] = body_log
             
-            # If vital organ destroyed, colonist dies
+            # Death from vital organ destruction or blood loss
             if is_fatal:
-                defender.health = 0
                 defender.is_dead = True
                 result["killed"] = True
-                result["message"] = f"{attacker_name} killed {defender_name}! ({body_log})"
+                cause = body.cause_of_death or "injuries"
+                result["cause_of_death"] = cause
+                result["message"] = f"{attacker_name} killed {defender_name}! ({cause})"
                 return result
         
-        # Check for retreat (fistfights usually non-lethal)
-        if defender.health <= 30 and defender.health > 0:
-            # Retreat check - most colonists flee at low health
+        # Check for retreat based on overall body health, not HP bar
+        overall_health = body.get_overall_health()
+        blood_loss = body.blood_loss
+        
+        # Retreat if badly hurt (low body health or significant blood loss)
+        if overall_health <= 50 or blood_loss >= 40:
             from relationships import get_relationship
             rel = get_relationship(attacker, defender)
             
@@ -357,7 +363,10 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
             if not will_kill:
                 # Defender retreats!
                 result["retreated"] = True
-                result["message"] = f"{defender_name} retreats from the fight!"
+                if blood_loss >= 40:
+                    result["message"] = f"{defender_name} retreats, bleeding badly!"
+                else:
+                    result["message"] = f"{defender_name} retreats from the fight!"
                 
                 # End combat for both
                 defender.in_combat = False
@@ -370,12 +379,6 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
                 attacker.add_thought("combat", f"{defender_name} backed off. Good.", 0.05, game_tick=game_tick)
                 
                 return result
-        
-        if defender.health <= 0:
-            defender.health = 0
-            defender.is_dead = True
-            result["killed"] = True
-            result["message"] = f"{attacker_name} killed {defender_name}!"
         else:
             # Include body part in message if available
             body_log = result.get("body_log", "")
