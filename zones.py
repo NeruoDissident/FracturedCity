@@ -320,6 +320,18 @@ def get_all_tile_storage() -> Dict[Coord3D, dict]:
     return _TILE_STORAGE.copy()
 
 
+def find_tile_with_resource(resource_type: str, min_amount: int = 1) -> Optional[Coord3D]:
+    """Find a stockpile tile containing the specified resource.
+    
+    Returns (x, y, z) of first tile with enough of the resource, or None.
+    """
+    for coord, storage in _TILE_STORAGE.items():
+        if storage and storage.get("type") == resource_type:
+            if storage.get("amount", 0) >= min_amount:
+                return coord
+    return None
+
+
 def add_to_tile_storage(x: int, y: int, z: int, resource_type: str, amount: int) -> int:
     """Add resources to a specific stockpile tile.
     
@@ -395,6 +407,34 @@ def add_to_zone_storage(x: int, y: int, z: int, resource_type: str, amount: int)
             zone["stored"][resource_type] += stored
     
     return True
+
+
+def add_to_any_stockpile(resource_type: str, amount: int) -> int:
+    """Add resources to any available stockpile tile.
+    
+    Finds a stockpile that allows this resource type and has space.
+    Returns amount actually stored.
+    """
+    remaining = amount
+    
+    for zone_id, zone in _ZONES.items():
+        if zone.get("type") != ZoneType.STOCKPILE:
+            continue
+        
+        # Check if zone allows this resource type
+        filter_key = f"allow_{resource_type}"
+        if not zone.get(filter_key, True):
+            continue
+        
+        # Try to add to tiles in this zone
+        for tile in zone.get("tiles", []):
+            if remaining <= 0:
+                break
+            
+            stored = add_to_tile_storage(*tile, resource_type, remaining)
+            remaining -= stored
+    
+    return amount - remaining
 
 
 # Equipment storage - separate from resource storage

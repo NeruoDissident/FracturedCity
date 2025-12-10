@@ -1527,7 +1527,88 @@ def spawn_resource_nodes(grid, count: int = 40) -> tuple[int, int]:
     print(f"[WorldGen] Colonist spawn: ({colonist_spawn[0]}, {colonist_spawn[1]})")
     print(f"[WorldGen] ═══════════════════════════════════════")
     
+    # Create starter stockpile near spawn
+    _create_starter_stockpile(grid, colonist_spawn)
+    
     return colonist_spawn
+
+
+def _create_starter_stockpile(grid, colonist_spawn: tuple[int, int]) -> None:
+    """Create a 4x4 starter stockpile with resources near colonist spawn.
+    
+    This is for testing/dev purposes to skip early resource gathering.
+    """
+    import zones
+    
+    spawn_x, spawn_y = colonist_spawn
+    
+    # Place stockpile 3 tiles to the right of spawn
+    stockpile_x = spawn_x + 3
+    stockpile_y = spawn_y - 2  # Slightly above
+    
+    # Find a clear 4x4 area (check for walkable tiles)
+    found = False
+    for offset_x in range(0, 10):
+        for offset_y in range(-5, 5):
+            test_x = spawn_x + 3 + offset_x
+            test_y = spawn_y + offset_y
+            
+            # Check if 4x4 area is clear
+            all_clear = True
+            for dx in range(4):
+                for dy in range(4):
+                    tx, ty = test_x + dx, test_y + dy
+                    if not grid.is_walkable(tx, ty, 0):
+                        all_clear = False
+                        break
+                if not all_clear:
+                    break
+            
+            if all_clear:
+                stockpile_x = test_x
+                stockpile_y = test_y
+                found = True
+                break
+        if found:
+            break
+    
+    if not found:
+        print("[WorldGen] WARNING: Could not find clear area for starter stockpile")
+        return
+    
+    # Create stockpile zone
+    tiles = []
+    for dx in range(4):
+        for dy in range(4):
+            tiles.append((stockpile_x + dx, stockpile_y + dy, 0))
+    
+    zone_id = zones.create_stockpile_zone(tiles, grid, z=0)
+    if zone_id < 0:
+        print("[WorldGen] WARNING: Failed to create starter stockpile zone")
+        return
+    
+    # Add starter resources - distribute across tiles
+    starter_resources = [
+        ("wood", 50),
+        ("mineral", 50),
+        ("metal", 30),
+        ("scrap", 40),
+        ("raw_food", 30),
+        ("power", 20),
+    ]
+    
+    tile_index = 0
+    for resource_type, amount in starter_resources:
+        # Spread resources across multiple tiles if needed
+        remaining = amount
+        while remaining > 0 and tile_index < len(tiles):
+            tx, ty, tz = tiles[tile_index]
+            stored = zones.add_to_tile_storage(tx, ty, tz, resource_type, remaining)
+            remaining -= stored
+            if stored > 0:
+                tile_index += 1  # Move to next tile for variety
+    
+    print(f"[WorldGen] ★ Starter stockpile created at ({stockpile_x}, {stockpile_y}) with resources")
 
 
 def is_resource_node(tile_value: Optional[str]) -> bool:

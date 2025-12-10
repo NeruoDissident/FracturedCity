@@ -26,7 +26,7 @@ from config import (
     COLOR_COLONIST_ETHER,
 )
 from grid import Grid
-from jobs import Job, request_job, remove_job, get_next_available_job, get_all_available_jobs, remove_designation, should_take_job, get_job_priority
+from jobs import Job, request_job, remove_job, get_next_available_job, get_all_available_jobs, remove_designation, should_take_job, get_job_priority, is_job_in_queue
 from resources import complete_gathering_job, set_node_state, NodeState, harvest_tick, pickup_resource_item, add_to_stockpile, spend_from_stockpile
 import buildings
 from buildings import deliver_material, mark_supply_job_completed, has_required_materials, is_door, is_door_open, open_door, is_window, is_window_open, open_window, register_window
@@ -2536,6 +2536,52 @@ class Colonist:
                         remove_designation(job.x, job.y, job.z)
                         self.current_job = None
                         self.state = "idle"
+            elif job.type == "trade_deliver":
+                # Pick up from stockpile to deliver to fixer
+                resource_type = job.resource_type
+                # Use job's pickup_amount (set when job created based on trade needs)
+                pickup_amount = getattr(job, 'pickup_amount', 10) or 10
+                haul_cap = self.get_equipment_haul_capacity()
+                pickup_amount = int(pickup_amount * haul_cap)
+                pickup_amount = max(1, pickup_amount)
+                
+                removed = zones.remove_from_tile_storage(job.x, job.y, job.z, pickup_amount)
+                if removed is not None and removed.get("amount", 0) > 0:
+                    self.carrying = {"type": resource_type, "amount": removed["amount"]}
+                    self.pick_up_item(self.carrying)
+                    self.state = "hauling"
+                    self.current_path = []
+                else:
+                    # Resource gone
+                    remove_job(job)
+                    self.current_job = None
+                    self.state = "idle"
+            elif job.type == "trade_collect":
+                # Pick up from fixer to deliver to stockpile
+                from wanderers import get_fixer_for_trade_job
+                fixer = get_fixer_for_trade_job(job.x, job.y)
+                if fixer and fixer.get("pending_trade"):
+                    resource_type = job.resource_type
+                    trade = fixer["pending_trade"]
+                    # Take from fixer's offer - use haul capacity
+                    available = trade["fixer_offer"].get(resource_type, 0) - trade["collected"].get(resource_type, 0)
+                    if available > 0:
+                        haul_cap = self.get_equipment_haul_capacity()
+                        base_carry = 10
+                        take_amount = min(available, int(base_carry * haul_cap))
+                        take_amount = max(1, take_amount)
+                        self.carrying = {"type": resource_type, "amount": take_amount}
+                        self.pick_up_item(self.carrying)
+                        self.state = "hauling"
+                        self.current_path = []
+                    else:
+                        remove_job(job)
+                        self.current_job = None
+                        self.state = "idle"
+                else:
+                    remove_job(job)
+                    self.current_job = None
+                    self.state = "idle"
             elif job.type == "equip":
                 # Equip job - pick up item from stockpile and equip it
                 item = zones.remove_equipment_from_tile(job.x, job.y, job.z)
@@ -2745,6 +2791,32 @@ class Colonist:
                     # Destination is no longer a stockpile - just add to global stockpile
                     add_to_stockpile(resource_type, amount)
                     print(f"[Haul] Delivered {amount} {resource_type} (stockpile zone removed)")
+            elif job.type == "trade_deliver":
+                # Deliver to fixer
+                from wanderers import get_fixer_for_trade_job, complete_trade_delivery
+                fixer = get_fixer_for_trade_job(dest_x, dest_y)
+                if fixer:
+                    complete_trade_delivery(fixer, resource_type, amount)
+                    print(f"[Trade] Delivered {amount} {resource_type} to {fixer['name']}")
+                else:
+                    # Fixer left - drop items
+                    add_to_stockpile(resource_type, amount)
+                    print(f"[Trade] Fixer gone, returning {amount} {resource_type} to stockpile")
+            elif job.type == "trade_collect":
+                # Deliver fixer's goods to stockpile
+                from wanderers import get_fixer_for_trade_job, complete_trade_collection
+                # First mark as collected from fixer
+                fixer = get_fixer_for_trade_job(job.x, job.y)
+                if fixer:
+                    complete_trade_collection(fixer, resource_type, amount)
+                # Then add to stockpile
+                if zones.is_stockpile_zone(dest_x, dest_y, dest_z):
+                    add_to_stockpile(resource_type, amount)
+                    zones.add_to_zone_storage(dest_x, dest_y, dest_z, resource_type, amount)
+                    print(f"[Trade] Stored {amount} {resource_type} from trade")
+                else:
+                    add_to_stockpile(resource_type, amount)
+                    print(f"[Trade] Stored {amount} {resource_type} (stockpile zone changed)")
             elif job.type == "install_furniture":
                 # Install furniture at destination: convert tile and consume item
                 furniture_item_id = job.resource_type or self.carrying.get("item_id")
@@ -2887,12 +2959,21 @@ class Colonist:
             elif job.type == "crafting":
                 buildings.release_workstation(job.x, job.y, job.z)
             
-            # Unassign job so others can take it
-            job.assigned = False
-            self.current_job = None
+            # Only unassign and log if job is still in queue
+            # (job may have been completed/removed by another colonist)
+            if is_job_in_queue(job):
+                reason_str = f" ({reason})" if reason else ""
+                
+                # If job is "no longer valid", remove it entirely to prevent infinite loop
+                # Other interrupts (path blocked, stuck) just unassign so job can be retried
+                if reason == "job no longer valid":
+                    remove_job(job)
+                    print(f"[Interrupt] Job {job.type} at ({job.x},{job.y}) removed{reason_str}")
+                else:
+                    job.assigned = False
+                    print(f"[Interrupt] Job {job.type} at ({job.x},{job.y}) interrupted{reason_str}")
             
-            reason_str = f" ({reason})" if reason else ""
-            print(f"[Interrupt] Job {job.type} at ({job.x},{job.y}) interrupted{reason_str}")
+            self.current_job = None
         
         # Drop carried items
         if self.carrying is not None:
@@ -2906,9 +2987,10 @@ class Colonist:
 
     def _enter_recovery(self, reason: str = "") -> None:
         """Enter recovery state - brief pause before returning to idle."""
-        if self.state != "recovery":
+        # Only log if not a silent recovery (job completed by someone else)
+        if self.state != "recovery" and reason != "job no longer valid":
             reason_str = f" ({reason})" if reason else ""
-            print(f"[Recovery] Colonist entering recovery{reason_str}")
+            print(f"[Recovery] {self.name} entering recovery{reason_str}")
         self.state = "recovery"
         self.recovery_timer = self.recovery_duration
         self.current_path = []
@@ -3385,7 +3467,8 @@ class Colonist:
     
     def _try_go_to_sleep(self, grid: Grid, all_colonists: list, game_tick: int) -> None:
         """Try to find a bed and go to sleep."""
-        from beds import get_colonist_bed
+        from beds import get_colonist_bed, get_all_beds, assign_colonist_to_bed, get_bed_occupants
+        from relationships import get_relationship, get_romantic_partner
         
         # Check if we have an assigned bed
         bed_pos = get_colonist_bed(id(self))
@@ -3409,12 +3492,126 @@ class Colonist:
                     self.state = "moving_to_sleep"
                     return
         
-        # No bed - sleep on ground (with penalty)
-        if self.tiredness > 95:
+        # No assigned bed - try to claim one intelligently
+        all_beds = get_all_beds()
+        if all_beds:
+            best_bed = None
+            best_score = -999
+            
+            for pos, data in all_beds:
+                occupants = data.get("assigned", [])
+                
+                # Skip full beds
+                if len(occupants) >= 2:
+                    continue
+                
+                score = 0
+                
+                if len(occupants) == 0:
+                    # Empty bed - base score
+                    score = 10
+                else:
+                    # Has one occupant - check compatibility
+                    other_id = occupants[0]
+                    other = None
+                    for c in all_colonists:
+                        if id(c) == other_id:
+                            other = c
+                            break
+                    
+                    if other:
+                        # Check if romantic partner
+                        partner = get_romantic_partner(self, all_colonists)
+                        if partner and id(partner) == other_id:
+                            score = 100  # Strongly prefer partner's bed
+                        else:
+                            rel = get_relationship(self, other)
+                            if rel["score"] >= 50:
+                                score = 50  # Good friend
+                            elif rel["score"] >= 30:
+                                score = 30  # Friend
+                            elif rel["score"] <= -50:
+                                score = -50  # Enemy - avoid
+                            elif rel["score"] <= -30:
+                                score = -20  # Dislike - prefer not
+                            else:
+                                score = 5  # Neutral
+                
+                # Prefer closer beds
+                dist = abs(self.x - pos[0]) + abs(self.y - pos[1])
+                score -= dist * 0.1
+                
+                if score > best_score:
+                    best_score = score
+                    best_bed = pos
+            
+            # Claim the best bed if score is acceptable
+            if best_bed and best_score > -10:
+                if assign_colonist_to_bed(id(self), *best_bed):
+                    bx, by, bz = best_bed
+                    self.current_path = self._calculate_path(grid, bx, by, bz)
+                    if self.current_path:
+                        self.sleep_target = best_bed
+                        self.state = "moving_to_sleep"
+                        return
+        
+        # No bed available - sleep on ground (with penalty)
+        if self.tiredness > 85:
             self.is_sleeping = True
             self.state = "sleeping"
-            self.add_thought("need", "Sleeping on the ground...", -0.15, game_tick=game_tick)
+            self.add_thought("need", "Sleeping on the cold ground...", -0.2, game_tick=game_tick)
             print(f"[Sleep] {self.name} collapsed to sleep on the ground (no bed)")
+
+    def _move_to_sleep(self, grid: Grid) -> None:
+        """Move towards sleep target (bed)."""
+        if self.sleep_target is None:
+            self.state = "idle"
+            return
+        
+        bx, by, bz = self.sleep_target
+        
+        # Check if we've arrived (adjacent to bed)
+        dist = abs(self.x - bx) + abs(self.y - by)
+        if dist <= 1 and self.z == bz:
+            # Arrived at bed - go to sleep
+            self.is_sleeping = True
+            self.state = "sleeping"
+            self.add_thought("need", "Time to rest.", 0.05, game_tick=self._game_tick)
+            print(f"[Sleep] {self.name} went to sleep in their bed")
+            return
+        
+        # Move along path
+        if self.move_cooldown > 0:
+            self.move_cooldown -= 1
+            return
+        
+        if not self.current_path:
+            # Recalculate path
+            self.current_path = self._calculate_path(grid, bx, by, bz)
+            if not self.current_path:
+                # Can't reach bed - give up and sleep on ground
+                self.sleep_target = None
+                self.state = "idle"
+                return
+        
+        # Take next step
+        if self.current_path:
+            next_x, next_y, next_z = self.current_path[0]
+            
+            # Check if next tile is walkable
+            if grid.is_walkable(next_x, next_y, next_z) or is_door(next_x, next_y, next_z):
+                # Handle doors
+                if is_door(next_x, next_y, next_z) and not is_door_open(next_x, next_y, next_z):
+                    open_door(next_x, next_y, next_z)
+                
+                self.x = next_x
+                self.y = next_y
+                self.z = next_z
+                self.current_path.pop(0)
+                self.move_cooldown = self.move_speed
+            else:
+                # Path blocked - recalculate
+                self.current_path = []
 
     def _update_combat(self, all_colonists: list, game_tick: int) -> None:
         """Process combat behavior for this colonist."""
@@ -3644,6 +3841,11 @@ class Colonist:
             self._crafting_work_at_bench(grid)
         elif self.state == "eating":
             self._move_to_eat(grid)
+        elif self.state == "moving_to_sleep":
+            self._move_to_sleep(grid)
+        elif self.state == "sleeping":
+            # Sleep is handled in _update_tiredness, just pass here
+            pass
         else:
             print(f"ERROR: Colonist in unknown state: {self.state}")
 

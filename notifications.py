@@ -43,13 +43,15 @@ class Notification:
     """A single notification."""
     
     def __init__(self, ntype: NotificationType, title: str, detail: str = "", 
-                 duration: int = 300):
+                 duration: int = 300, click_location: tuple = None):
         self.type = ntype
         self.title = title
         self.detail = detail
         self.duration = duration  # Ticks to display
         self.age = 0
         self.alpha = 255
+        self.click_location = click_location  # (x, y) to jump camera on click
+        self.rect: pygame.Rect = None  # Set during draw for click detection
     
     def update(self) -> bool:
         """Update notification. Returns False when expired."""
@@ -85,11 +87,15 @@ def _init_fonts():
 
 
 def add_notification(ntype: NotificationType, title: str, detail: str = "",
-                     duration: int = 300):
-    """Add a notification to the queue."""
+                     duration: int = 300, click_location: tuple = None):
+    """Add a notification to the queue.
+    
+    Args:
+        click_location: Optional (x, y) tuple - clicking notification jumps camera here
+    """
     global _notifications
     
-    notif = Notification(ntype, title, detail, duration)
+    notif = Notification(ntype, title, detail, duration, click_location)
     _notifications.insert(0, notif)  # Add to front
     
     # Limit total notifications
@@ -103,15 +109,24 @@ def update_notifications():
     _notifications = [n for n in _notifications if n.update()]
 
 
-def draw_notifications(surface: pygame.Surface):
-    """Draw notifications in top-left corner."""
+def handle_notification_click(mouse_pos: tuple) -> tuple:
+    """Check if a notification was clicked. Returns click_location or None."""
+    for notif in _notifications[:_max_visible]:
+        if notif.rect and notif.rect.collidepoint(mouse_pos):
+            if notif.click_location:
+                return notif.click_location
+    return None
+
+
+def draw_notifications(surface: pygame.Surface, x_offset: int = 10, y_offset: int = 50):
+    """Draw notifications at specified position."""
     _init_fonts()
     
     if not _notifications:
         return
     
-    x = 10
-    y = 50  # Below time display
+    x = x_offset
+    y = y_offset
     
     for i, notif in enumerate(_notifications[:_max_visible]):
         # Background
@@ -133,6 +148,9 @@ def draw_notifications(surface: pygame.Surface):
         border_color = (*notif.color, notif.alpha)
         pygame.draw.rect(bg, border_color, (0, 0, width, height), 2)
         
+        # Store rect for click detection
+        notif.rect = pygame.Rect(x, y, width, height)
+        
         surface.blit(bg, (x, y))
         
         # Title with alpha
@@ -143,6 +161,12 @@ def draw_notifications(surface: pygame.Surface):
         if notif.detail:
             detail_surf.set_alpha(notif.alpha)
             surface.blit(detail_surf, (x + 8, y + 24))
+        
+        # Draw click indicator if clickable
+        if notif.click_location:
+            click_hint = _font_small.render("[click to locate]", True, (100, 200, 255))
+            click_hint.set_alpha(notif.alpha)
+            surface.blit(click_hint, (x + width - click_hint.get_width() - 8, y + 4))
         
         y += height + 4
 

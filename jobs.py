@@ -197,6 +197,11 @@ def get_next_job() -> Optional[Job]:
     return None
 
 
+def get_jobs_by_type(job_type: str) -> List[Job]:
+    """Return all jobs of a specific type (assigned or not)."""
+    return [j for j in JOB_QUEUE if j.type == job_type]
+
+
 def get_next_available_job(
     skip_types: list[str] | None = None,
     skip_unready_construction: bool = False
@@ -333,6 +338,11 @@ def remove_job(job: Job) -> None:
 
     if job in JOB_QUEUE:
         JOB_QUEUE.remove(job)
+
+
+def is_job_in_queue(job: Job) -> bool:
+    """Check if a job is still in the queue."""
+    return job in JOB_QUEUE
 
 
 def get_job_at(x: int, y: int, z: int = None) -> Optional[Job]:

@@ -1050,6 +1050,535 @@ def get_stockpile_filter_panel() -> StockpileFilterPanel:
 
 
 # ============================================================================
+# Bed Assignment Panel
+# ============================================================================
+
+class BedAssignmentPanel:
+    """UI panel for assigning colonists to beds."""
+    
+    def __init__(self):
+        self.visible = False
+        self.bed_pos: Optional[tuple[int, int, int]] = None
+        self.panel_rect = pygame.Rect(0, 0, 220, 300)
+        self.colonist_rects: list[pygame.Rect] = []
+        self.unassign_rects: list[pygame.Rect] = []  # X buttons to unassign
+        self.font: Optional[pygame.font.Font] = None
+        self.font_small: Optional[pygame.font.Font] = None
+        self.scroll_offset = 0
+    
+    def init_font(self) -> None:
+        self.font = pygame.font.Font(None, 24)
+        self.font_small = pygame.font.Font(None, 20)
+    
+    def open(self, x: int, y: int, z: int, screen_x: int, screen_y: int) -> None:
+        """Open the panel for a bed at world position."""
+        from beds import get_bed_at
+        
+        bed = get_bed_at(x, y, z)
+        if bed is None:
+            return
+        
+        self.bed_pos = (x, y, z)
+        self.visible = True
+        self.scroll_offset = 0
+        
+        # Position panel near click but keep on screen
+        self.panel_rect.x = min(screen_x + 20, SCREEN_W - self.panel_rect.width - 10)
+        self.panel_rect.y = min(screen_y, SCREEN_H - self.panel_rect.height - 60)
+    
+    def close(self) -> None:
+        """Close the panel."""
+        self.visible = False
+        self.bed_pos = None
+    
+    def handle_click(self, mouse_pos: tuple[int, int], colonists: list) -> bool:
+        """Handle click. Returns True if consumed."""
+        if not self.visible:
+            return False
+        
+        # Click outside panel closes it
+        if not self.panel_rect.collidepoint(mouse_pos):
+            self.close()
+            return True
+        
+        from beds import assign_colonist_to_bed, unassign_colonist, get_bed_occupants
+        
+        # Check unassign buttons first
+        for i, rect in enumerate(self.unassign_rects):
+            if rect.collidepoint(mouse_pos):
+                occupants = get_bed_occupants(*self.bed_pos)
+                if i < len(occupants):
+                    unassign_colonist(occupants[i])
+                return True
+        
+        # Check colonist assignment clicks
+        for i, rect in enumerate(self.colonist_rects):
+            if rect.collidepoint(mouse_pos):
+                # Get unassigned colonists
+                unassigned = self._get_unassigned_colonists(colonists)
+                if i < len(unassigned):
+                    colonist = unassigned[i]
+                    assign_colonist_to_bed(id(colonist), *self.bed_pos)
+                return True
+        
+        return True  # Consume click on panel
+    
+    def _get_unassigned_colonists(self, colonists: list) -> list:
+        """Get colonists not assigned to any bed."""
+        from beds import get_colonist_bed
+        return [c for c in colonists if not c.is_dead and get_colonist_bed(id(c)) is None]
+    
+    def _get_colonist_by_id(self, colonist_id: int, colonists: list):
+        """Find colonist by id()."""
+        for c in colonists:
+            if id(c) == colonist_id:
+                return c
+        return None
+    
+    def draw(self, surface: pygame.Surface, colonists: list) -> None:
+        """Draw the bed assignment panel."""
+        if not self.visible or self.bed_pos is None:
+            return
+        
+        if self.font is None:
+            self.init_font()
+        
+        from beds import get_bed_at, get_bed_occupants
+        
+        bed = get_bed_at(*self.bed_pos)
+        if bed is None:
+            self.close()
+            return
+        
+        # Panel background
+        pygame.draw.rect(surface, (40, 42, 48), self.panel_rect, border_radius=6)
+        pygame.draw.rect(surface, (100, 180, 180), self.panel_rect, 2, border_radius=6)
+        
+        # Title
+        title = self.font.render("Crash Bed", True, (100, 200, 200))
+        surface.blit(title, (self.panel_rect.x + 10, self.panel_rect.y + 10))
+        
+        # Quality indicator
+        quality = bed.get("quality", 1)
+        quality_text = "★" * quality + "☆" * (3 - quality)
+        quality_surf = self.font_small.render(quality_text, True, (255, 220, 100))
+        surface.blit(quality_surf, (self.panel_rect.right - 60, self.panel_rect.y + 12))
+        
+        y = self.panel_rect.y + 40
+        
+        # Current occupants section
+        occupants = get_bed_occupants(*self.bed_pos)
+        
+        section_title = self.font_small.render(f"Assigned ({len(occupants)}/2):", True, (180, 180, 180))
+        surface.blit(section_title, (self.panel_rect.x + 10, y))
+        y += 24
+        
+        self.unassign_rects.clear()
+        
+        if not occupants:
+            empty_text = self.font_small.render("(none)", True, (120, 120, 120))
+            surface.blit(empty_text, (self.panel_rect.x + 20, y))
+            y += 24
+        else:
+            for occ_id in occupants:
+                colonist = self._get_colonist_by_id(occ_id, colonists)
+                name = colonist.name if colonist else f"#{occ_id}"
+                
+                # Name
+                name_surf = self.font_small.render(name, True, (200, 200, 200))
+                surface.blit(name_surf, (self.panel_rect.x + 20, y))
+                
+                # Unassign button (X)
+                x_rect = pygame.Rect(self.panel_rect.right - 30, y, 20, 20)
+                self.unassign_rects.append(x_rect)
+                pygame.draw.rect(surface, (100, 60, 60), x_rect, border_radius=3)
+                x_text = self.font_small.render("✗", True, (200, 100, 100))
+                surface.blit(x_text, (x_rect.x + 4, x_rect.y + 2))
+                
+                y += 26
+        
+        y += 10
+        
+        # Separator
+        pygame.draw.line(surface, (80, 85, 95), 
+                        (self.panel_rect.x + 10, y),
+                        (self.panel_rect.right - 10, y), 1)
+        y += 10
+        
+        # Available colonists section
+        unassigned = self._get_unassigned_colonists(colonists)
+        
+        avail_title = self.font_small.render(f"Available ({len(unassigned)}):", True, (180, 180, 180))
+        surface.blit(avail_title, (self.panel_rect.x + 10, y))
+        y += 24
+        
+        self.colonist_rects.clear()
+        
+        # Can only assign if bed has space
+        can_assign = len(occupants) < 2
+        
+        if not unassigned:
+            empty_text = self.font_small.render("(all assigned)", True, (120, 120, 120))
+            surface.blit(empty_text, (self.panel_rect.x + 20, y))
+        else:
+            for colonist in unassigned[:8]:  # Show max 8
+                rect = pygame.Rect(self.panel_rect.x + 10, y, self.panel_rect.width - 20, 24)
+                self.colonist_rects.append(rect)
+                
+                # Highlight if hoverable
+                mouse_pos = pygame.mouse.get_pos()
+                if can_assign and rect.collidepoint(mouse_pos):
+                    pygame.draw.rect(surface, (60, 80, 60), rect, border_radius=3)
+                
+                # Name
+                text_color = (200, 200, 200) if can_assign else (100, 100, 100)
+                name_surf = self.font_small.render(colonist.name, True, text_color)
+                surface.blit(name_surf, (rect.x + 10, rect.y + 4))
+                
+                y += 26
+        
+        # Hint at bottom
+        if not can_assign:
+            hint = self.font_small.render("Bed is full", True, (200, 150, 100))
+            surface.blit(hint, (self.panel_rect.x + 10, self.panel_rect.bottom - 25))
+
+
+# Global bed assignment panel
+_bed_assignment_panel: Optional[BedAssignmentPanel] = None
+
+
+def get_bed_assignment_panel() -> BedAssignmentPanel:
+    """Get or create the global bed assignment panel."""
+    global _bed_assignment_panel
+    if _bed_assignment_panel is None:
+        _bed_assignment_panel = BedAssignmentPanel()
+    return _bed_assignment_panel
+
+
+# ============================================================================
+# Fixer Trade Panel
+# ============================================================================
+
+class FixerTradePanel:
+    """UI panel for trading with fixers."""
+    
+    def __init__(self):
+        self.visible = False
+        self.fixer: Optional[dict] = None
+        self.panel_rect = pygame.Rect(0, 0, 400, 450)
+        self.font: Optional[pygame.font.Font] = None
+        self.font_small: Optional[pygame.font.Font] = None
+        
+        # Trade state
+        self.player_offer: Dict[str, int] = {}  # {item_id: qty}
+        self.fixer_offer: Dict[str, int] = {}   # {item_id: qty}
+        
+        # Clickable areas
+        self.fixer_item_rects: List[Tuple[pygame.Rect, str]] = []
+        self.player_item_rects: List[Tuple[pygame.Rect, str]] = []
+        self.confirm_rect: Optional[pygame.Rect] = None
+        self.cancel_rect: Optional[pygame.Rect] = None
+    
+    def init_font(self) -> None:
+        self.font = pygame.font.Font(None, 24)
+        self.font_small = pygame.font.Font(None, 20)
+    
+    def open(self, fixer: dict) -> None:
+        """Open trade panel for a fixer."""
+        self.fixer = fixer
+        self.visible = True
+        self.player_offer.clear()
+        self.fixer_offer.clear()
+        
+        # Center panel
+        self.panel_rect.x = (SCREEN_W - self.panel_rect.width) // 2
+        self.panel_rect.y = (SCREEN_H - self.panel_rect.height) // 2
+    
+    def close(self) -> None:
+        """Close the panel."""
+        self.visible = False
+        self.fixer = None
+        self.player_offer.clear()
+        self.fixer_offer.clear()
+    
+    def handle_click(self, mouse_pos: tuple[int, int], zones_module) -> bool:
+        """Handle click. Returns True if consumed."""
+        if not self.visible or not self.fixer:
+            return False
+        
+        # Click outside closes
+        if not self.panel_rect.collidepoint(mouse_pos):
+            self.close()
+            return True
+        
+        # Check fixer items (click to add to their offer)
+        for rect, item_id in self.fixer_item_rects:
+            if rect.collidepoint(mouse_pos):
+                available = self.fixer["inventory"].get(item_id, 0)
+                offered = self.fixer_offer.get(item_id, 0)
+                if offered < available:
+                    self.fixer_offer[item_id] = offered + 1
+                return True
+        
+        # Check player items (click to add to offer)
+        for rect, item_id in self.player_item_rects:
+            if rect.collidepoint(mouse_pos):
+                available = self._get_player_stock(item_id, zones_module)
+                offered = self.player_offer.get(item_id, 0)
+                if offered < available:
+                    self.player_offer[item_id] = offered + 1
+                return True
+        
+        # Confirm trade
+        if self.confirm_rect and self.confirm_rect.collidepoint(mouse_pos):
+            if self._execute_trade(zones_module):
+                self.close()
+            return True
+        
+        # Cancel
+        if self.cancel_rect and self.cancel_rect.collidepoint(mouse_pos):
+            self.close()
+            return True
+        
+        return True
+    
+    def _get_player_stock(self, item_id: str, zones_module) -> int:
+        """Get how much of an item the player has in stockpiles."""
+        total = 0
+        for coord, storage in zones_module.get_all_tile_storage().items():
+            if storage and storage.get("type") == item_id:
+                total += storage.get("amount", 0)
+        return total
+    
+    def _execute_trade(self, zones_module) -> bool:
+        """Queue the trade for colonist execution. Returns True if successful."""
+        from economy import is_fair_trade
+        from wanderers import queue_trade
+        
+        if not self.fixer:
+            return False
+        
+        origin = self.fixer["origin"]
+        
+        # Convert to list format for trade check
+        player_items = [(k, v) for k, v in self.player_offer.items() if v > 0]
+        fixer_items = [(k, v) for k, v in self.fixer_offer.items() if v > 0]
+        
+        if not fixer_items:
+            return False  # Must get something
+        
+        # Check if fair
+        if not is_fair_trade(player_items, fixer_items, origin):
+            print("[Trade] Fixer rejected unfair trade")
+            return False
+        
+        # Check player has the resources in stockpiles
+        for item_id, qty in player_items:
+            total = 0
+            for coord, storage in zones_module.get_all_tile_storage().items():
+                if storage and storage.get("type") == item_id:
+                    total += storage.get("amount", 0)
+            if total < qty:
+                print(f"[Trade] Not enough {item_id} in stockpiles ({total}/{qty})")
+                return False
+        
+        # Queue trade for colonist execution (no instant transfer!)
+        if queue_trade(self.fixer, self.player_offer, self.fixer_offer):
+            from notifications import add_notification, NotificationType
+            add_notification(NotificationType.INFO,
+                           "// TRADE QUEUED //",
+                           f"Colonists will exchange goods with {self.fixer['name']}",
+                           duration=360)
+            return True
+        
+        return False
+    
+    def draw(self, surface: pygame.Surface, zones_module) -> None:
+        """Draw the trade panel."""
+        if not self.visible or not self.fixer:
+            return
+        
+        if self.font is None:
+            self.init_font()
+        
+        from economy import calculate_fixer_price, get_base_value
+        
+        origin = self.fixer["origin"]
+        
+        # Panel background
+        pygame.draw.rect(surface, (35, 38, 45), self.panel_rect, border_radius=8)
+        pygame.draw.rect(surface, (255, 200, 80), self.panel_rect, 2, border_radius=8)
+        
+        # Title
+        title = self.font.render(f"Trade with {self.fixer['name']}", True, (255, 220, 100))
+        surface.blit(title, (self.panel_rect.x + 15, self.panel_rect.y + 12))
+        
+        # Origin subtitle
+        origin_text = self.font_small.render(f"Origin: {origin.name}", True, (150, 150, 150))
+        surface.blit(origin_text, (self.panel_rect.x + 15, self.panel_rect.y + 36))
+        
+        # Divider
+        y = self.panel_rect.y + 55
+        pygame.draw.line(surface, (80, 85, 95), 
+                        (self.panel_rect.x + 10, y),
+                        (self.panel_rect.right - 10, y), 1)
+        y += 10
+        
+        # Two columns: Fixer's goods | Your goods
+        col_width = (self.panel_rect.width - 30) // 2
+        left_x = self.panel_rect.x + 10
+        right_x = self.panel_rect.x + 20 + col_width
+        
+        # Fixer's goods header
+        header = self.font_small.render("Fixer's Goods", True, (200, 180, 100))
+        surface.blit(header, (left_x, y))
+        
+        # Your goods header
+        header2 = self.font_small.render("Your Stockpile", True, (100, 180, 200))
+        surface.blit(header2, (right_x, y))
+        y += 22
+        
+        self.fixer_item_rects.clear()
+        self.player_item_rects.clear()
+        
+        # Fixer's inventory
+        fixer_y = y
+        for item_id, qty in self.fixer["inventory"].items():
+            if qty <= 0:
+                continue
+            
+            offered = self.fixer_offer.get(item_id, 0)
+            sell_price = calculate_fixer_price(item_id, origin, is_buying=False)
+            
+            rect = pygame.Rect(left_x, fixer_y, col_width - 5, 22)
+            self.fixer_item_rects.append((rect, item_id))
+            
+            # Highlight if hovered
+            mouse_pos = pygame.mouse.get_pos()
+            if rect.collidepoint(mouse_pos):
+                pygame.draw.rect(surface, (60, 55, 40), rect, border_radius=3)
+            
+            # Item name and qty
+            display = f"{item_id}: {qty}"
+            if offered > 0:
+                display = f"{item_id}: {qty} (-{offered})"
+            text = self.font_small.render(display, True, (200, 200, 200))
+            surface.blit(text, (left_x + 4, fixer_y + 3))
+            
+            # Price
+            price_text = self.font_small.render(f"[{sell_price}]", True, (255, 200, 80))
+            surface.blit(price_text, (left_x + col_width - 40, fixer_y + 3))
+            
+            fixer_y += 24
+        
+        # Player's stockpile items
+        player_y = y
+        player_items = {}
+        for coord, storage in zones_module.get_all_tile_storage().items():
+            if storage:
+                item_id = storage.get("type")
+                amount = storage.get("amount", 0)
+                if item_id and amount > 0:
+                    player_items[item_id] = player_items.get(item_id, 0) + amount
+        
+        for item_id, qty in player_items.items():
+            offered = self.player_offer.get(item_id, 0)
+            buy_price = calculate_fixer_price(item_id, origin, is_buying=True)
+            
+            rect = pygame.Rect(right_x, player_y, col_width - 5, 22)
+            self.player_item_rects.append((rect, item_id))
+            
+            mouse_pos = pygame.mouse.get_pos()
+            if rect.collidepoint(mouse_pos):
+                pygame.draw.rect(surface, (40, 55, 60), rect, border_radius=3)
+            
+            display = f"{item_id}: {qty}"
+            if offered > 0:
+                display = f"{item_id}: {qty} (-{offered})"
+            text = self.font_small.render(display, True, (200, 200, 200))
+            surface.blit(text, (right_x + 4, player_y + 3))
+            
+            price_text = self.font_small.render(f"[{buy_price}]", True, (100, 200, 255))
+            surface.blit(price_text, (right_x + col_width - 40, player_y + 3))
+            
+            player_y += 24
+        
+        # Trade summary
+        summary_y = self.panel_rect.bottom - 100
+        pygame.draw.line(surface, (80, 85, 95),
+                        (self.panel_rect.x + 10, summary_y),
+                        (self.panel_rect.right - 10, summary_y), 1)
+        summary_y += 10
+        
+        # Calculate values
+        from economy import calculate_trade_value
+        player_value = calculate_trade_value(
+            [(k, v) for k, v in self.player_offer.items() if v > 0],
+            origin, is_player_offering=True
+        )
+        fixer_value = calculate_trade_value(
+            [(k, v) for k, v in self.fixer_offer.items() if v > 0],
+            origin, is_player_offering=False
+        )
+        
+        # Show values
+        your_text = self.font_small.render(f"You offer: {player_value} value", True, (100, 200, 255))
+        surface.blit(your_text, (left_x, summary_y))
+        
+        their_text = self.font_small.render(f"They offer: {fixer_value} value", True, (255, 200, 80))
+        surface.blit(their_text, (right_x, summary_y))
+        summary_y += 25
+        
+        # Fair trade indicator
+        is_fair = player_value >= fixer_value * 0.9 if fixer_value > 0 else True
+        fair_color = (100, 200, 100) if is_fair else (200, 100, 100)
+        fair_text = "Fair Trade" if is_fair else "Unfair - Add More"
+        fair_surf = self.font_small.render(fair_text, True, fair_color)
+        surface.blit(fair_surf, (self.panel_rect.centerx - fair_surf.get_width() // 2, summary_y))
+        summary_y += 25
+        
+        # Buttons
+        btn_width = 80
+        btn_height = 28
+        
+        self.confirm_rect = pygame.Rect(
+            self.panel_rect.centerx - btn_width - 10, summary_y,
+            btn_width, btn_height
+        )
+        self.cancel_rect = pygame.Rect(
+            self.panel_rect.centerx + 10, summary_y,
+            btn_width, btn_height
+        )
+        
+        # Confirm button
+        confirm_color = (60, 100, 60) if is_fair else (50, 50, 50)
+        pygame.draw.rect(surface, confirm_color, self.confirm_rect, border_radius=4)
+        pygame.draw.rect(surface, (100, 200, 100) if is_fair else (80, 80, 80), self.confirm_rect, 1, border_radius=4)
+        confirm_text = self.font_small.render("Trade", True, (200, 255, 200) if is_fair else (120, 120, 120))
+        surface.blit(confirm_text, (self.confirm_rect.centerx - confirm_text.get_width() // 2,
+                                    self.confirm_rect.centery - confirm_text.get_height() // 2))
+        
+        # Cancel button
+        pygame.draw.rect(surface, (80, 50, 50), self.cancel_rect, border_radius=4)
+        pygame.draw.rect(surface, (200, 100, 100), self.cancel_rect, 1, border_radius=4)
+        cancel_text = self.font_small.render("Cancel", True, (255, 200, 200))
+        surface.blit(cancel_text, (self.cancel_rect.centerx - cancel_text.get_width() // 2,
+                                   self.cancel_rect.centery - cancel_text.get_height() // 2))
+
+
+# Global fixer trade panel
+_fixer_trade_panel: Optional[FixerTradePanel] = None
+
+
+def get_fixer_trade_panel() -> FixerTradePanel:
+    """Get or create the global fixer trade panel."""
+    global _fixer_trade_panel
+    if _fixer_trade_panel is None:
+        _fixer_trade_panel = FixerTradePanel()
+    return _fixer_trade_panel
+
+
+# ============================================================================
 # Workstation Panel - Recipe selection and crafting info
 # ============================================================================
 
@@ -1727,18 +2256,21 @@ class ColonistManagementPanel:
         self.font_large: Optional[pygame.font.Font] = None
         self.font_small: Optional[pygame.font.Font] = None
         
-        # Panel dimensions - larger with external tab sidebar
-        self.tab_sidebar_width = 80
-        self.panel_width = 520
-        self.panel_height = 680
+        # Callback for camera centering when switching colonists
+        self.on_colonist_changed: Optional[Callable] = None  # (colonist) -> None
         
-        # Total width includes sidebar
+        # Panel dimensions - right sidebar style (not centered modal)
+        self.tab_sidebar_width = 80
+        self.panel_width = 420
+        self.panel_height = SCREEN_H - 50  # Almost full height, leave room for top bar
+        
+        # Total width includes tab sidebar
         total_width = self.tab_sidebar_width + self.panel_width
         
-        # Center the whole thing
+        # Pin to right edge of screen
         self.sidebar_rect = pygame.Rect(
-            (SCREEN_W - total_width) // 2,
-            (SCREEN_H - self.panel_height) // 2 - 20,
+            SCREEN_W - total_width,
+            40,  # Below top bar
             self.tab_sidebar_width,
             self.panel_height
         )
@@ -1871,10 +2403,16 @@ class ColonistManagementPanel:
     def _prev_colonist(self) -> None:
         if self.colonists:
             self.current_index = (self.current_index - 1) % len(self.colonists)
+            # Center camera on new colonist
+            if self.on_colonist_changed and self.current_colonist:
+                self.on_colonist_changed(self.current_colonist)
     
     def _next_colonist(self) -> None:
         if self.colonists:
             self.current_index = (self.current_index + 1) % len(self.colonists)
+            # Center camera on new colonist
+            if self.on_colonist_changed and self.current_colonist:
+                self.on_colonist_changed(self.current_colonist)
     
     @property
     def current_colonist(self):
@@ -3055,10 +3593,242 @@ class ConstructionUI:
         self.action_bar.draw(surface)
 
 
+# ============================================================================
+# Visitor Interrogation Window - Reuses ColonistManagementPanel with Accept/Deny
+# ============================================================================
+
+class VisitorPanel(ColonistManagementPanel):
+    """Visitor character sheet - same as colonist panel but with Accept/Deny buttons instead of job tags."""
+    
+    # Cyberpunk button text
+    ACCEPT_TEXT = ">> JACK IN <<"
+    DENY_TEXT = "// FLATLINE //"
+    
+    # Override tabs - no Chat or Help for visitors
+    TABS = ["Overview", "Bio", "Relations", "Stats", "Thoughts"]
+    
+    def __init__(self):
+        super().__init__()
+        self.wanderer: Optional[dict] = None
+        
+        # Accept/Deny button rects
+        self.accept_btn_rect = pygame.Rect(0, 0, 150, 36)
+        self.deny_btn_rect = pygame.Rect(0, 0, 150, 36)
+        
+        # Callbacks
+        self.on_accept: Optional[callable] = None
+        self.on_deny: Optional[callable] = None
+    
+    def open(self, wanderer: dict) -> None:
+        """Open panel for a specific wanderer."""
+        self.wanderer = wanderer
+        colonist = wanderer.get("colonist")
+        if colonist:
+            # Use parent's open with a single-item list
+            self.colonists = [colonist]
+            self.current_index = 0
+            self.visible = True
+            self._update_button_positions()
+    
+    def close(self) -> None:
+        super().close()
+        self.wanderer = None
+    
+    def _update_button_positions(self) -> None:
+        """Update button positions including Accept/Deny."""
+        super()._update_button_positions()
+        
+        # Accept/Deny buttons replace prev/next
+        btn_y = self.panel_rect.bottom - 50
+        self.accept_btn_rect.x = self.panel_rect.x + 20
+        self.accept_btn_rect.y = btn_y
+        self.deny_btn_rect.x = self.panel_rect.right - 170
+        self.deny_btn_rect.y = btn_y
+    
+    def handle_click(self, mouse_pos: tuple[int, int]) -> bool:
+        """Handle mouse click with Accept/Deny buttons."""
+        if not self.visible:
+            return False
+        
+        # Check close button
+        if self.close_btn_rect.collidepoint(mouse_pos):
+            self.close()
+            return True
+        
+        # Check tab buttons
+        for i, rect in enumerate(self.tab_rects):
+            if rect.collidepoint(mouse_pos):
+                self.current_tab = i
+                return True
+        
+        # Check accept button
+        if self.accept_btn_rect.collidepoint(mouse_pos):
+            if self.on_accept and self.wanderer:
+                self.on_accept(self.wanderer)
+            self.close()
+            return True
+        
+        # Check deny button
+        if self.deny_btn_rect.collidepoint(mouse_pos):
+            if self.on_deny and self.wanderer:
+                self.on_deny(self.wanderer)
+            self.close()
+            return True
+        
+        # Consume click if inside panel or sidebar
+        if self.panel_rect.collidepoint(mouse_pos) or self.sidebar_rect.collidepoint(mouse_pos):
+            return True
+        
+        return False
+    
+    def _draw_navigation_buttons(self, surface: pygame.Surface) -> None:
+        """Override to draw Accept/Deny buttons instead of prev/next."""
+        # Accept button (cyan/green cyberpunk)
+        accept_hover = self.accept_btn_rect.collidepoint(pygame.mouse.get_pos())
+        accept_bg = (0, 60, 50) if accept_hover else (0, 40, 35)
+        accept_border = (0, 255, 200) if accept_hover else (0, 180, 140)
+        pygame.draw.rect(surface, accept_bg, self.accept_btn_rect, border_radius=4)
+        pygame.draw.rect(surface, accept_border, self.accept_btn_rect, 2, border_radius=4)
+        accept_surf = self.font.render(self.ACCEPT_TEXT, True, accept_border)
+        surface.blit(accept_surf, (self.accept_btn_rect.centerx - accept_surf.get_width() // 2,
+                                   self.accept_btn_rect.centery - accept_surf.get_height() // 2))
+        
+        # Deny button (pink/red cyberpunk)
+        deny_hover = self.deny_btn_rect.collidepoint(pygame.mouse.get_pos())
+        deny_bg = (60, 20, 40) if deny_hover else (40, 15, 25)
+        deny_border = (255, 50, 100) if deny_hover else (180, 40, 80)
+        pygame.draw.rect(surface, deny_bg, self.deny_btn_rect, border_radius=4)
+        pygame.draw.rect(surface, deny_border, self.deny_btn_rect, 2, border_radius=4)
+        deny_surf = self.font.render(self.DENY_TEXT, True, deny_border)
+        surface.blit(deny_surf, (self.deny_btn_rect.centerx - deny_surf.get_width() // 2,
+                                 self.deny_btn_rect.centery - deny_surf.get_height() // 2))
+        
+        # Visitor status info
+        if self.wanderer:
+            state = self.wanderer.get("state", "approaching")
+            patience = self.wanderer.get("patience", 0)
+            patience_pct = int((patience / 3600) * 100) if patience > 0 else 0
+            
+            status_text = f"STATUS: {state.upper()} | PATIENCE: {patience_pct}%"
+            status_surf = self.font_small.render(status_text, True, (100, 120, 130))
+            status_x = self.panel_rect.centerx - status_surf.get_width() // 2
+            status_y = self.panel_rect.bottom - 18
+            surface.blit(status_surf, (status_x, status_y))
+    
+    def _draw_overview_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int, col2_x: int) -> None:
+        """Override to hide job tag toggles for visitors."""
+        # Call parent but we'll skip the job tags section by not drawing them
+        # Save initial content_y for right column
+        initial_content_y = content_y
+        
+        # === Left Column: Status & Stats ===
+        section_color = (180, 200, 220)
+        value_color = (220, 220, 230)
+        muted_color = (140, 140, 150)
+        
+        # Current Status (not task, since they're not working)
+        self._draw_section_header(surface, "Status", col1_x, content_y, section_color)
+        content_y += 18
+        
+        state = self.wanderer.get("state", "approaching") if self.wanderer else "unknown"
+        task_surf = self.font_small.render(state.upper(), True, value_color)
+        surface.blit(task_surf, (col1_x + 8, content_y))
+        content_y += 22
+        
+        # Hunger
+        self._draw_section_header(surface, "Hunger", col1_x, content_y, section_color)
+        content_y += 16
+        hunger_val = colonist.hunger
+        hunger_color = (100, 200, 100) if hunger_val < 50 else (200, 200, 100) if hunger_val < 70 else (200, 100, 100)
+        bar_width = min(140, w // 2 - 60)
+        self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, hunger_val, 100, hunger_color)
+        content_y += 20
+        
+        # Comfort
+        self._draw_section_header(surface, "Comfort", col1_x, content_y, section_color)
+        content_y += 16
+        comfort_val = getattr(colonist, 'comfort', 0.0)
+        comfort_color = (100, 200, 150) if comfort_val > 0 else (200, 150, 100) if comfort_val < 0 else (150, 150, 150)
+        comfort_display = (comfort_val + 10) / 20 * 100
+        self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, comfort_display, 100, comfort_color)
+        content_y += 20
+        
+        # Stress
+        self._draw_section_header(surface, "Stress", col1_x, content_y, section_color)
+        content_y += 16
+        stress_val = getattr(colonist, 'stress', 0.0)
+        stress_color = (200, 100, 100) if stress_val > 2 else (200, 200, 100) if stress_val > 0 else (100, 150, 200)
+        stress_display = (stress_val + 10) / 20 * 100
+        self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, stress_display, 100, stress_color)
+        content_y += 24
+        
+        # === Preferences Section ===
+        self._draw_section_header(surface, "Preferences", col1_x, content_y, (150, 200, 255))
+        content_y += 18
+        
+        preferences = getattr(colonist, 'preferences', {})
+        pref_items = [
+            ("Outside", preferences.get('likes_outside', 0.0)),
+            ("Integrity", preferences.get('likes_integrity', 0.0)),
+            ("Interference", preferences.get('likes_interference', 0.0)),
+            ("Echo", preferences.get('likes_echo', 0.0)),
+            ("Pressure", preferences.get('likes_pressure', 0.0)),
+            ("Crowding", preferences.get('likes_crowding', 0.0)),
+        ]
+        
+        for pref_name, pref_val in pref_items:
+            pref_color = (100, 200, 100) if pref_val > 0.5 else (200, 100, 100) if pref_val < -0.5 else (150, 150, 150)
+            pref_text = self.font_small.render(f"{pref_name}: {pref_val:+.1f}", True, pref_color)
+            surface.blit(pref_text, (col1_x + 8, content_y))
+            content_y += 14
+        
+        content_y += 10
+        
+        # === Right Column: Equipment (same as parent) ===
+        right_y = initial_content_y
+        self._draw_section_header(surface, "Equipment", col2_x, right_y, (200, 180, 140))
+        right_y += 20
+        
+        equipment = getattr(colonist, 'equipment', {})
+        self.equipment_slot_rects = {}
+        
+        slot_names = ["head", "body", "hands", "feet", "implant", "charm"]
+        slot_labels = ["Head", "Body", "Hands", "Feet", "Implant", "Charm"]
+        
+        for slot, label in zip(slot_names, slot_labels):
+            item = equipment.get(slot)
+            slot_rect = pygame.Rect(col2_x, right_y, 200, 28)
+            self.equipment_slot_rects[slot] = (slot_rect, item)
+            
+            # Slot label
+            label_surf = self.font_small.render(f"{label}:", True, muted_color)
+            surface.blit(label_surf, (col2_x, right_y + 6))
+            
+            # Item name or empty
+            if item:
+                item_name = item.get("name", "Unknown")[:18]
+                rarity = item.get("rarity", "common")
+                rarity_colors = {
+                    "common": (180, 180, 180),
+                    "uncommon": (100, 200, 100),
+                    "rare": (100, 150, 255),
+                    "epic": (200, 100, 255),
+                    "legendary": (255, 200, 50),
+                }
+                item_color = rarity_colors.get(rarity, (180, 180, 180))
+                item_surf = self.font.render(item_name, True, item_color)
+            else:
+                item_surf = self.font_small.render("- empty -", True, (80, 80, 90))
+            
+            surface.blit(item_surf, (col2_x + 55, right_y + 5))
+            right_y += 30
+
+
 # Global UI instances
 _construction_ui: Optional[ConstructionUI] = None
 _colonist_panel: Optional[ColonistJobTagsPanel] = None
 _colonist_management_panel: Optional[ColonistManagementPanel] = None
+_visitor_panel: Optional[VisitorPanel] = None
 
 
 def get_construction_ui() -> ConstructionUI:
@@ -3083,3 +3853,11 @@ def get_colonist_management_panel() -> ColonistManagementPanel:
     if _colonist_management_panel is None:
         _colonist_management_panel = ColonistManagementPanel()
     return _colonist_management_panel
+
+
+def get_visitor_panel() -> VisitorPanel:
+    """Get or create the global visitor panel instance."""
+    global _visitor_panel
+    if _visitor_panel is None:
+        _visitor_panel = VisitorPanel()
+    return _visitor_panel

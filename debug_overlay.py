@@ -74,12 +74,10 @@ class DebugOverlay:
         # Draw tile overlays first (under everything) - pass camera offset
         self._draw_tile_overlays(screen, grid, resources_module, zones_module, buildings_module, rooms_module)
         
-        # Draw info panels
+        # Draw info panels (reduced - colonist/jobs/rooms now in sidebar)
         self._draw_resource_panel(screen, resources_module, zones_module)
-        self._draw_jobs_panel(screen, jobs_module)
         self._draw_construction_panel(screen, buildings_module)
-        self._draw_colonist_panel(screen, colonists)
-        self._draw_rooms_panel(screen, rooms_module, len(colonists))
+        # Removed: _draw_jobs_panel, _draw_colonist_panel, _draw_rooms_panel (now in sidebar)
         
         # Draw tile hover tooltip with environmental data
         self._draw_tile_hover_tooltip(screen, grid)

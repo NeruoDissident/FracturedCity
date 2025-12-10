@@ -92,6 +92,27 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
     mx, my = pygame.mouse.get_pos()
     ui = get_construction_ui()
     
+    # Check new UI layout first (sidebar clicks)
+    from ui_layout import get_ui_layout
+    ui_layout = get_ui_layout()
+    sidebar_action = ui_layout.handle_click((mx, my))
+    if sidebar_action:
+        # Direct tool selection - set the tool directly
+        ui.action_bar.current_tool = sidebar_action
+        ui.action_bar._close_all_menus()
+        return
+    
+    # Check if click was in sidebar area (consumed but no action)
+    if ui_layout.left_sidebar.rect.collidepoint(mx, my):
+        return
+    
+    # If click is in UI panels, don't process as map click
+    if ui_layout.is_point_in_ui(mx, my):
+        # Still let existing UI handle it for bottom bar
+        if ui.handle_click((mx, my), event.button):
+            return
+        return
+    
     # Check colonist management panel first (highest priority)
     from ui import get_colonist_management_panel
     mgmt_panel = get_colonist_management_panel()
@@ -114,6 +135,31 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
     from ui import get_workstation_panel
     ws_panel = get_workstation_panel()
     if ws_panel.handle_click((mx, my)):
+        return
+    
+    # Check bed assignment panel
+    from ui import get_bed_assignment_panel
+    bed_panel = get_bed_assignment_panel()
+    if bed_panel.handle_click((mx, my), colonists):
+        return
+    
+    # Check fixer trade panel
+    from ui import get_fixer_trade_panel
+    trade_panel = get_fixer_trade_panel()
+    if trade_panel.handle_click((mx, my), zones_module):
+        return
+    
+    # Check visitor panel
+    from ui import get_visitor_panel
+    visitor_panel = get_visitor_panel()
+    if visitor_panel.handle_click((mx, my)):
+        return
+    
+    # Check notification clicks (jump camera to location)
+    from notifications import handle_notification_click
+    click_loc = handle_notification_click((mx, my))
+    if click_loc:
+        grid.center_camera_on(click_loc[0], click_loc[1])
         return
     
     # Let UI handle click first
@@ -244,7 +290,49 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
             _drag_start = (gx, gy)
             _drag_mode = "salvage"
         elif build_mode is None:
-            # No tool selected - check for colonist click or stockpile zone
+            # No tool selected - check for wanderer, colonist, or stockpile zone
+            
+            # Check for fixer first (trader)
+            from wanderers import get_fixer_at
+            fixer = get_fixer_at(gx, gy, current_z)
+            if fixer is not None:
+                # Open trade panel
+                from ui import get_fixer_trade_panel
+                trade_panel = get_fixer_trade_panel()
+                trade_panel.open(fixer)
+                return
+            
+            # Check for wanderer (potential recruit) - open visitor panel
+            from wanderers import get_wanderer_at, recruit_wanderer, reject_wanderer
+            wanderer = get_wanderer_at(gx, gy, current_z)
+            if wanderer is not None:
+                # Open visitor panel instead of auto-recruiting
+                from ui import get_visitor_panel
+                visitor_panel = get_visitor_panel()
+                
+                def accept_visitor(w, cols=colonists):
+                    new_colonist = recruit_wanderer(w)
+                    if new_colonist:
+                        cols.append(new_colonist)
+                        from notifications import add_notification, NotificationType
+                        add_notification(NotificationType.ARRIVAL,
+                                       "// LINK ESTABLISHED //",
+                                       f"{new_colonist.name} has jacked in",
+                                       duration=360)
+                
+                def deny_visitor(w):
+                    reject_wanderer(w)
+                    from notifications import add_notification, NotificationType
+                    add_notification(NotificationType.INFO,
+                                   "// CONNECTION TERMINATED //",
+                                   f"{w['name']} flatlined",
+                                   duration=240)
+                
+                visitor_panel.on_accept = accept_visitor
+                visitor_panel.on_deny = deny_visitor
+                visitor_panel.open(wanderer)
+                return
+            
             # Check if clicking on a colonist (within 1 tile radius)
             clicked_colonist = None
             for colonist in colonists:
@@ -263,7 +351,16 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
             else:
                 # Check if clicking on a workstation (open recipe panel)
                 tile = grid.get_tile(gx, gy, current_z)
-                if tile and tile.startswith("finished_"):
+                
+                # Check for bed first
+                if tile == "crash_bed":
+                    from beds import get_bed_at
+                    from ui import get_bed_assignment_panel
+                    bed = get_bed_at(gx, gy, current_z)
+                    if bed is not None:
+                        bed_panel = get_bed_assignment_panel()
+                        bed_panel.open(gx, gy, current_z, mx, my)
+                elif tile and tile.startswith("finished_"):
                     ws = buildings_module.get_workstation(gx, gy, current_z)
                     if ws is not None:
                         # Open workstation panel
@@ -605,13 +702,15 @@ def main() -> None:
     # Center camera on colonist spawn location
     spawn_center_x = spawn_x * TILE_SIZE
     spawn_center_y = spawn_y * TILE_SIZE
+    # Initialize camera position
     grid.camera_x = spawn_center_x - SCREEN_W // 2
     grid.camera_y = spawn_center_y - SCREEN_H // 2
     # Clamp to valid range
-    grid.pan_camera(0, 0)  # This will apply bounds clamping
+    grid.pan_camera(0, 0)
     
     ether_mode = False
     paused = False
+    game_speed = 1  # 1-5, controls simulation speed
     tick_count = 0
 
     running = True
@@ -644,6 +743,21 @@ def main() -> None:
                     # Toggle pause
                     paused = not paused
                     print(f"[Game] {'PAUSED' if paused else 'RESUMED'}")
+                elif event.key == pygame.K_1:
+                    game_speed = 1
+                    print(f"[Game] Speed: 1x (Normal)")
+                elif event.key == pygame.K_2:
+                    game_speed = 2
+                    print(f"[Game] Speed: 2x")
+                elif event.key == pygame.K_3:
+                    game_speed = 3
+                    print(f"[Game] Speed: 3x")
+                elif event.key == pygame.K_4:
+                    game_speed = 4
+                    print(f"[Game] Speed: 4x")
+                elif event.key == pygame.K_5:
+                    game_speed = 5
+                    print(f"[Game] Speed: 5x (Max)")
                 elif event.key == pygame.K_F6:
                     # Quick save
                     quicksave(grid, colonists, zones_module, buildings_module, resources_module, jobs_module)
@@ -670,30 +784,57 @@ def main() -> None:
                     subprocess.Popen([sys.executable, script_path])
                     sys.exit(0)
                 elif event.key == pygame.K_F7:
-                    # Debug: Equip procedurally generated items on all colonists
-                    from item_generator import generate_item, generated_item_to_dict
-                    for c in colonists:
-                        # Generate items for random slots
-                        slots = ["head", "body", "hands", "feet", "implant", "charm"]
-                        import random
-                        for slot in random.sample(slots, min(3, len(slots))):
-                            item = generate_item(slot=slot, min_components=2, max_components=3)
-                            c.equipment[slot] = generated_item_to_dict(item)
-                            print(f"[Debug] {c.name} equipped: {item.name} ({item.rarity})")
-                    print(f"[Debug] Equipped procedural items on {len(colonists)} colonists")
-                    # Show first colonist's equipment stats
-                    if colonists:
-                        c = colonists[0]
-                        stats = c.get_equipment_stats()
-                        print(f"[Debug] {c.name}'s equipment stats:")
-                        print(f"  Speed bonus: {stats['speed_bonus']:+.0%}")
-                        print(f"  Build speed: {stats['build_speed']:+.0%}")
-                        print(f"  Harvest speed: {stats['harvest_speed']:+.0%}")
-                        print(f"  Craft speed: {stats['craft_speed']:+.0%}")
-                        print(f"  Haul capacity: {stats['haul_capacity']:+.0%}")
-                        print(f"  Comfort: {stats['comfort']:+.2f}")
-                        print(f"  Hazard resist: {stats['hazard_resist']:+.0%}")
-                        print(f"  Stress resist: {stats['stress_resist']:+.0%}")
+                    # Debug: Spawn wanderers (refugees) and fixer (trader)
+                    from wanderers import _pick_group_spawn_location, _create_wanderer_at, _wanderers, _create_fixer, _fixers
+                    from resources import get_colonist_spawn_location
+                    from notifications import add_notification, NotificationType
+                    import random
+                    
+                    colony_center = get_colonist_spawn_location()
+                    
+                    # Pick ONE spawn location for the group
+                    group_spawn = _pick_group_spawn_location(grid)
+                    if group_spawn:
+                        # Spawn 1-3 wanderers around that point
+                        num_wanderers = random.randint(1, 3)
+                        spawned_names = []
+                        for i in range(num_wanderers):
+                            offset_x = (i % 3) - 1
+                            offset_y = (i // 3) - 1
+                            spawn_x = group_spawn[0] + offset_x
+                            spawn_y = group_spawn[1] + offset_y
+                            if not grid.is_walkable(spawn_x, spawn_y, 0):
+                                spawn_x, spawn_y = group_spawn
+                            
+                            wanderer = _create_wanderer_at(spawn_x, spawn_y, colony_center, grid)
+                            if wanderer:
+                                _wanderers.append(wanderer)
+                                spawned_names.append(wanderer["name"])
+                        
+                        if spawned_names:
+                            print(f"[Debug] Spawned {len(spawned_names)} wanderer(s): {', '.join(spawned_names)}")
+                            add_notification(NotificationType.ARRIVAL,
+                                           f"// {len(spawned_names)} SIGNAL(S) DETECTED //",
+                                           ", ".join(spawned_names),
+                                           duration=480,
+                                           click_location=group_spawn)
+                            # Jump camera to them
+                            grid.center_camera_on(group_spawn[0], group_spawn[1])
+                    
+                    # Also spawn a fixer if none exists
+                    if len(_fixers) == 0:
+                        fixer = _create_fixer(colony_center, grid)
+                        if fixer:
+                            _fixers.append(fixer)
+                            print(f"[Debug] Spawned fixer: {fixer['name']} from {fixer['origin'].name}")
+                            fixer_loc = (fixer["x"], fixer["y"])
+                            add_notification(NotificationType.INFO,
+                                           "// FIXER INBOUND //",
+                                           f"{fixer['name']} wants to trade",
+                                           duration=480,
+                                           click_location=fixer_loc)
+                    else:
+                        print("[Debug] Fixer already present, skipping")
                 elif event.key == pygame.K_F8:
                     # Debug: Print construction site status
                     from buildings import get_all_construction_sites, get_missing_materials
@@ -732,9 +873,8 @@ def main() -> None:
                     else:
                         mgmt_panel.open(colonists)
                 elif event.key == pygame.K_l:
-                    # Toggle lists panel
-                    from lists_ui import toggle_lists_panel, get_lists_panel
-                    toggle_lists_panel()
+                    # L key now switches to COLONISTS tab in sidebar (lists panel deprecated)
+                    ui_layout.left_sidebar.current_tab = 1  # COLONISTS tab
                     panel = get_lists_panel()
                     if panel.visible:
                         panel.update_data(colonists, grid)
@@ -750,24 +890,32 @@ def main() -> None:
                 # ESC keybinding removed - use window close button to quit
 
             if event.type == pygame.MOUSEBUTTONDOWN:
-                # Let lists panel handle mouse first
-                from lists_ui import get_lists_panel
-                lists_panel = get_lists_panel()
-                if lists_panel.handle_event(event):
-                    continue  # Lists panel consumed the event
+                # Ignore scroll wheel (4, 5) and middle mouse (2) - not used
+                if event.button in (2, 4, 5):
+                    continue
+                
+                # Check top bar speed controls first
+                from ui_layout import get_ui_layout
+                ui_layout = get_ui_layout()
+                mx, my = pygame.mouse.get_pos()
+                consumed, speed_val = ui_layout.top_bar.handle_click((mx, my), {"paused": paused, "game_speed": game_speed})
+                if consumed:
+                    if speed_val == -1:  # Toggle pause
+                        paused = not paused
+                        print(f"[Game] {'PAUSED' if paused else 'RESUMED'}")
+                    elif speed_val > 0:  # Set speed
+                        game_speed = speed_val
+                        print(f"[Game] Speed: {game_speed}x")
+                    continue
+                
                 handle_mouse_down(grid, event, colonists)
             
             if event.type == pygame.MOUSEBUTTONUP:
-                from lists_ui import get_lists_panel
-                lists_panel = get_lists_panel()
-                lists_panel.handle_event(event)  # For scrollbar release
+                # Ignore scroll wheel and middle mouse
+                if event.button in (2, 4, 5):
+                    continue
                 handle_mouse_up(grid, event)
             
-            if event.type == pygame.MOUSEMOTION:
-                from lists_ui import get_lists_panel
-                lists_panel = get_lists_panel()
-                lists_panel.handle_event(event)  # For hover and scrollbar drag
-        
         # Camera controls (WASD or Arrow keys)
         keys = pygame.key.get_pressed()
         camera_speed = 20  # pixels per frame
@@ -789,6 +937,7 @@ def main() -> None:
         
         # Only update simulation when not paused
         if not paused:
+          for _ in range(game_speed):  # Run multiple ticks based on speed
             # Advance game time
             from time_system import tick_time
             tick_time()
@@ -826,6 +975,49 @@ def main() -> None:
             
             # Process filter mismatch relocation (resources on stockpiles that no longer allow them)
             zones_module.process_filter_mismatch_relocation(jobs_module)
+            
+            # Update wanderers (potential recruits) and fixers (traders)
+            from wanderers import spawn_wanderer_check, update_wanderers, spawn_fixer_check, update_fixers
+            from time_system import get_game_time
+            from resources import get_colonist_spawn_location
+            colony_center = get_colonist_spawn_location()
+            current_day = get_game_time().day
+            new_wanderers = spawn_wanderer_check(current_day, colony_center, grid)
+            
+            # Notify player of new visitors (clickable to jump camera)
+            if new_wanderers:
+                from notifications import add_notification, NotificationType
+                count = len(new_wanderers)
+                group_spawn = new_wanderers[0].get("group_spawn")
+                
+                if count == 1:
+                    name = new_wanderers[0]["name"]
+                    add_notification(NotificationType.ARRIVAL, 
+                                   f"// SIGNAL DETECTED //",
+                                   f"{name} approaches the colony",
+                                   duration=480,
+                                   click_location=group_spawn)
+                else:
+                    names = ", ".join(w["name"] for w in new_wanderers[:3])
+                    if count > 3:
+                        names += f" +{count - 3} more"
+                    add_notification(NotificationType.ARRIVAL,
+                                   f"// {count} SIGNALS DETECTED //",
+                                   names,
+                                   duration=480,
+                                   click_location=group_spawn)
+                
+                # Auto-jump camera to group spawn location
+                if group_spawn:
+                    grid.center_camera_on(group_spawn[0], group_spawn[1])
+            
+            update_wanderers(grid, colony_center, tick_count)
+            spawn_fixer_check(current_day, colony_center, grid)
+            update_fixers(grid, colony_center, tick_count)
+            
+            # Process trade jobs (colonists physically exchange goods with fixers)
+            from wanderers import process_trade_jobs
+            process_trade_jobs(jobs_module, zones_module)
         
         # Update UI
         ui = get_construction_ui()
@@ -844,6 +1036,10 @@ def main() -> None:
         
         draw_colonists(screen, colonists, ether_mode=ether_mode, current_z=grid.current_z, camera_x=grid.camera_x, camera_y=grid.camera_y)
         
+        # Draw wanderers (potential recruits)
+        from wanderers import draw_wanderers
+        draw_wanderers(screen, current_z=grid.current_z, camera_x=grid.camera_x, camera_y=grid.camera_y)
+        
         # Draw day/night tint overlay
         from time_system import get_screen_tint, get_display_string
         tint = get_screen_tint()
@@ -852,27 +1048,51 @@ def main() -> None:
             tint_overlay.fill(tint)
             screen.blit(tint_overlay, (0, 0))
         
-        # Draw UI overlay
-        draw_stockpile_ui(screen)
+        # Draw new UI layout (top bar, left sidebar, bottom bar)
+        from ui_layout import get_ui_layout, LEFT_SIDEBAR_WIDTH, TOP_BAR_HEIGHT, BOTTOM_BAR_HEIGHT
+        ui_layout = get_ui_layout()
         
-        # Draw time display (top right)
-        font = pygame.font.Font(None, 28)
-        time_str = get_display_string()
-        time_surface = font.render(time_str, True, (220, 220, 180))
-        screen.blit(time_surface, (SCREEN_W - time_surface.get_width() - 10, 10))
+        # Gather game data for UI
+        game_data = {
+            "time_str": get_display_string(),
+            "z_level": grid.current_z,
+            "paused": paused,
+            "game_speed": game_speed,
+            "resources": {
+                "wood": zones_module.get_total_stored("wood"),
+                "scrap": zones_module.get_total_stored("scrap"),
+                "metal": zones_module.get_total_stored("metal"),
+                "mineral": zones_module.get_total_stored("mineral"),
+                "power": zones_module.get_total_stored("power"),
+                "raw_food": zones_module.get_total_stored("raw_food"),
+                "cooked_meal": zones_module.get_total_stored("cooked_meal"),
+            },
+            "colonists": [{"name": c.name, "status": c.current_job.type if c.current_job else "Idle"} 
+                         for c in colonists if not c.is_dead],
+            "colonist_objects": [c for c in colonists if not c.is_dead],  # Actual colonist objects
+            "current_tool": ui.get_build_mode(),
+            "job_count": len(jobs_module.get_all_available_jobs()),
+            "jobs_module": jobs_module,
+        }
         
-        # Draw Z-level indicator (below time)
-        z_name = "Ground" if grid.current_z == 0 else f"Floor {grid.current_z}"
-        z_text = f"Z: {grid.current_z} ({z_name})"
-        z_surface = font.render(z_text, True, (200, 200, 255))
-        screen.blit(z_surface, (SCREEN_W - z_surface.get_width() - 10, 35))
+        # Wire up sidebar callbacks for colonist clicks
+        from ui import get_colonist_management_panel
+        _mgmt_panel = get_colonist_management_panel()
+        ui_layout.left_sidebar.on_colonist_locate = lambda x, y, z: grid.center_camera_on(x, y)
+        ui_layout.left_sidebar.on_colonist_click = lambda c: _mgmt_panel.open_for_colonist(colonists, c)
         
-        # Draw notifications (top-left)
+        # Wire up colonist panel prev/next to center camera
+        _mgmt_panel.on_colonist_changed = lambda c: grid.center_camera_on(c.x, c.y) if hasattr(c, 'x') else None
+        
+        ui_layout.update(pygame.mouse.get_pos())
+        ui_layout.draw(screen, game_data)
+        
+        # Draw notifications (adjusted position for new layout - offset for sidebar)
         from notifications import draw_notifications
-        draw_notifications(screen)
+        draw_notifications(screen, x_offset=LEFT_SIDEBAR_WIDTH + 10, y_offset=TOP_BAR_HEIGHT + 10)
         
-        # Draw construction UI
-        ui.draw(screen)
+        # Old bottom bar removed - now using sidebar UI
+        # ui.draw(screen)
         
         # Draw stockpile filter panel (if open)
         from ui import get_stockpile_filter_panel
@@ -883,6 +1103,21 @@ def main() -> None:
         from ui import get_workstation_panel
         ws_panel = get_workstation_panel()
         ws_panel.draw(screen)
+        
+        # Draw bed assignment panel (if open)
+        from ui import get_bed_assignment_panel
+        bed_panel = get_bed_assignment_panel()
+        bed_panel.draw(screen, colonists)
+        
+        # Draw fixer trade panel (if open)
+        from ui import get_fixer_trade_panel
+        trade_panel = get_fixer_trade_panel()
+        trade_panel.draw(screen, zones_module)
+        
+        # Draw visitor panel (if open)
+        from ui import get_visitor_panel
+        visitor_panel = get_visitor_panel()
+        visitor_panel.draw(screen)
         
         # Draw colonist job tags panel (if open)
         from ui import get_colonist_panel
@@ -909,11 +1144,14 @@ def main() -> None:
         # Draw debug overlay (toggle with 'I' key)
         draw_debug(screen, grid, colonists, jobs_module, resources_module, zones_module, buildings_module, rooms_module)
         
-        # Draw pause indicator
+        # Draw pause indicator (centered in viewport area)
         if paused:
             font_pause = pygame.font.Font(None, 48)
             pause_text = font_pause.render("PAUSED", True, (255, 255, 100))
-            pause_rect = pause_text.get_rect(center=(SCREEN_W // 2, 30))
+            # Center in viewport area (accounting for sidebar and top bar)
+            pause_x = LEFT_SIDEBAR_WIDTH + (SCREEN_W - LEFT_SIDEBAR_WIDTH) // 2
+            pause_y = TOP_BAR_HEIGHT + 40
+            pause_rect = pause_text.get_rect(center=(pause_x, pause_y))
             # Draw background for visibility
             bg_rect = pause_rect.inflate(20, 10)
             pygame.draw.rect(screen, (40, 40, 40), bg_rect)

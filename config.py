@@ -12,9 +12,9 @@ GRID_W = 200
 GRID_H = 200
 GRID_Z = 3  # Number of Z-levels (0 = ground, 1 = first floor, 2 = second floor)
 
-# Screen dimensions - LARGER WINDOW
-SCREEN_W = 1600
-SCREEN_H = 900
+# Screen dimensions - FULL HD (increase for 4K monitors)
+SCREEN_W = 1920
+SCREEN_H = 1080
 
 # --- SIMULATION ---------------------------------------------------------------
 
@@ -23,19 +23,19 @@ COLONIST_COUNT = 10
 COLOR_BG_NORMAL = (20, 20, 20)
 COLOR_BG_ETHER = (15, 0, 25)
 
-COLOR_GRID_LINES = (60, 60, 60)
+COLOR_GRID_LINES = (40, 70, 80)  # Teal-tinted grid lines to match UI
 COLOR_TILE_SELECTED = (80, 120, 255)
 COLOR_TILE_BUILDING = (200, 180, 60)
 COLOR_TILE_FINISHED_BUILDING = (170, 150, 40)
 COLOR_TILE_WALL = (100, 100, 110)           # planned wall (under construction)
 COLOR_TILE_FINISHED_WALL = (80, 80, 90)     # completed wall
-COLOR_TILE_STREET = (45, 45, 50)            # dark gray for city streets
-COLOR_TILE_STREET_DESIGNATED = (55, 50, 45) # slightly warmer for designated streets
-COLOR_TILE_STREET_CRACKED = (40, 40, 45)   # darker cracked asphalt
-COLOR_TILE_STREET_SCAR = (32, 30, 36)      # scarred pavement tone
-COLOR_TILE_STREET_RIPPED = (26, 22, 26)    # exposed sub-layer for ripped streets
-COLOR_TILE_SIDEWALK = (55, 55, 60)          # slightly lighter gray for sidewalks
-COLOR_TILE_SIDEWALK_DESIGNATED = (60, 55, 50) # warmer for designated sidewalks
+COLOR_TILE_STREET = (50, 52, 58)            # medium cool gray for city streets
+COLOR_TILE_STREET_DESIGNATED = (58, 55, 50) # slightly warmer for designated streets
+COLOR_TILE_STREET_CRACKED = (45, 47, 52)   # slightly darker cracked asphalt
+COLOR_TILE_STREET_SCAR = (40, 40, 46)      # scarred pavement tone
+COLOR_TILE_STREET_RIPPED = (32, 32, 38)    # exposed sub-layer for ripped streets
+COLOR_TILE_SIDEWALK = (72, 70, 68)          # lighter warm gray for sidewalks (contrast)
+COLOR_TILE_SIDEWALK_DESIGNATED = (78, 72, 65) # warmer for designated sidewalks
 COLOR_TILE_SCORCHED = (25, 22, 20)          # dark scorched earth from demolished pavement
 COLOR_TILE_DEBRIS = (65, 60, 55)            # brownish gray for debris/rubble
 COLOR_TILE_WEEDS = (35, 45, 30)             # dark greenish for overgrowth

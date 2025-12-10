@@ -264,11 +264,11 @@ class Grid:
         world_width_px = self.width * TILE_SIZE
         world_height_px = self.height * TILE_SIZE
         
-        # Update camera position
+        # Update camera position directly
         self.camera_x += dx
         self.camera_y += dy
         
-        # Clamp to world bounds (allow camera to show from 0 to world_size - screen_size)
+        # Clamp to world bounds
         max_camera_x = max(0, world_width_px - SCREEN_W)
         max_camera_y = max(0, world_height_px - SCREEN_H)
         
@@ -297,8 +297,8 @@ class Grid:
         
         Returns (tile_x, tile_y) in world space.
         """
-        world_x = screen_x + self.camera_x
-        world_y = screen_y + self.camera_y
+        world_x = screen_x + int(self.camera_x)
+        world_y = screen_y + int(self.camera_y)
         tile_x = world_x // TILE_SIZE
         tile_y = world_y // TILE_SIZE
         return (tile_x, tile_y)
@@ -419,8 +419,223 @@ class Grid:
             glint_center = (rect.right - 6, rect.top + 6)
             pygame.draw.circle(surface, highlight, glint_center, 2)
     
+    def _draw_wood_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
+        """Render a wood resource node with tree/lumber variants."""
+        import random
+        
+        # Brown palette for wood
+        base_palette = [
+            (100, 70, 40),   # Dark brown
+            (120, 85, 50),   # Medium brown
+            (90, 60, 35),    # Reddish brown
+        ]
+        palette_index = self._get_tile_variant(x, y, z, len(base_palette), salt=0x1D001)
+        base_color = base_palette[palette_index]
+        
+        color = self._get_tile_color_variation(base_color, x, y, z, 12)
+        if depleted:
+            color = (color[0] // 3, color[1] // 3, color[2] // 3)
+        
+        shadow = (max(0, color[0] - 30), max(0, color[1] - 25), max(0, color[2] - 20))
+        highlight = (min(255, color[0] + 35), min(255, color[1] + 30), min(255, color[2] + 25))
+        foliage = (50, 90, 45) if not depleted else (20, 35, 18)
+        foliage_light = (70, 120, 60) if not depleted else (28, 48, 24)
+        
+        # Background
+        pygame.draw.rect(surface, shadow, rect)
+        
+        seed = self._get_tile_seed(x, y, z)
+        rng = random.Random(seed ^ 0x1E33)
+        variant = self._get_tile_variant(x, y, z, 4, salt=0xF0E15)
+        
+        if variant == 0:
+            # Single tree with foliage
+            trunk_w = 4 + rng.randint(0, 2)
+            trunk_h = 12 + rng.randint(0, 4)
+            trunk_x = rect.centerx - trunk_w // 2 + rng.randint(-2, 2)
+            trunk_rect = pygame.Rect(trunk_x, rect.bottom - trunk_h - 2, trunk_w, trunk_h)
+            pygame.draw.rect(surface, color, trunk_rect)
+            pygame.draw.line(surface, highlight, (trunk_rect.left, trunk_rect.top), 
+                           (trunk_rect.left, trunk_rect.bottom), 1)
+            # Foliage (triangle/circle cluster)
+            foliage_y = trunk_rect.top - 4
+            pygame.draw.circle(surface, foliage, (trunk_x + trunk_w // 2, foliage_y), 8)
+            pygame.draw.circle(surface, foliage_light, (trunk_x + trunk_w // 2 - 2, foliage_y - 2), 3)
+        elif variant == 1:
+            # Two small trees
+            for offset in [-6, 6]:
+                tx = rect.centerx + offset + rng.randint(-1, 1)
+                trunk_rect = pygame.Rect(tx - 2, rect.bottom - 10, 3, 8)
+                pygame.draw.rect(surface, color, trunk_rect)
+                pygame.draw.circle(surface, foliage, (tx, rect.bottom - 14), 5)
+                pygame.draw.circle(surface, foliage_light, (tx - 1, rect.bottom - 15), 2)
+        elif variant == 2:
+            # Log pile (harvested look)
+            log_color = color
+            for i in range(3):
+                log_y = rect.bottom - 6 - i * 5
+                log_w = 18 - i * 3
+                log_rect = pygame.Rect(rect.centerx - log_w // 2, log_y, log_w, 4)
+                pygame.draw.ellipse(surface, log_color, log_rect)
+                pygame.draw.ellipse(surface, highlight, log_rect, 1)
+                log_color = (max(0, log_color[0] - 10), max(0, log_color[1] - 8), max(0, log_color[2] - 5))
+        else:
+            # Stump with scattered wood
+            stump_rect = pygame.Rect(rect.centerx - 5, rect.centery, 10, 8)
+            pygame.draw.ellipse(surface, color, stump_rect)
+            pygame.draw.ellipse(surface, highlight, stump_rect, 1)
+            # Rings on top
+            pygame.draw.circle(surface, shadow, (rect.centerx, rect.centery + 2), 3, 1)
+            # Scattered planks
+            for _ in range(2):
+                px = rect.left + 4 + rng.randint(0, 16)
+                py = rect.top + 4 + rng.randint(0, 8)
+                pygame.draw.rect(surface, highlight, (px, py, 6, 2))
+    
+    def _draw_scrap_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
+        """Render a scrap resource node with junk pile variants."""
+        import random
+        
+        # Gray/rust palette for scrap
+        base_palette = [
+            (90, 85, 80),    # Gray
+            (110, 90, 75),   # Rusty
+            (80, 80, 90),    # Blue-gray
+        ]
+        palette_index = self._get_tile_variant(x, y, z, len(base_palette), salt=0x5C4A9)
+        base_color = base_palette[palette_index]
+        
+        color = self._get_tile_color_variation(base_color, x, y, z, 10)
+        if depleted:
+            color = (color[0] // 3, color[1] // 3, color[2] // 3)
+        
+        shadow = (max(0, color[0] - 25), max(0, color[1] - 25), max(0, color[2] - 25))
+        highlight = (min(255, color[0] + 40), min(255, color[1] + 35), min(255, color[2] + 30))
+        rust = (min(255, color[0] + 30), max(0, color[1] - 10), max(0, color[2] - 20))
+        
+        pygame.draw.rect(surface, shadow, rect)
+        
+        seed = self._get_tile_seed(x, y, z)
+        rng = random.Random(seed ^ 0x10A1C)
+        variant = self._get_tile_variant(x, y, z, 3, salt=0x911E)
+        
+        if variant == 0:
+            # Twisted metal pile
+            for i in range(4):
+                sx = rect.left + 3 + rng.randint(0, 14)
+                sy = rect.top + 5 + rng.randint(0, 12)
+                sw = 4 + rng.randint(0, 6)
+                sh = 2 + rng.randint(0, 2)
+                piece_color = rust if rng.random() < 0.4 else color
+                pygame.draw.rect(surface, piece_color, (sx, sy, sw, sh))
+            # Central chunk
+            pygame.draw.rect(surface, color, (rect.centerx - 4, rect.centery - 2, 8, 6))
+            pygame.draw.rect(surface, highlight, (rect.centerx - 4, rect.centery - 2, 8, 6), 1)
+        elif variant == 1:
+            # Stacked debris
+            for i in range(3):
+                dy = rect.bottom - 5 - i * 6
+                dw = 16 - i * 3
+                debris_rect = pygame.Rect(rect.centerx - dw // 2, dy, dw, 5)
+                piece_color = color if i % 2 == 0 else rust
+                pygame.draw.rect(surface, piece_color, debris_rect)
+                pygame.draw.line(surface, highlight, debris_rect.topleft, debris_rect.topright, 1)
+        else:
+            # Scattered parts
+            parts = [(5, 6, 6, 4), (12, 4, 5, 5), (8, 12, 7, 3), (15, 10, 4, 6), (3, 14, 8, 3)]
+            for px, py, pw, ph in parts:
+                piece_color = rust if rng.random() < 0.3 else color
+                pygame.draw.rect(surface, piece_color, (rect.left + px, rect.top + py, pw, ph))
+            # Highlight on top piece
+            pygame.draw.rect(surface, highlight, (rect.left + 12, rect.top + 4, 5, 5), 1)
+        
+        if not depleted:
+            # Metallic glint
+            pygame.draw.circle(surface, (200, 200, 210), (rect.right - 5, rect.top + 5), 2)
+    
+    def _draw_stockpile_resource(self, surface: pygame.Surface, rect: pygame.Rect, 
+                                  res_type: str, amount: int, x: int, y: int, z: int) -> None:
+        """Draw a resource stack on a stockpile tile matching the map node style."""
+        import random
+        
+        fill_ratio = min(1.0, amount / 10.0)
+        seed = self._get_tile_seed(x, y, z)
+        rng = random.Random(seed)
+        
+        if res_type == "wood":
+            # Log pile that grows
+            num_logs = 1 + int(fill_ratio * 4)
+            log_color = (120, 85, 50)
+            highlight = (150, 115, 75)
+            for i in range(num_logs):
+                log_y = rect.centery + 6 - i * 4
+                log_w = 12 + int(fill_ratio * 6)
+                log_rect = pygame.Rect(rect.centerx - log_w // 2, log_y, log_w, 3)
+                pygame.draw.ellipse(surface, log_color, log_rect)
+                pygame.draw.ellipse(surface, highlight, log_rect, 1)
+        elif res_type == "scrap":
+            # Junk pile that grows
+            num_pieces = 2 + int(fill_ratio * 4)
+            for i in range(num_pieces):
+                px = rect.centerx - 6 + rng.randint(0, 12)
+                py = rect.centery - 4 + rng.randint(0, 8) - int(fill_ratio * 4)
+                pw = 3 + rng.randint(0, 4)
+                ph = 2 + rng.randint(0, 2)
+                piece_color = (110, 90, 75) if rng.random() < 0.4 else (90, 85, 80)
+                pygame.draw.rect(surface, piece_color, (px, py, pw, ph))
+            pygame.draw.rect(surface, (130, 125, 120), (rect.centerx - 3, rect.centery - 2, 6, 4), 1)
+        elif res_type == "mineral":
+            # Rock pile that grows
+            num_rocks = 1 + int(fill_ratio * 3)
+            base_y = rect.centery + 4
+            for i in range(num_rocks):
+                rx = rect.centerx - 4 + (i % 2) * 4 + rng.randint(-2, 2)
+                ry = base_y - i * 4
+                radius = 4 + int(fill_ratio * 2)
+                rock_color = (94, 96, 105)
+                pygame.draw.circle(surface, rock_color, (rx, ry), radius)
+                pygame.draw.circle(surface, (130, 132, 145), (rx - 1, ry - 1), radius - 2, 1)
+        elif res_type == "metal":
+            # Metal ingots stacked
+            num_bars = 1 + int(fill_ratio * 3)
+            bar_color = (160, 165, 180)
+            highlight = (200, 205, 220)
+            for i in range(num_bars):
+                bar_y = rect.centery + 4 - i * 5
+                bar_rect = pygame.Rect(rect.centerx - 6, bar_y, 12, 4)
+                pygame.draw.rect(surface, bar_color, bar_rect)
+                pygame.draw.line(surface, highlight, bar_rect.topleft, bar_rect.topright, 1)
+        elif res_type == "power":
+            # Glowing power cells
+            num_cells = 1 + int(fill_ratio * 2)
+            for i in range(num_cells):
+                cx = rect.centerx - 4 + i * 4
+                cy = rect.centery + 2 - i * 3
+                pygame.draw.rect(surface, (200, 180, 60), (cx - 3, cy - 4, 6, 8))
+                pygame.draw.rect(surface, (255, 240, 100), (cx - 2, cy - 2, 4, 4))
+        elif res_type == "raw_food":
+            # Food crates/sacks
+            size = 6 + int(fill_ratio * 6)
+            pygame.draw.rect(surface, (140, 160, 90), 
+                           (rect.centerx - size // 2, rect.centery - size // 2, size, size))
+            pygame.draw.rect(surface, (170, 195, 110), 
+                           (rect.centerx - size // 2, rect.centery - size // 2, size, size), 1)
+        elif res_type == "cooked_meal":
+            # Meal containers
+            size = 6 + int(fill_ratio * 6)
+            pygame.draw.ellipse(surface, (180, 140, 90), 
+                              (rect.centerx - size // 2, rect.centery - size // 2 + 2, size, size - 2))
+            pygame.draw.ellipse(surface, (210, 170, 110), 
+                              (rect.centerx - size // 2, rect.centery - size // 2 + 2, size, size - 2), 1)
+        else:
+            # Generic box
+            size = int(8 + 16 * fill_ratio)
+            stack_rect = pygame.Rect(rect.centerx - size // 2, rect.centery - size // 2, size, size)
+            pygame.draw.rect(surface, (150, 150, 150), stack_rect)
+            pygame.draw.rect(surface, (200, 200, 200), stack_rect, 1)
+    
     def _draw_street_tile(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, tile_type: str) -> None:
-        """Render street tiles with damage variations."""
+        """Render street tiles with cobblestone pattern and damage variations."""
         import random
         
         base_colors = {
@@ -430,22 +645,50 @@ class Grid:
             "street_ripped": COLOR_TILE_STREET_RIPPED,
         }
         base_color = base_colors.get(tile_type, COLOR_TILE_STREET)
-        color = self._get_tile_color_variation(base_color, x, y, z, 6)
+        color = self._get_tile_color_variation(base_color, x, y, z, 4)
         pygame.draw.rect(surface, color, rect)
         
         seed = self._get_tile_seed(x, y, z) ^ 0x57F9A
         rng = random.Random(seed)
         
+        # Cobblestone/rock pattern for all street types
+        dark_grout = (max(0, color[0] - 12), max(0, color[1] - 12), max(0, color[2] - 14))
+        light_stone = (min(255, color[0] + 8), min(255, color[1] + 10), min(255, color[2] + 12))
+        
+        # Draw irregular stone pattern
+        variant = self._get_tile_variant(x, y, z, 3, salt=0xC0BB1E)
+        
+        if variant == 0:
+            # Horizontal stones
+            pygame.draw.line(surface, dark_grout, (rect.left, rect.top + 8), (rect.right, rect.top + 8), 1)
+            pygame.draw.line(surface, dark_grout, (rect.left, rect.bottom - 8), (rect.right, rect.bottom - 8), 1)
+            pygame.draw.line(surface, dark_grout, (rect.centerx, rect.top), (rect.centerx, rect.top + 8), 1)
+            pygame.draw.line(surface, dark_grout, (rect.centerx - 6, rect.top + 8), (rect.centerx - 6, rect.bottom - 8), 1)
+            pygame.draw.line(surface, dark_grout, (rect.centerx + 6, rect.bottom - 8), (rect.centerx + 6, rect.bottom), 1)
+        elif variant == 1:
+            # Offset brick pattern
+            pygame.draw.line(surface, dark_grout, (rect.left, rect.centery), (rect.right, rect.centery), 1)
+            pygame.draw.line(surface, dark_grout, (rect.left + 6, rect.top), (rect.left + 6, rect.centery), 1)
+            pygame.draw.line(surface, dark_grout, (rect.right - 6, rect.top), (rect.right - 6, rect.centery), 1)
+            pygame.draw.line(surface, dark_grout, (rect.centerx, rect.centery), (rect.centerx, rect.bottom), 1)
+        else:
+            # Irregular stones
+            pygame.draw.line(surface, dark_grout, (rect.left + 4, rect.top), (rect.left + 4, rect.bottom), 1)
+            pygame.draw.line(surface, dark_grout, (rect.right - 5, rect.top), (rect.right - 5, rect.bottom), 1)
+            pygame.draw.line(surface, dark_grout, (rect.left + 4, rect.top + 10), (rect.right - 5, rect.top + 10), 1)
+            pygame.draw.line(surface, dark_grout, (rect.left, rect.bottom - 6), (rect.left + 4, rect.bottom - 6), 1)
+        
+        # Add subtle highlight on some stones
+        if rng.random() < 0.3:
+            hx = rect.left + rng.randint(3, rect.width - 6)
+            hy = rect.top + rng.randint(3, rect.height - 6)
+            pygame.draw.rect(surface, light_stone, (hx, hy, 3, 2))
+        
         if tile_type == "street":
-            # Subtle cross-hatching to keep base streets interesting
-            if rng.random() < 0.35:
-                pygame.draw.line(surface, (color[0] - 10, color[1] - 10, color[2] - 10),
-                                 (rect.left + 4, rect.top + rng.randint(4, rect.height - 4)),
-                                 (rect.right - 4, rect.top + rng.randint(4, rect.height - 4)), 1)
             return
         
-        crack_color = (max(0, color[0] - 25), max(0, color[1] - 25), max(0, color[2] - 25))
-        highlight = (min(255, color[0] + 30), min(255, color[1] + 20), min(255, color[2] + 20))
+        crack_color = (max(0, color[0] - 20), max(0, color[1] - 20), max(0, color[2] - 22))
+        highlight = (min(255, color[0] + 25), min(255, color[1] + 22), min(255, color[2] + 20))
         
         if tile_type == "street_cracked":
             # Several fine cracks
@@ -472,7 +715,7 @@ class Grid:
                 (rect.right - rng.randint(2, 6), rect.bottom - rng.randint(4, 8)),
                 (rect.centerx, rect.bottom - rng.randint(2, 4)),
             ]
-            hole_color = (max(0, color[0] - 30), max(0, color[1] - 30), max(0, color[2] - 35))
+            hole_color = (max(0, color[0] - 25), max(0, color[1] - 25), max(0, color[2] - 28))
             pygame.draw.polygon(surface, hole_color, rip_points)
             pygame.draw.lines(surface, highlight, True, rip_points, 2)
             
@@ -482,6 +725,45 @@ class Grid:
                 cx = rect.left + rng.randint(3, rect.width - 4)
                 cy = rect.top + rng.randint(3, rect.height - 4)
                 pygame.draw.circle(surface, COLOR_RESOURCE_NODE_MINERAL, (cx, cy), 2)
+    
+    def _draw_sidewalk_tile(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, designated: bool = False) -> None:
+        """Render sidewalk tiles with brick pattern."""
+        import random
+        
+        base_color = COLOR_TILE_SIDEWALK_DESIGNATED if designated else COLOR_TILE_SIDEWALK
+        color = self._get_tile_color_variation(base_color, x, y, z, 3)
+        pygame.draw.rect(surface, color, rect)
+        
+        # Brick pattern - darker mortar lines
+        mortar = (max(0, color[0] - 10), max(0, color[1] - 10), max(0, color[2] - 12))
+        light_brick = (min(255, color[0] + 6), min(255, color[1] + 5), min(255, color[2] + 4))
+        
+        seed = self._get_tile_seed(x, y, z)
+        rng = random.Random(seed ^ 0xB41C1)
+        
+        # Horizontal mortar lines (3 rows of bricks)
+        brick_h = TILE_SIZE // 3
+        for row in range(1, 3):
+            y_pos = rect.top + row * brick_h
+            pygame.draw.line(surface, mortar, (rect.left, y_pos), (rect.right, y_pos), 1)
+        
+        # Vertical mortar lines (offset per row for brick pattern)
+        brick_w = TILE_SIZE // 2
+        for row in range(3):
+            y_start = rect.top + row * brick_h
+            y_end = y_start + brick_h
+            offset = (row % 2) * (brick_w // 2)
+            
+            for col in range(3):
+                x_pos = rect.left + offset + col * brick_w
+                if rect.left < x_pos < rect.right:
+                    pygame.draw.line(surface, mortar, (x_pos, y_start), (x_pos, y_end), 1)
+        
+        # Subtle brick highlights
+        if rng.random() < 0.25:
+            bx = rect.left + rng.randint(2, rect.width - 5)
+            by = rect.top + rng.randint(2, rect.height - 5)
+            pygame.draw.rect(surface, light_brick, (bx, by, 4, 2))
     
     # --- Interior Lighting System ---
     
@@ -551,11 +833,13 @@ class Grid:
         z = self.current_z
         is_ground_level = (z == 0)
         
-        # Calculate visible tile range based on camera position
-        start_tile_x = max(0, self.camera_x // TILE_SIZE)
-        start_tile_y = max(0, self.camera_y // TILE_SIZE)
-        end_tile_x = min(self.width, (self.camera_x + SCREEN_W) // TILE_SIZE + 1)
-        end_tile_y = min(self.height, (self.camera_y + SCREEN_H) // TILE_SIZE + 1)
+        # Calculate visible tile range based on camera position (convert float to int)
+        cam_x = int(self.camera_x)
+        cam_y = int(self.camera_y)
+        start_tile_x = max(0, cam_x // TILE_SIZE)
+        start_tile_y = max(0, cam_y // TILE_SIZE)
+        end_tile_x = min(self.width, (cam_x + SCREEN_W) // TILE_SIZE + 1)
+        end_tile_y = min(self.height, (cam_y + SCREEN_H) // TILE_SIZE + 1)
 
         for y in range(start_tile_y, end_tile_y):
             for x in range(start_tile_x, end_tile_x):
@@ -564,8 +848,8 @@ class Grid:
                 world_y = y * TILE_SIZE
                 
                 # Screen position (apply camera offset)
-                screen_x = world_x - self.camera_x
-                screen_y = world_y - self.camera_y
+                screen_x = world_x - cam_x
+                screen_y = world_y - cam_y
                 
                 rect = pygame.Rect(
                     screen_x,
@@ -596,8 +880,9 @@ class Grid:
                     pygame.draw.rect(surface, color, rect)
                 # Decorative tiles with subtle color variation
                 elif tile == "sidewalk":
-                    color = self._get_tile_color_variation(COLOR_TILE_SIDEWALK, x, y, z, 8)
-                    pygame.draw.rect(surface, color, rect)
+                    self._draw_sidewalk_tile(surface, rect, x, y, z, designated=False)
+                elif tile == "sidewalk_designated":
+                    self._draw_sidewalk_tile(surface, rect, x, y, z, designated=True)
                 elif tile == "debris":
                     color = self._get_tile_color_variation(COLOR_TILE_DEBRIS, x, y, z, 12)
                     pygame.draw.rect(surface, color, rect)
@@ -1439,35 +1724,8 @@ class Grid:
                         res_type = tile_storage.get("type", "")
                         amount = tile_storage.get("amount", 0)
                         
-                        # Color based on resource type
-                        if res_type == "wood":
-                            stack_color = COLOR_RESOURCE_NODE_WOOD
-                        elif res_type == "scrap":
-                            stack_color = COLOR_RESOURCE_NODE_SCRAP
-                        elif res_type == "metal":
-                            stack_color = COLOR_RESOURCE_NODE_METAL
-                        elif res_type == "mineral":
-                            stack_color = COLOR_RESOURCE_NODE_MINERAL
-                        elif res_type == "raw_food":
-                            stack_color = COLOR_RESOURCE_NODE_RAW_FOOD
-                        elif res_type == "cooked_meal":
-                            stack_color = COLOR_RESOURCE_NODE_COOKED_MEAL
-                        elif res_type == "power":
-                            stack_color = COLOR_RESOURCE_NODE_POWER
-                        else:
-                            stack_color = (150, 150, 150)
-                        
-                        # Draw stack - size based on amount (max 10)
-                        fill_ratio = min(1.0, amount / 10.0)
-                        stack_size = int(8 + 16 * fill_ratio)  # 8 to 24 pixels
-                        stack_rect = pygame.Rect(
-                            rect.centerx - stack_size // 2,
-                            rect.centery - stack_size // 2,
-                            stack_size,
-                            stack_size,
-                        )
-                        pygame.draw.rect(surface, stack_color, stack_rect)
-                        pygame.draw.rect(surface, (255, 255, 255), stack_rect, 1)
+                        # Use styled stockpile resource drawing
+                        self._draw_stockpile_resource(surface, rect, res_type, amount, x, y, z)
                     
                     # Draw equipment stored in stockpile
                     if equipment_storage:
@@ -1523,9 +1781,11 @@ class Grid:
                         
                         rendered = False
                         if resource_type == "wood":
-                            color = COLOR_RESOURCE_NODE_WOOD
+                            self._draw_wood_node(surface, rect, x, y, z, depleted)
+                            rendered = True
                         elif resource_type == "scrap":
-                            color = COLOR_RESOURCE_NODE_SCRAP
+                            self._draw_scrap_node(surface, rect, x, y, z, depleted)
+                            rendered = True
                         elif resource_type == "metal":
                             color = COLOR_RESOURCE_NODE_METAL
                         elif resource_type == "mineral":
@@ -1683,15 +1943,25 @@ class Grid:
                         count_text = count_font.render(str(len(world_items)), True, (255, 255, 255))
                         surface.blit(count_text, (cx + 5, cy - 6))
 
-                # Grid lines - faint standard lines, thicker every 10 tiles
-                # Standard 1px grid
-                pygame.draw.rect(surface, COLOR_GRID_LINES, rect, 1)
+                # Grid lines - teal-tinted dotted lines to match UI theme
+                # Draw dotted grid lines (every 4 pixels)
+                grid_color = COLOR_GRID_LINES
+                dot_spacing = 4
                 
-                # Thicker lines every 10 tiles for better readability
+                # Right edge (vertical dotted line)
+                for py in range(rect.top, rect.bottom, dot_spacing * 2):
+                    pygame.draw.line(surface, grid_color, (rect.right - 1, py), (rect.right - 1, min(py + dot_spacing, rect.bottom)), 1)
+                
+                # Bottom edge (horizontal dotted line)
+                for px in range(rect.left, rect.right, dot_spacing * 2):
+                    pygame.draw.line(surface, grid_color, (px, rect.bottom - 1), (min(px + dot_spacing, rect.right), rect.bottom - 1), 1)
+                
+                # Thicker solid lines every 10 tiles for better readability (teal accent)
+                grid_major_color = (60, 100, 110)  # Brighter teal for major lines
                 if x % 10 == 0:
-                    pygame.draw.line(surface, (80, 80, 80), (rect.left, rect.top), (rect.left, rect.bottom), 2)
+                    pygame.draw.line(surface, grid_major_color, (rect.left, rect.top), (rect.left, rect.bottom), 1)
                 if y % 10 == 0:
-                    pygame.draw.line(surface, (80, 80, 80), (rect.left, rect.top), (rect.right, rect.top), 2)
+                    pygame.draw.line(surface, grid_major_color, (rect.left, rect.top), (rect.right, rect.top), 1)
                 
                 # Job/designation category debug border - for tiles with active jobs or designations
                 if is_ground_level:
