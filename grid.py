@@ -822,6 +822,70 @@ class Grid:
         screen_x = world_x - self.camera_x
         screen_y = world_y - self.camera_y
         return (screen_x, screen_y)
+    
+    def _draw_layer_below(self, surface: pygame.Surface, below_z: int, cam_x: int, cam_y: int,
+                          start_x: int, start_y: int, end_x: int, end_y: int) -> None:
+        """Draw the Z-level below with transparency for context.
+        
+        Renders a dimmed version of the floor below so players can see what's underneath.
+        """
+        # Create a temporary surface for the layer below
+        visible_w = (end_x - start_x) * TILE_SIZE
+        visible_h = (end_y - start_y) * TILE_SIZE
+        if visible_w <= 0 or visible_h <= 0:
+            return
+        
+        # Draw tiles from the level below with dimmed colors
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
+                world_x = x * TILE_SIZE
+                world_y = y * TILE_SIZE
+                screen_x = world_x - cam_x
+                screen_y = world_y - cam_y
+                
+                rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
+                tile = self.tiles[below_z][y][x]
+                
+                # Get base color for tile and dim it significantly
+                if tile == "empty" or tile is None:
+                    base_color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, below_z, 8)
+                elif tile == "dirt":
+                    base_color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, below_z, 10)
+                elif tile == "grass":
+                    base_color = self._get_tile_color_variation(COLOR_TILE_GRASS, x, y, below_z, 12)
+                elif tile == "rock":
+                    base_color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, below_z, 8)
+                elif tile == "sidewalk" or tile == "sidewalk_designated":
+                    base_color = COLOR_TILE_SIDEWALK
+                elif tile == "pavement" or tile == "pavement_designated":
+                    base_color = COLOR_TILE_PAVEMENT
+                elif tile == "floor":
+                    base_color = COLOR_TILE_FLOOR
+                elif tile == "wall" or tile == "wall_finished":
+                    base_color = COLOR_TILE_WALL_FINISHED
+                elif tile == "roof":
+                    base_color = COLOR_TILE_ROOF
+                else:
+                    base_color = (60, 60, 70)  # Default dim color
+                
+                # Dim the color to 40% brightness
+                dimmed = (base_color[0] * 4 // 10, base_color[1] * 4 // 10, base_color[2] * 4 // 10)
+                pygame.draw.rect(surface, dimmed, rect)
+        
+        # Draw a subtle grid overlay to distinguish the layer below
+        grid_color = (30, 40, 50)
+        for y in range(start_y, end_y + 1):
+            world_y = y * TILE_SIZE
+            screen_y = world_y - cam_y
+            pygame.draw.line(surface, grid_color, 
+                           (start_x * TILE_SIZE - cam_x, screen_y),
+                           (end_x * TILE_SIZE - cam_x, screen_y), 1)
+        for x in range(start_x, end_x + 1):
+            world_x = x * TILE_SIZE
+            screen_x = world_x - cam_x
+            pygame.draw.line(surface, grid_color,
+                           (screen_x, start_y * TILE_SIZE - cam_y),
+                           (screen_x, end_y * TILE_SIZE - cam_y), 1)
 
     def draw(self, surface: pygame.Surface, hovered_tile: tuple[int, int] | None = None) -> None:
         """Render the grid and its tiles to the given surface.
@@ -840,6 +904,10 @@ class Grid:
         start_tile_y = max(0, cam_y // TILE_SIZE)
         end_tile_x = min(self.width, (cam_x + SCREEN_W) // TILE_SIZE + 1)
         end_tile_y = min(self.height, (cam_y + SCREEN_H) // TILE_SIZE + 1)
+        
+        # Draw layer below with transparency when viewing upper floors
+        if z > 0:
+            self._draw_layer_below(surface, z - 1, cam_x, cam_y, start_tile_x, start_tile_y, end_tile_x, end_tile_y)
 
         for y in range(start_tile_y, end_tile_y):
             for x in range(start_tile_x, end_tile_x):
@@ -861,10 +929,14 @@ class Grid:
                 tile = self.tiles[z][y][x]
 
                 # Draw base ground tiles first (beneath everything else)
-                # Empty/None tiles get earth tones instead of pure black
+                # On upper floors, skip empty tiles so layer below shows through
                 if tile == "empty" or tile is None:
-                    color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, z, 8)
-                    pygame.draw.rect(surface, color, rect)
+                    if is_ground_level:
+                        # Ground level: draw earth tones
+                        color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, z, 8)
+                        pygame.draw.rect(surface, color, rect)
+                    # Upper floors: don't draw empty tiles (layer below visible)
+                    continue
                 elif tile == "dirt":
                     color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, z, 10)
                     pygame.draw.rect(surface, color, rect)

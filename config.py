@@ -10,7 +10,7 @@ TILE_SIZE = 32
 # Grid dimensions (tiles) - LARGE MAP
 GRID_W = 200
 GRID_H = 200
-GRID_Z = 3  # Number of Z-levels (0 = ground, 1 = first floor, 2 = second floor)
+GRID_Z = 10  # Number of Z-levels (0 = ground, 1+ = upper floors)
 
 # Screen dimensions - FULL HD (increase for 4K monitors)
 SCREEN_W = 1920

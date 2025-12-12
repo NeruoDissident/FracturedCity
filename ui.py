@@ -3793,8 +3793,10 @@ class VisitorPanel(ColonistManagementPanel):
     ACCEPT_TEXT = ">> JACK IN <<"
     DENY_TEXT = "// FLATLINE //"
     
-    # Override tabs - no Chat or Help for visitors
-    TABS = ["Overview", "Bio", "Relations", "Stats", "Thoughts"]
+    # Use same tabs as parent but exclude Chat and Help (indices 6, 7)
+    # Parent: ["Status", "Bio", "Body", "Links", "Stats", "Mind", "Chat", "Help"]
+    # We keep indices 0-5 so content drawing works correctly
+    TABS = ["Status", "Bio", "Body", "Links", "Stats", "Mind"]
     
     def __init__(self):
         super().__init__()
