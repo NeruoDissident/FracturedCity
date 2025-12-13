@@ -131,6 +131,32 @@ IDLE_CONVERSATIONS = [
     ('"Think we\'re safe here?"', '"Safe as anywhere."'),
 ]
 
+# Injury check-in conversations
+INJURY_CONVERSATIONS = [
+    ('"Your eye... what happened?"', '"Fight got ugly."'),
+    ('"You\'re limping."', '"I\'ll be fine."'),
+    ('"That looks bad."', '"Seen worse."'),
+    ('"You okay?"', '"Been better."'),
+    ('"Need help?"', '"I can manage."'),
+    ('"Should get that looked at."', '"When I have time."'),
+    ('"You\'re hurt."', '"I noticed."'),
+    ('"Can you even see out of that?"', '"Enough to get by."'),
+    ('"Your hand..."', '"Still works. Mostly."'),
+    ('"You need to rest."', '"Can\'t afford to."'),
+]
+
+# Fight aftermath conversations
+FIGHT_AFTERMATH_CONVERSATIONS = [
+    ('"Saw you and {other} going at it."', '"Don\'t want to talk about it."'),
+    ('"That fight was brutal."', '"Yeah."'),
+    ('"You two done?"', '"For now."'),
+    ('"What was that about?"', '"Old tensions."'),
+    ('"Heard the commotion."', '"It\'s handled."'),
+    ('"You won, at least."', '"Doesn\'t feel like it."'),
+    ('"They had it coming."', '"Maybe."'),
+    ('"Glad you\'re okay."', '"Thanks."'),
+]
+
 # Quirk-triggered conversations (speaker has the quirk)
 QUIRK_CONVERSATIONS = {
     "hums_when_thinking": [
@@ -190,19 +216,106 @@ MAJOR_TRAIT_CONVERSATIONS = {
     ],
 }
 
+# Conflict conversations - triggered by trait clashes before fights
+# Format: {(trait_a, trait_b): [(speaker_line, listener_line), ...]}
+CONFLICT_CONVERSATIONS = {
+    # Paranoia vs Talkers
+    ("mild_paranoia", "overexplains"): [
+        ('"Can you just... stop talking?"', '"I\'m just trying to help!"'),
+        ('"Do you ever shut up?"', '"I\'m explaining things!"'),
+        ('"Too many words."', '"You need to understand—"'),
+        ('"Give me some space."', '"I\'m just standing here!"'),
+    ],
+    ("mild_paranoia", "gives_nicknames"): [
+        ('"Don\'t call me that."', '"It\'s just a nickname!"'),
+        ('"Stop acting so familiar."', '"We\'re friends, aren\'t we?"'),
+        ('"I don\'t like nicknames."', '"Lighten up a little."'),
+    ],
+    
+    # Sky fear vs Outside lovers
+    ("afraid_of_sky", "topside_sprawl"): [
+        ('"How can you stand it out there?"', '"Better than hiding like a coward."'),
+        ('"All that... nothing above us."', '"It\'s called freedom."'),
+        ('"The sky is wrong."', '"You\'re wrong."'),
+    ],
+    
+    # Claustrophobia vs Underground
+    ("afraid_of_tight_spaces", "deep_shelters"): [
+        ('"These walls are closing in."', '"This is nothing. You should see the shelters."'),
+        ('"I need air."', '"We\'re fine."'),
+        ('"Too cramped in here."', '"You\'re being dramatic."'),
+    ],
+    
+    # Light sleeper vs Noisy
+    ("sleeps_lightly", "hums_when_thinking"): [
+        ('"That humming. Please stop."', '"Didn\'t realize I was doing it."'),
+        ('"Can\'t sleep with all that noise."', '"I\'m barely making a sound!"'),
+        ('"You\'re too loud."', '"You\'re too sensitive."'),
+    ],
+    
+    # Organizer vs Hoarder
+    ("keeps_inventory", "scavenges_trinkets"): [
+        ('"Why do you keep all this junk?"', '"It\'s not junk!"'),
+        ('"This place is a mess."', '"I know where everything is."'),
+        ('"Throw it out."', '"You don\'t understand."'),
+    ],
+    
+    # Slow vs Efficient
+    ("takes_long_path", "former_mercenary"): [
+        ('"Why do you always rush?"', '"Why do you always waste time?"'),
+        ('"There\'s value in being careful."', '"There\'s value in getting things done."'),
+        ('"Not everything is a mission."', '"Everything is."'),
+    ],
+    
+    # Belief conflicts
+    ("last_light_disciple", "gravemind_listener"): [
+        ('"Your voices are lies."', '"Your light is dead."'),
+        ('"The Last Light guides."', '"The deep ones remember."'),
+        ('"You worship nothing."', '"You worship a corpse."'),
+    ],
+    
+    # Connection conflicts
+    ("echo_touched", "unlinked"): [
+        ('"You feel nothing."', '"I feel plenty. Just not your echoes."'),
+        ('"You\'re cut off."', '"I\'m free."'),
+        ('"The echoes connect us all."', '"I don\'t want to be connected."'),
+    ],
+    
+    # Noise conflicts
+    ("static_soul", "silent_commune_raised"): [
+        ('"The silence is suffocating."', '"The noise is maddening."'),
+        ('"I need the static."', '"I need the quiet."'),
+        ('"How can you stand it so quiet?"', '"How can you stand all that noise?"'),
+    ],
+    
+    # Origin tensions
+    ("rust_warrens", "deep_shelters"): [
+        ('"Surface scavenger."', '"At least I saw the sky."'),
+        ('"You don\'t know real darkness."', '"You don\'t know real danger."'),
+        ('"Warrens folk are tougher."', '"Shelter folk are smarter."'),
+    ],
+    ("topside_sprawl", "fringe_settlements"): [
+        ('"City folk don\'t know survival."', '"Fringe folk don\'t know civilization."'),
+        ('"The sprawl made us weak."', '"The fringe made you animals."'),
+        ('"You wouldn\'t last a day topside."', '"You wouldn\'t last an hour on the fringe."'),
+    ],
+}
+
 
 # =============================================================================
-# CONVERSATION LOG - Global colony chat
+# CONVERSATION LOG - Per-colonist perspective
 # =============================================================================
 
-_conversation_log: list[dict] = []
+# Store conversations per colonist: {colonist_id: [conversation_entries]}
+_colonist_conversation_logs: dict[int, list[dict]] = {}
 _max_log_entries = 100
 
 
 def add_conversation(speaker_name: str, listener_name: str, 
                      speaker_line: str, listener_line: str,
-                     game_tick: int, conversation_type: str = "chat") -> None:
-    """Add a conversation to the global log.
+                     game_tick: int, conversation_type: str = "chat",
+                     speaker_id: int = None, listener_id: int = None) -> None:
+    """Add a conversation to both participants' logs from their perspective.
     
     Args:
         speaker_name: Name of colonist who initiated
@@ -210,29 +323,65 @@ def add_conversation(speaker_name: str, listener_name: str,
         speaker_line: What the speaker said
         listener_line: What the listener replied
         game_tick: Current game tick
-        conversation_type: "chat", "shared_origin", "shared_experience", "mood", "work", "quirk", "major"
+        conversation_type: "chat", "shared_origin", "shared_experience", "mood", "work", "quirk", "major", "conflict", "injury_checkin", "fight_aftermath"
+        speaker_id: ID of speaker colonist (for per-colonist log)
+        listener_id: ID of listener colonist (for per-colonist log)
     """
-    global _conversation_log
+    global _colonist_conversation_logs
     
-    entry = {
-        "tick": game_tick,
-        "speaker": speaker_name,
-        "listener": listener_name,
-        "speaker_line": speaker_line,
-        "listener_line": listener_line,
-        "type": conversation_type,
-    }
+    # Add to speaker's log (they spoke first)
+    if speaker_id is not None:
+        if speaker_id not in _colonist_conversation_logs:
+            _colonist_conversation_logs[speaker_id] = []
+        
+        speaker_entry = {
+            "tick": game_tick,
+            "is_speaker": True,
+            "other_name": listener_name,
+            "my_line": speaker_line,
+            "their_line": listener_line,
+            "type": conversation_type,
+        }
+        _colonist_conversation_logs[speaker_id].append(speaker_entry)
+        
+        # Trim if too long
+        if len(_colonist_conversation_logs[speaker_id]) > _max_log_entries:
+            _colonist_conversation_logs[speaker_id] = _colonist_conversation_logs[speaker_id][-_max_log_entries:]
     
-    _conversation_log.append(entry)
-    
-    # Trim if too long
-    if len(_conversation_log) > _max_log_entries:
-        _conversation_log = _conversation_log[-_max_log_entries:]
+    # Add to listener's log (they responded)
+    if listener_id is not None:
+        if listener_id not in _colonist_conversation_logs:
+            _colonist_conversation_logs[listener_id] = []
+        
+        listener_entry = {
+            "tick": game_tick,
+            "is_speaker": False,
+            "other_name": speaker_name,
+            "my_line": listener_line,
+            "their_line": speaker_line,
+            "type": conversation_type,
+        }
+        _colonist_conversation_logs[listener_id].append(listener_entry)
+        
+        # Trim if too long
+        if len(_colonist_conversation_logs[listener_id]) > _max_log_entries:
+            _colonist_conversation_logs[listener_id] = _colonist_conversation_logs[listener_id][-_max_log_entries:]
 
 
-def get_conversation_log(limit: int = 20) -> list[dict]:
-    """Get recent conversations from the global log."""
-    return list(reversed(_conversation_log[-limit:]))
+def get_conversation_log(colonist_id: int, limit: int = 20) -> list[dict]:
+    """Get recent conversations from a specific colonist's perspective.
+    
+    Args:
+        colonist_id: ID of the colonist whose log to retrieve
+        limit: Maximum number of conversations to return
+        
+    Returns:
+        List of conversation entries from this colonist's perspective, most recent first
+    """
+    if colonist_id not in _colonist_conversation_logs:
+        return []
+    
+    return list(reversed(_colonist_conversation_logs[colonist_id][-limit:]))
 
 
 def clear_conversation_log() -> None:
@@ -251,7 +400,33 @@ def generate_conversation(speaker: "Colonist", listener: "Colonist",
     
     Returns tuple of (speaker_line, listener_line, conversation_type) or None.
     """
-    # Check for shared traits first (more interesting)
+    # Check for recent events first (most contextual)
+    
+    # Check if listener has visible injuries (health < 75%)
+    listener_body = getattr(listener, 'body', None)
+    if listener_body and random.random() < 0.4:  # 40% chance to comment on injuries
+        # Find worst injury
+        worst_health = 100.0
+        for part in listener_body.parts.values():
+            if part.health < worst_health:
+                worst_health = part.health
+        
+        if worst_health < 75:
+            speaker_line, listener_line = random.choice(INJURY_CONVERSATIONS)
+            return (speaker_line, listener_line, "injury_checkin")
+    
+    # Check if listener was recently in combat (last 3000 ticks = ~50 seconds)
+    listener_last_combat = getattr(listener, 'last_combat_tick', 0)
+    if game_tick - listener_last_combat < 3000 and random.random() < 0.3:
+        # Find who they fought
+        recent_target = getattr(listener, 'combat_target', None)
+        if recent_target:
+            other_name = recent_target.name.split()[0]
+            speaker_line, listener_line = random.choice(FIGHT_AFTERMATH_CONVERSATIONS)
+            speaker_line = speaker_line.format(other=other_name)
+            return (speaker_line, listener_line, "fight_aftermath")
+    
+    # Check for shared traits (more interesting)
     
     # Shared origin?
     speaker_origin = speaker.traits.get("origin", "")
@@ -324,6 +499,50 @@ def generate_conversation(speaker: "Colonist", listener: "Colonist",
     return (speaker_line, listener_line, "chat")
 
 
+def generate_conflict_conversation(colonist_a: "Colonist", colonist_b: "Colonist") -> Optional[tuple[str, str]]:
+    """Generate a conflict conversation based on trait clash.
+    
+    Returns tuple of (speaker_line, listener_line) or None if no conflict found.
+    """
+    traits_a = getattr(colonist_a, 'traits', {})
+    traits_b = getattr(colonist_b, 'traits', {})
+    
+    # Collect all traits
+    all_traits_a = set()
+    all_traits_a.add(traits_a.get("origin", ""))
+    all_traits_a.add(traits_a.get("experience", ""))
+    all_traits_a.update(traits_a.get("quirks", []))
+    if traits_a.get("major_trait"):
+        all_traits_a.add(traits_a["major_trait"])
+    all_traits_a.discard("")
+    
+    all_traits_b = set()
+    all_traits_b.add(traits_b.get("origin", ""))
+    all_traits_b.add(traits_b.get("experience", ""))
+    all_traits_b.update(traits_b.get("quirks", []))
+    if traits_b.get("major_trait"):
+        all_traits_b.add(traits_b["major_trait"])
+    all_traits_b.discard("")
+    
+    # Find matching conflict conversation
+    for trait_a in all_traits_a:
+        for trait_b in all_traits_b:
+            # Check both orderings
+            key = (trait_a, trait_b)
+            if key in CONFLICT_CONVERSATIONS:
+                templates = CONFLICT_CONVERSATIONS[key]
+                return random.choice(templates)
+            
+            key_reversed = (trait_b, trait_a)
+            if key_reversed in CONFLICT_CONVERSATIONS:
+                templates = CONFLICT_CONVERSATIONS[key_reversed]
+                # Swap speaker and listener
+                listener_line, speaker_line = random.choice(templates)
+                return (speaker_line, listener_line)
+    
+    return None
+
+
 def try_start_conversation(speaker: "Colonist", listener: "Colonist",
                            game_tick: int) -> bool:
     """Try to start a conversation between two colonists.
@@ -363,11 +582,12 @@ def try_start_conversation(speaker: "Colonist", listener: "Colonist",
     
     speaker_line, listener_line, convo_type = result
     
-    # Add to global log
+    # Add to per-colonist logs
     add_conversation(
         speaker.name, listener.name,
         speaker_line, listener_line,
-        game_tick, convo_type
+        game_tick, convo_type,
+        speaker_id=id(speaker), listener_id=id(listener)
     )
     
     # Record interaction in relationship system

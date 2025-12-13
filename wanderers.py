@@ -791,3 +791,27 @@ def draw_wanderers(surface, current_z: int = 0, camera_x: int = 0, camera_y: int
         text = font.render("$", True, (255, 220, 100))
         text_rect = text.get_rect(center=(screen_x, screen_y))
         surface.blit(text, text_rect)
+
+
+# =============================================================================
+# RAIDERS - Hostile NPCs
+# =============================================================================
+
+def spawn_raider(grid) -> Optional["Colonist"]:
+    """Spawn a single hostile raider at map edge.
+    
+    Returns the Colonist object (caller adds to colonists list).
+    """
+    from colonist import Colonist, generate_colonist_name
+    
+    spawn = _pick_group_spawn_location(grid)
+    if not spawn:
+        return None
+    
+    x, y = spawn
+    raider = Colonist(x, y, color=(180, 50, 50))  # Dark red
+    raider.name = generate_colonist_name()
+    raider.faction = "raiders"
+    raider.is_hostile = True
+    
+    return raider

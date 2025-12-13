@@ -476,7 +476,7 @@ class Body:
                 if not part.is_internal and part.status != PartStatus.MISSING]
     
     def damage_part(self, part_id: str, amount: float, damage_type: str = "blunt",
-                    attacker_name: str = "", game_time: float = 0.0) -> Tuple[bool, str]:
+                    attacker_name: str = "", game_time: float = 0.0, defender_name: str = "") -> Tuple[bool, str]:
         """
         Damage a body part.
         
@@ -558,7 +558,10 @@ class Body:
                     self.cause_of_death = f"{part.name} destroyed"
                 log_msg = self.cause_of_death.capitalize() + "!"
                 if attacker_name:
-                    log_msg = f"{attacker_name} {attack_verb} {part_lower} - {log_msg}"
+                    if defender_name:
+                        log_msg = f"{attacker_name} {attack_verb} {defender_name} — {log_msg}"
+                    else:
+                        log_msg = f"{attacker_name} {attack_verb} {part_lower} - {log_msg}"
                 self.combat_log.append((game_time, log_msg))
                 return True, log_msg  # Fatal!
             else:
@@ -595,7 +598,10 @@ class Body:
         
         # Build full log message
         if attacker_name:
-            full_log = f"{attacker_name} {attack_verb} {part_lower} - {log_msg}"
+            if defender_name:
+                full_log = f"{attacker_name} {attack_verb} {defender_name} — {log_msg}"
+            else:
+                full_log = f"{attacker_name} {attack_verb} {part_lower} - {log_msg}"
         else:
             full_log = log_msg
         

@@ -824,6 +824,15 @@ class Colonist:
         if self.thought_cooldown > 0:
             self.thought_cooldown -= 1
     
+    def _check_injury_thoughts(self, game_tick: int) -> None:
+        """Generate thoughts about current injuries."""
+        from injury_thoughts import get_injury_thought
+        
+        result = get_injury_thought(self, game_tick)
+        if result:
+            thought_text, mood_effect = result
+            self.add_thought("combat", thought_text, mood_effect, game_tick=game_tick)
+    
     def _generate_environment_thought(self, sample: dict, game_tick: int) -> None:
         """Generate a thought based on current environment and preferences.
         
@@ -2061,6 +2070,69 @@ class Colonist:
             if grid.is_walkable(new_x, new_y, self.z):
                 self.x = new_x
                 self.y = new_y
+
+    def _chase_combat_target(self, grid: Grid, all_colonists: list = None) -> bool:
+        """If hostile or in combat, hunt/chase targets.
+        
+        Returns True if actively chasing (caller should skip other idle behavior).
+        """
+        from combat import is_hostile_to_anyone, is_hostile_to
+        
+        # If hostile but no target, find one (unlimited range)
+        if is_hostile_to_anyone(self) and not self.combat_target:
+            if all_colonists:
+                best_target = None
+                best_dist = float('inf')
+                for other in all_colonists:
+                    if other is self or other.is_dead:
+                        continue
+                    if is_hostile_to(self, other):
+                        dist = abs(self.x - other.x) + abs(self.y - other.y)
+                        if dist < best_dist:
+                            best_dist = dist
+                            best_target = other
+                if best_target:
+                    self.in_combat = True
+                    self.combat_target = best_target
+        
+        if not self.in_combat or not self.combat_target:
+            return False
+        
+        target = self.combat_target
+        if target.is_dead:
+            self.in_combat = False
+            self.combat_target = None
+            return False
+        
+        # Already adjacent - _update_combat handles the attack
+        dx = abs(self.x - target.x)
+        dy = abs(self.y - target.y)
+        if self.z == target.z and max(dx, dy) <= 1:
+            return True  # Stay here, combat system attacks
+        
+        # Move cooldown
+        if self.move_cooldown > 0:
+            self.move_cooldown -= 1
+            return True
+        
+        # Calculate path if needed
+        if not self.current_path:
+            self.current_path = self._calculate_path(grid, target.x, target.y, target.z)
+        
+        # Follow path
+        if self.current_path:
+            next_x, next_y, next_z = self.current_path[0]
+            if grid.is_walkable(next_x, next_y, next_z):
+                self.x = next_x
+                self.y = next_y
+                self.z = next_z
+                self.current_path.pop(0)
+                self.move_cooldown = self.move_speed
+            else:
+                # Path blocked, recalculate next tick
+                self.current_path = []
+        
+        return True
 
     def _try_take_job(self, grid: Grid = None) -> None:
         """Claim a job from the global queue if available.
@@ -3562,7 +3634,7 @@ class Colonist:
             self.add_thought("need", "Sleeping on the cold ground...", -0.2, game_tick=game_tick)
             print(f"[Sleep] {self.name} collapsed to sleep on the ground (no bed)")
 
-    def _heal_body(self) -> None:
+    def _heal_body(self, game_tick: int = 0) -> None:
         """Natural healing of body parts over time."""
         from body import Body, PartStatus
         
@@ -3598,6 +3670,10 @@ class Colonist:
                         part.status = PartStatus.FRACTURED
                     else:
                         part.status = PartStatus.CUT
+        
+        # Generate injury-aware thoughts (every ~30 seconds)
+        if game_tick > 0 and game_tick % 1800 == 0:
+            self._check_injury_thoughts(game_tick)
 
     def _move_to_sleep(self, grid: Grid) -> None:
         """Move towards sleep target (bed)."""
@@ -3867,7 +3943,7 @@ class Colonist:
         
         # Natural body healing (slow, every ~10 seconds)
         if game_tick % 600 == 0:
-            self._heal_body()
+            self._heal_body(game_tick)
         
         # If sleeping, skip other updates
         if self.is_sleeping:
@@ -3903,9 +3979,11 @@ class Colonist:
                         return
 
         if self.state == "idle":
-            self._try_take_job(grid)
-            if self.state == "idle":
-                self._maybe_wander_when_idle(grid)
+            # If chasing a combat target, don't take jobs or wander
+            if not self._chase_combat_target(grid, self._all_colonists):
+                self._try_take_job(grid)
+                if self.state == "idle":
+                    self._maybe_wander_when_idle(grid)
         elif self.state == "moving_to_job":
             self._move_towards_job(grid)
         elif self.state == "working":
@@ -3938,9 +4016,24 @@ class Colonist:
         world_cx = self.x * TILE_SIZE + TILE_SIZE // 2
         world_cy = self.y * TILE_SIZE + TILE_SIZE // 2 + self.fidget_offset
         
-        # Screen position (apply camera offset)
-        screen_cx = world_cx - camera_x
-        screen_cy = world_cy - camera_y
+        # Combat shake - jitter toward target when fighting
+        combat_offset_x = 0
+        combat_offset_y = 0
+        if self.in_combat and self.combat_target and not self.combat_target.is_dead:
+            # Shake toward target
+            target = self.combat_target
+            dx = target.x - self.x
+            dy = target.y - self.y
+            # Random jitter in target direction
+            shake = random.randint(-3, 3)
+            if dx != 0:
+                combat_offset_x = shake if dx > 0 else -shake
+            if dy != 0:
+                combat_offset_y = shake if dy > 0 else -shake
+        
+        # Screen position (apply camera offset + combat shake)
+        screen_cx = world_cx - camera_x + combat_offset_x
+        screen_cy = world_cy - camera_y + combat_offset_y
         
         # Use ether mode colors if enabled
         if ether_mode:
@@ -3992,19 +4085,23 @@ class Colonist:
                           (screen_cx + face_offset_x, head_y + face_offset_y), 1)
         
         # Job state ring around colonist
+        # Priority: combat > stuck > job state
         ring_color = None
-        if self.state == "idle":
+        if self.in_combat:
+            ring_color = (255, 50, 50)  # Bright red - fighting
+        elif self.stuck_timer > 15:
+            ring_color = (255, 100, 100)  # Dim red - stuck
+        elif self.state == "idle":
             ring_color = (100, 150, 255)  # Blue
         elif self.state in ("hauling", "moving_to_haul"):
             ring_color = (255, 220, 100)  # Yellow
         elif self.state in ("building", "moving_to_build", "salvaging", "moving_to_salvage", "harvesting", "moving_to_harvest"):
             ring_color = (100, 255, 150)  # Green
-        elif self.stuck_timer > 15:
-            ring_color = (255, 100, 100)  # Red (stuck)
         
         if ring_color:
-            # Draw thin ring around colonist
-            pygame.draw.circle(surface, ring_color, (screen_cx, screen_cy), 12, 1)
+            # Draw thin ring around colonist (thicker for combat)
+            thickness = 2 if self.in_combat else 1
+            pygame.draw.circle(surface, ring_color, (screen_cx, screen_cy), 12, thickness)
         
         # Draw carrying indicator if hauling
         if self.carrying is not None:

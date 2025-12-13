@@ -864,13 +864,14 @@ def main() -> None:
                         print(f"[Debug] Spawned work_gloves at ({c.x},{c.y},z={c.z})")
                         print(f"[Debug] World items: {get_all_world_items()}")
                 elif event.key == pygame.K_F11:
-                    # Debug: Print workstation status
-                    from buildings import _WORKSTATIONS, get_workstation_recipe
-                    print(f"[Debug] Registered workstations: {len(_WORKSTATIONS)}")
-                    for (x, y, z), ws in _WORKSTATIONS.items():
-                        recipe = get_workstation_recipe(x, y, z)
-                        recipe_name = recipe.get("name", "?") if recipe else "None"
-                        print(f"  ({x},{y},z={z}) type={ws.get('type')} recipe={recipe_name} reserved={ws.get('reserved')} working={ws.get('working')}")
+                    # Debug: Spawn a raider
+                    from wanderers import spawn_raider
+                    raider = spawn_raider(grid)
+                    if raider:
+                        colonists.append(raider)
+                        from notifications import add_notification, NotificationType
+                        add_notification(NotificationType.FIGHT_START, f"Raider: {raider.name}", duration=180)
+                        print(f"[Debug] Spawned raider: {raider.name} at ({raider.x}, {raider.y})")
                 elif event.key == pygame.K_F12:
                     # Debug: Toggle BERSERK MODE - everyone fights everyone
                     from combat import CombatStance
@@ -1096,8 +1097,8 @@ def main() -> None:
                 "cooked_meal": zones_module.get_total_stored("cooked_meal"),
             },
             "colonists": [{"name": c.name, "status": c.current_job.type if c.current_job else "Idle"} 
-                         for c in colonists if not c.is_dead],
-            "colonist_objects": [c for c in colonists if not c.is_dead],  # Actual colonist objects
+                         for c in colonists if not c.is_dead and getattr(c, 'faction', 'colony') == 'colony'],
+            "colonist_objects": [c for c in colonists if not c.is_dead and getattr(c, 'faction', 'colony') == 'colony'],  # Colony members only
             "current_tool": ui.get_build_mode(),
             "job_count": len(jobs_module.get_all_available_jobs()),
             "jobs_module": jobs_module,
@@ -1191,8 +1192,8 @@ def main() -> None:
             pygame.draw.rect(screen, (255, 255, 100), bg_rect, 2)
             screen.blit(pause_text, pause_rect)
         
-        # Check for colony lost (all colonists dead)
-        alive_colonists = [c for c in colonists if not c.is_dead]
+        # Check for colony lost (all colony members dead)
+        alive_colonists = [c for c in colonists if not c.is_dead and getattr(c, 'faction', 'colony') == 'colony']
         if len(alive_colonists) == 0:
             # Draw "Colony Lost" overlay
             overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)

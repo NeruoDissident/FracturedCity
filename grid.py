@@ -855,18 +855,43 @@ class Grid:
                     base_color = self._get_tile_color_variation(COLOR_TILE_GRASS, x, y, below_z, 12)
                 elif tile == "rock":
                     base_color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, below_z, 8)
-                elif tile == "sidewalk" or tile == "sidewalk_designated":
+                elif tile == "scorched":
+                    base_color = self._get_tile_color_variation(COLOR_TILE_SCORCHED, x, y, below_z, 6)
+                elif tile == "debris":
+                    base_color = self._get_tile_color_variation(COLOR_TILE_DEBRIS, x, y, below_z, 12)
+                elif tile == "weeds":
+                    base_color = self._get_tile_color_variation(COLOR_TILE_WEEDS, x, y, below_z, 10)
+                elif tile in ("sidewalk", "sidewalk_designated"):
                     base_color = COLOR_TILE_SIDEWALK
-                elif tile == "pavement" or tile == "pavement_designated":
-                    base_color = COLOR_TILE_PAVEMENT
+                elif tile in ("street", "street_cracked", "street_scar", "street_ripped"):
+                    base_color = COLOR_TILE_STREET
                 elif tile == "floor":
-                    base_color = COLOR_TILE_FLOOR
-                elif tile == "wall" or tile == "wall_finished":
-                    base_color = COLOR_TILE_WALL_FINISHED
+                    base_color = (140, 120, 90)
+                elif tile == "finished_floor":
+                    base_color = (160, 130, 90)
+                elif tile in ("wall", "finished_wall", "wall_advanced", "finished_wall_advanced"):
+                    base_color = COLOR_TILE_FINISHED_WALL
+                elif tile in ("door", "window", "finished_window", "window_tile"):
+                    base_color = COLOR_TILE_FINISHED_WALL
+                elif tile in ("building", "finished_building"):
+                    base_color = COLOR_TILE_FINISHED_BUILDING
                 elif tile == "roof":
-                    base_color = COLOR_TILE_ROOF
+                    base_color = (60, 40, 80)
+                elif tile in ("roof_access", "roof_floor"):
+                    base_color = (160, 130, 90)
+                elif tile.startswith("prop_"):
+                    if tile == "prop_barrel":
+                        base_color = COLOR_TILE_PROP_BARREL
+                    elif tile == "prop_sign":
+                        base_color = COLOR_TILE_PROP_SIGN
+                    elif tile == "prop_scrap":
+                        base_color = COLOR_TILE_PROP_SCRAP
+                    else:
+                        base_color = (70, 65, 60)
+                elif tile.startswith("finished_"):
+                    base_color = (90, 85, 80)
                 else:
-                    base_color = (60, 60, 70)  # Default dim color
+                    base_color = (60, 60, 70)
                 
                 # Dim the color to 40% brightness
                 dimmed = (base_color[0] * 4 // 10, base_color[1] * 4 // 10, base_color[2] * 4 // 10)

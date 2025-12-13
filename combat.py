@@ -39,18 +39,26 @@ def get_combat_power(colonist: "Colonist") -> float:
     """Calculate a colonist's combat effectiveness.
     
     Base power modified by:
-    - Health (wounded = weaker)
+    - Body health (injured parts = weaker)
     - Mood (stressed = weaker)
     - Traits (mercenary = stronger)
-    - Equipment (future: weapons)
+    - Equipment stats (focus, hazard_resist)
     
     Returns value typically 0.5 to 2.0
     """
     base_power = 1.0
     
-    # Health modifier (50% health = 75% power)
-    health_pct = colonist.health / 100.0
-    health_mod = 0.5 + (health_pct * 0.5)
+    # Body health modifier - use overall body health, not legacy HP
+    body = getattr(colonist, 'body', None)
+    if body:
+        body_health_pct = body.get_overall_health() / 100.0
+        # Also factor in blood loss
+        blood_loss_penalty = body.blood_loss / 200.0  # 100 blood loss = 0.5 penalty
+        health_mod = max(0.3, body_health_pct - blood_loss_penalty)
+    else:
+        # Fallback to legacy health if no body system
+        health_pct = colonist.health / 100.0
+        health_mod = 0.5 + (health_pct * 0.5)
     
     # Mood modifier
     mood_mods = {
@@ -88,14 +96,25 @@ def get_combat_power(colonist: "Colonist") -> float:
     if "afraid_of_sky" in quirks or "afraid_of_tight_spaces" in quirks:
         trait_mod -= 0.05  # Anxious
     
-    # Equipment bonus (future: actual weapons)
+    # Equipment stats - use actual equipment bonuses
     equip_mod = 1.0
-    equipment = getattr(colonist, 'equipment', {})
-    # For now, any equipment gives tiny bonus
-    equipped_count = sum(1 for v in equipment.values() if v is not None)
-    equip_mod += equipped_count * 0.02
+    if hasattr(colonist, 'get_equipment_stats'):
+        equip_stats = colonist.get_equipment_stats()
+        # Focus improves combat effectiveness (concentration, precision)
+        equip_mod += equip_stats.get("focus", 0.0)
+        # Hazard resist provides minor combat toughness
+        equip_mod += equip_stats.get("hazard_resist", 0.0) * 0.5
     
-    return base_power * health_mod * mood_mod * trait_mod * equip_mod
+    # Body injury penalties (damaged limbs reduce combat ability)
+    injury_mod = 1.0
+    if body:
+        body_mods = body.get_stat_modifiers()
+        # Walk speed penalty affects dodging/positioning
+        walk_penalty = body_mods.get("walk_speed", 0.0)
+        injury_mod -= abs(walk_penalty) * 0.5  # 20% walk penalty = 10% combat penalty
+        injury_mod = max(0.5, injury_mod)  # Floor at 50%
+    
+    return base_power * health_mod * mood_mod * trait_mod * equip_mod * injury_mod
 
 
 def get_combat_stance(colonist: "Colonist") -> CombatStance:
@@ -328,10 +347,14 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
             # Randomly choose blunt or cut damage
             damage_type = random.choice(["blunt", "blunt", "blunt", "cut"])  # 75% blunt, 25% cut
             is_fatal, body_log = body.damage_part(
-                target_part, body_damage, damage_type, attacker_name, game_tick
+                target_part, body_damage, damage_type, attacker_name, game_tick, defender_name
             )
             result["body_part"] = target_part
             result["body_log"] = body_log
+            
+            # Generate injury-aware thought for defender (if not fatal)
+            if not is_fatal and hasattr(defender, '_check_injury_thoughts'):
+                defender._check_injury_thoughts(game_tick)
             
             # Death from vital organ destruction or blood loss
             if is_fatal:
@@ -378,6 +401,15 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
                 defender.add_thought("combat", f"Had to back down from {attacker_name}.", -0.2, game_tick=game_tick)
                 attacker.add_thought("combat", f"{defender_name} backed off. Good.", 0.05, game_tick=game_tick)
                 
+                # Relationship changes - only for colony members (not raiders)
+                if getattr(attacker, 'faction', 'colony') == 'colony' and getattr(defender, 'faction', 'colony') == 'colony':
+                    from relationships import modify_relationship
+                    # Defender resents being beaten
+                    modify_relationship(defender, attacker, -5, "Lost a fight")
+                    # Attacker sometimes feels satisfied (50% chance)
+                    if random.random() < 0.5:
+                        modify_relationship(attacker, defender, 2, "Won a fight")
+                
                 return result
         else:
             # Include body part in message if available
@@ -390,6 +422,12 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
         # Add thoughts
         attacker.add_thought("combat", f"Fighting {defender_name}.", -0.1, game_tick=game_tick)
         defender.add_thought("combat", f"Attacked by {attacker_name}!", -0.2, game_tick=game_tick)
+        
+        # Relationship changes - only for colony members (not raiders)
+        if getattr(attacker, 'faction', 'colony') == 'colony' and getattr(defender, 'faction', 'colony') == 'colony':
+            from relationships import modify_relationship
+            # Defender resents being attacked (small penalty per hit)
+            modify_relationship(defender, attacker, -2, "Attacked me")
         
         # Stress from combat
         attacker.stress = min(10.0, attacker.stress + 0.5)
@@ -658,18 +696,59 @@ def check_trait_clash(colonist: "Colonist", other: "Colonist", game_tick: int) -
     if not has_conflict:
         return False
     
-    # Conflict exists - small chance of fight
-    combined_stress = (stress_a + stress_b) / 2
-    fight_chance = combined_stress * 0.001  # 0.1% per average stress point
+    # Get relationship status
+    rel = get_relationship(colonist, other)
     
-    if random.random() < fight_chance:
-        colonist.add_thought("combat", 
-            f"{other.name.split()[0]} just gets under my skin!", 
-            -0.15, game_tick=game_tick)
-        other.add_thought("combat", 
-            f"What is {colonist.name.split()[0]}'s problem?!", 
-            -0.15, game_tick=game_tick)
-        return True
+    # If relationship is already bad (< -10), escalate directly to fight
+    if rel["score"] < -10:
+        combined_stress = (stress_a + stress_b) / 2
+        fight_chance = combined_stress * 0.001  # 0.1% per average stress point
+        
+        if random.random() < fight_chance:
+            colonist.add_thought("combat", 
+                f"{other.name.split()[0]} just gets under my skin!", 
+                -0.15, game_tick=game_tick)
+            other.add_thought("combat", 
+                f"What is {colonist.name.split()[0]}'s problem?!", 
+                -0.15, game_tick=game_tick)
+            return True
+    else:
+        # First time or neutral relationship - try conflict conversation first
+        from conversations import generate_conflict_conversation, add_conversation
+        
+        # Check if they've had a conflict conversation recently
+        last_conflict = getattr(colonist, '_last_conflict_conversation', 0)
+        if game_tick - last_conflict < 1800:  # ~30 seconds cooldown
+            return False
+        
+        # Generate conflict conversation
+        result = generate_conflict_conversation(colonist, other)
+        if result:
+            speaker_line, listener_line = result
+            
+            # Add to chat log
+            add_conversation(
+                colonist.name, other.name,
+                speaker_line, listener_line,
+                game_tick, "conflict",
+                speaker_id=id(colonist), listener_id=id(other)
+            )
+            
+            # Add thoughts
+            colonist.add_thought("social", 
+                f"Had an unpleasant exchange with {other.name.split()[0]}.", 
+                -0.15, game_tick=game_tick)
+            other.add_thought("social", 
+                f"{colonist.name.split()[0]} is getting on my nerves.", 
+                -0.15, game_tick=game_tick)
+            
+            # Worsen relationship
+            from relationships import modify_relationship
+            modify_relationship(colonist, other, -5, "Argued")
+            
+            # Mark cooldown
+            colonist._last_conflict_conversation = game_tick
+            other._last_conflict_conversation = game_tick
     
     return False
 

@@ -2544,7 +2544,7 @@ class ColonistManagementPanel:
         elif self.current_tab == 5:
             self._draw_thoughts_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 6:
-            self._draw_chat_tab(surface, colonist, x, content_y, content_w, col1_x)
+            self._draw_chat_tab(surface, x, content_y, content_w, col1_x)
         elif self.current_tab == 7:
             self._draw_help_tab(surface, x, content_y, content_w, col1_x)
         
@@ -3186,14 +3186,80 @@ class ColonistManagementPanel:
         # COMBAT LOG - full width
         self._draw_section_header(surface, "COMBAT LOG", col1_x, bottom_y, (255, 80, 80))
         bottom_y += 14
-        combat_log = body.get_recent_combat_log(5)
+        combat_log = body.get_recent_combat_log(8)
         if combat_log:
+            max_text_width = full_width - 8
+            text_x = col1_x + 4
+            lines_drawn = 0
+            max_lines = max(1, (self._content_bottom - bottom_y) // line_h)
+
+            self_first = colonist.name.split()[0] if getattr(colonist, 'name', '') else ""
+
+            def _extract_name_tokens(msg: str) -> set:
+                tokens = set()
+                if not msg:
+                    return tokens
+                if msg.startswith("FIGHT STARTED:") and " vs " in msg:
+                    try:
+                        rest = msg.split(":", 1)[1].strip()
+                        left, right = rest.split(" vs ", 1)
+                        left = left.strip().split()[0]
+                        right = right.strip().split()[0]
+                        if left:
+                            tokens.add(left)
+                        if right:
+                            tokens.add(right)
+                    except Exception:
+                        pass
+                for prefix in ("KILLED:", "RETREATED:"):
+                    if msg.startswith(prefix):
+                        after = msg[len(prefix):].strip()
+                        if after:
+                            tokens.add(after.split()[0])
+                first_word = msg.strip().split()[0] if msg.strip() else ""
+                if first_word and first_word[0].isupper() and first_word.isalpha():
+                    tokens.add(first_word)
+                return tokens
+
+            def _draw_colored_line(line: str, x: int, y: int, name_tokens: set) -> None:
+                cursor_x = x
+                for word in line.split():
+                    color = muted_color
+                    if word in name_tokens:
+                        color = (120, 200, 255) if word == self_first else (255, 120, 120)
+                    surf = self.font_small.render(word + " ", True, color)
+                    surface.blit(surf, (cursor_x, y))
+                    cursor_x += surf.get_width()
+
             for entry in combat_log:
-                # More room now - allow longer entries
-                display = entry[:50] + ".." if len(entry) > 52 else entry
-                surf = self.font_small.render(display, True, muted_color)
-                surface.blit(surf, (col1_x + 4, bottom_y))
-                bottom_y += line_h
+                if lines_drawn >= max_lines:
+                    break
+
+                words = entry.split() if entry.strip() else [entry]
+                current_line = ""
+                name_tokens = _extract_name_tokens(entry)
+                for word in words:
+                    candidate = (current_line + " " + word).strip() if current_line else word
+                    if self.font_small.size(candidate)[0] <= max_text_width:
+                        current_line = candidate
+                        continue
+
+                    # Draw current line and start a new one
+                    if current_line:
+                        _draw_colored_line(current_line, text_x, bottom_y, name_tokens)
+                        bottom_y += line_h
+                        lines_drawn += 1
+                        if lines_drawn >= max_lines:
+                            break
+                    current_line = word
+
+                if lines_drawn >= max_lines:
+                    break
+
+                if current_line:
+                    _draw_colored_line(current_line, text_x, bottom_y, name_tokens)
+                    bottom_y += line_h
+                    lines_drawn += 1
         else:
             surf = self.font_small.render("No injuries recorded", True, muted_color)
             surface.blit(surf, (col1_x + 4, bottom_y))
@@ -3265,7 +3331,7 @@ class ColonistManagementPanel:
             surface.blit(no_rels, (col1_x + 8, content_y))
             return
         
-        # Show top relationships (sorted by score)
+        # Show all relationships (sorted by score)
         shown = 0
         for other, rel_data in relationships:
             if shown >= 12:  # Limit display
@@ -3273,16 +3339,12 @@ class ColonistManagementPanel:
                 surface.blit(more_text, (col1_x + 8, content_y))
                 break
             
-            # Skip strangers with 0 interactions
-            if rel_data["interactions"] == 0 and rel_data["score"] == 0:
-                continue
-            
             other_name = other.name.split()[0]
             label = get_relationship_label(colonist, other)
             score = rel_data["score"]
             color = get_relationship_color(colonist, other)
             
-            # Format: "Name (Label) +50"
+            # Format: "Name - Label (±score)"
             score_sign = "+" if score >= 0 else ""
             rel_text = f"• {other_name} - {label} ({score_sign}{score})"
             
@@ -3290,10 +3352,6 @@ class ColonistManagementPanel:
             surface.blit(rel_surf, (col1_x + 8, content_y))
             content_y += 14
             shown += 1
-        
-        if shown == 0:
-            no_rels = self.font_small.render("(no relationships yet)", True, muted_color)
-            surface.blit(no_rels, (col1_x + 8, content_y))
     
     def _draw_thoughts_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
         """Draw the Thoughts tab - colonist's internal monologue."""
@@ -3371,59 +3429,100 @@ class ColonistManagementPanel:
                 legend_x = col1_x
                 legend_y += 12
     
-    def _draw_chat_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
-        """Draw the Chat tab - colony-wide conversation log."""
+    def _draw_chat_tab(self, surface, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Chat tab - per-colonist conversation log."""
         from conversations import get_conversation_log
         
         muted_color = (140, 140, 150)
         header_color = (180, 200, 220)
-        speaker_color = (200, 180, 255)
-        listener_color = (180, 220, 200)
+        my_color = (200, 150, 255)  # Purple for this colonist
+        other_color = (150, 255, 200)  # Cyan/green for others
+        
+        colonist = self.current_colonist
+        if not colonist:
+            return
         
         # Header
-        self._draw_section_header(surface, "Colony Chat Log", col1_x, content_y, header_color)
+        self._draw_section_header(surface, "Chat Log", col1_x, content_y, header_color)
         content_y += 18
         
-        # Get recent conversations
-        conversations = get_conversation_log(15)  # Show up to 15 conversations
+        # Get recent conversations from this colonist's perspective
+        conversations = get_conversation_log(id(colonist), 15)  # Show up to 15 conversations
         
         if not conversations:
             no_chat = self.font_small.render("(no conversations yet)", True, muted_color)
             surface.blit(no_chat, (col1_x, content_y))
             return
         
-        # Draw each conversation
+        # Draw each conversation from this colonist's perspective
         max_text_width = w - 40
+        colonist_first_name = colonist.name.split()[0]
+        line_h = 13
+        
+        def wrap_and_draw_line(text: str, start_x: int, start_y: int, color: tuple, max_width: int) -> int:
+            """Wrap text and draw it, returning the final y position."""
+            words = text.split()
+            current_line = ""
+            y = start_y
+            
+            for word in words:
+                candidate = (current_line + " " + word).strip() if current_line else word
+                if self.font_small.size(candidate)[0] <= max_width:
+                    current_line = candidate
+                else:
+                    # Draw current line and start a new one
+                    if current_line:
+                        surf = self.font_small.render(current_line, True, color)
+                        surface.blit(surf, (start_x, y))
+                        y += line_h
+                        if y > 520:
+                            return y
+                    current_line = word
+            
+            # Draw final line
+            if current_line:
+                surf = self.font_small.render(current_line, True, color)
+                surface.blit(surf, (start_x, y))
+                y += line_h
+            
+            return y
+        
         for convo in conversations:
-            speaker = convo.get("speaker", "???").split()[0]  # First name
-            listener = convo.get("listener", "???").split()[0]
-            speaker_line = convo.get("speaker_line", "")
-            listener_line = convo.get("listener_line", "")
-            
-            # Speaker line
-            speaker_text = f"{speaker}: {speaker_line}"
-            # Truncate if too long
-            while self.font_small.size(speaker_text)[0] > max_text_width and len(speaker_text) > 20:
-                speaker_text = speaker_text[:-4] + "..."
-            
-            speaker_surf = self.font_small.render(speaker_text, True, speaker_color)
-            surface.blit(speaker_surf, (col1_x + 4, content_y))
-            content_y += 13
-            
-            # Listener response (indented)
-            listener_text = f"{listener}: {listener_line}"
-            while self.font_small.size(listener_text)[0] > max_text_width - 10 and len(listener_text) > 20:
-                listener_text = listener_text[:-4] + "..."
-            
-            listener_surf = self.font_small.render(listener_text, True, listener_color)
-            surface.blit(listener_surf, (col1_x + 14, content_y))
-            content_y += 15
-            
-            # Stop if we run out of space
             if content_y > 520:
                 more_text = self.font_small.render("...", True, muted_color)
                 surface.blit(more_text, (col1_x, content_y))
                 break
+            
+            other_name = convo.get("other_name", "???").split()[0]  # First name
+            my_line = convo.get("my_line", "")
+            their_line = convo.get("their_line", "")
+            is_speaker = convo.get("is_speaker", True)
+            
+            # If this colonist spoke first, show their line first
+            if is_speaker:
+                # My line (purple)
+                my_text = f"{colonist_first_name}: {my_line}"
+                content_y = wrap_and_draw_line(my_text, col1_x + 4, content_y, my_color, max_text_width)
+                
+                if content_y > 520:
+                    break
+                
+                # Their response (cyan/green, indented)
+                their_text = f"{other_name}: {their_line}"
+                content_y = wrap_and_draw_line(their_text, col1_x + 14, content_y, other_color, max_text_width - 10)
+                content_y += 2  # Small gap between conversations
+            else:
+                # They spoke first (cyan/green)
+                their_text = f"{other_name}: {their_line}"
+                content_y = wrap_and_draw_line(their_text, col1_x + 4, content_y, other_color, max_text_width)
+                
+                if content_y > 520:
+                    break
+                
+                # My response (purple, indented)
+                my_text = f"{colonist_first_name}: {my_line}"
+                content_y = wrap_and_draw_line(my_text, col1_x + 14, content_y, my_color, max_text_width - 10)
+                content_y += 2  # Small gap between conversations
     
     def _draw_help_tab(self, surface, x: int, content_y: int, w: int, col1_x: int) -> None:
         """Draw the Help tab - compact stat reference."""
