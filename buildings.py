@@ -18,6 +18,15 @@ import zones
 
 Coord3D = Tuple[int, int, int]  # (x, y, z)
 
+# Debug mode - free building without material requirements
+FREE_BUILD_MODE = False
+
+def toggle_free_build_mode() -> bool:
+    """Toggle free build mode. Returns new state."""
+    global FREE_BUILD_MODE
+    FREE_BUILD_MODE = not FREE_BUILD_MODE
+    return FREE_BUILD_MODE
+
 # Building type definitions
 # Each type specifies: name, materials needed, work to construct, drag constraints
 BUILDING_TYPES = {
@@ -145,6 +154,16 @@ BUILDING_TYPES = {
             {"id": "memory_locket", "name": "Memory Locket", "input": {"metal": 1, "mineral": 1}, "output_item": "memory_locket", "work_time": 60},
             {"id": "signal_stone", "name": "Signal Stone", "input": {"mineral": 2, "power": 1}, "output_item": "signal_stone", "work_time": 80},
         ],
+    },
+    # === Military/Training ===
+    "barracks": {
+        "name": "Barracks",
+        "tile_type": "barracks",
+        "materials": {"wood": 4, "metal": 2},
+        "construction_work": 120,
+        "walkable": False,
+        "workstation": True,  # Acts like a workstation for training job spawning
+        "training_station": True,  # Special flag for training
     },
 }
 
@@ -323,6 +342,7 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
         "gutter_forge", "finished_gutter_forge",
         "skinshop_loom", "finished_skinshop_loom",
         "cortex_spindle", "finished_cortex_spindle",
+        "barracks", "finished_barracks",
         "bridge", "finished_bridge",
         "fire_escape", "fire_escape_platform",
         "roof",  # Must use Allow tool first
@@ -357,10 +377,18 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
         zones.mark_tile_for_removal(x, y, z)
     
     # Create construction site - materials will be delivered by supply jobs
+    # In FREE_BUILD_MODE, skip material requirements
+    if FREE_BUILD_MODE:
+        materials_needed = {}
+        materials_delivered = {}
+    else:
+        materials_needed = building_def["materials"].copy()
+        materials_delivered = {k: 0 for k in building_def["materials"]}
+    
     site = {
         "type": building_type,
-        "materials_needed": building_def["materials"].copy(),
-        "materials_delivered": {k: 0 for k in building_def["materials"]},
+        "materials_needed": materials_needed,
+        "materials_delivered": materials_delivered,
         "awaiting_stockpile_clear": zones.is_pending_removal(x, y, z),
         "z": z,
     }
@@ -513,6 +541,27 @@ def place_cortex_spindle(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     if not can_place_cortex_spindle(grid, x, y, z):
         return False
     return place_building(grid, x, y, "cortex_spindle", z)
+
+
+def can_place_barracks(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Check if a Barracks can be placed at (x, y, z).
+    
+    Requirements:
+    - Must be on a floor tile only (anarchist mode - place anywhere)
+    """
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "roof_floor", "roof_access"):
+        print(f"[Build Debug] Barracks: Tile at ({x},{y}) is '{tile}', need floor")
+        return False
+    
+    return True
+
+
+def place_barracks(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a Barracks construction site at (x, y, z)."""
+    if not can_place_barracks(grid, x, y, z):
+        return False
+    return place_building(grid, x, y, "barracks", z)
 
 
 def place_workstation_generic(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -> bool:
@@ -1413,6 +1462,10 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
         else:
             job_category = "crafting"
         
+        # Calculate dynamic pressure for cooking jobs
+        from job_pressure import get_job_pressure
+        pressure = get_job_pressure(job_category)
+        
         work_time = recipe.get("work_time", 60)
         jobs_module.add_job(
             "crafting",
@@ -1420,6 +1473,7 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
             required=work_time,
             category=job_category,
             z=z,
+            pressure=pressure,
         )
         mark_crafting_job_created(x, y, z)
         jobs_created += 1
@@ -1465,11 +1519,32 @@ def get_save_state() -> dict:
         }
     
     # Doors and windows
-    doors_data = {f"{d[0]},{d[1]},{d[2]}": {"open": _DOOR_STATES.get(d, False), "timer": _DOOR_TIMERS.get(d, 0)} for d in _DOOR_STATES}
-    windows_data = {f"{w[0]},{w[1]},{w[2]}": {"open": _WINDOW_STATES.get(w, False), "timer": _WINDOW_TIMERS.get(w, 0)} for w in _WINDOW_STATES}
+    doors_data = {}
+    for coord, door in _DOOR_STATES.items():
+        key = f"{coord[0]},{coord[1]},{coord[2]}"
+        doors_data[key] = {
+            "open": bool(door.get("open", False)),
+            "close_timer": int(door.get("close_timer", 0)),
+        }
+
+    windows_data = {}
+    for coord, window in _WINDOW_STATES.items():
+        key = f"{coord[0]},{coord[1]},{coord[2]}"
+        windows_data[key] = {
+            "open": bool(window.get("open", False)),
+            "close_timer": int(window.get("close_timer", 0)),
+        }
     
     # Fire escapes
-    fire_escapes_data = [list(fe) for fe in _FIRE_ESCAPES]
+    fire_escapes_data = {}
+    for coord, escape in _FIRE_ESCAPES.items():
+        key = f"{coord[0]},{coord[1]},{coord[2]}"
+        fire_escapes_data[key] = {
+            "platform_dir": escape.get("platform_dir"),
+            "platform_pos": escape.get("platform_pos"),
+            "z": escape.get("z", coord[2]),
+            "complete": escape.get("complete", False),
+        }
     
     return {
         "construction_sites": sites_data,
@@ -1482,15 +1557,13 @@ def get_save_state() -> dict:
 
 def load_save_state(state: dict):
     """Restore buildings state from save."""
-    global _CONSTRUCTION_SITES, _WORKSTATIONS, _DOOR_STATES, _DOOR_TIMERS, _WINDOW_STATES, _WINDOW_TIMERS, _FIRE_ESCAPES
+    global _CONSTRUCTION_SITES, _WORKSTATIONS, _DOOR_STATES, _WINDOW_STATES, _FIRE_ESCAPES
     global _PENDING_SUPPLY_JOBS, _PENDING_CRAFTING_JOBS
     
     _CONSTRUCTION_SITES.clear()
     _WORKSTATIONS.clear()
     _DOOR_STATES.clear()
-    _DOOR_TIMERS.clear()
     _WINDOW_STATES.clear()
-    _WINDOW_TIMERS.clear()
     _FIRE_ESCAPES.clear()
     _PENDING_SUPPLY_JOBS.clear()
     _PENDING_CRAFTING_JOBS.clear()
@@ -1520,16 +1593,27 @@ def load_save_state(state: dict):
     for key, door_data in state.get("doors", {}).items():
         parts = key.split(",")
         coord = (int(parts[0]), int(parts[1]), int(parts[2]))
-        _DOOR_STATES[coord] = door_data.get("open", False)
-        _DOOR_TIMERS[coord] = door_data.get("timer", 0)
+        _DOOR_STATES[coord] = {
+            "open": bool(door_data.get("open", False)),
+            "close_timer": int(door_data.get("close_timer", door_data.get("timer", 0))),
+        }
     
     # Restore windows
     for key, window_data in state.get("windows", {}).items():
         parts = key.split(",")
         coord = (int(parts[0]), int(parts[1]), int(parts[2]))
-        _WINDOW_STATES[coord] = window_data.get("open", False)
-        _WINDOW_TIMERS[coord] = window_data.get("timer", 0)
+        _WINDOW_STATES[coord] = {
+            "open": bool(window_data.get("open", False)),
+            "close_timer": int(window_data.get("close_timer", window_data.get("timer", 0))),
+        }
     
     # Restore fire escapes
-    for fe in state.get("fire_escapes", []):
-        _FIRE_ESCAPES.add(tuple(fe))
+    for key, escape_data in state.get("fire_escapes", {}).items():
+        parts = key.split(",")
+        coord = (int(parts[0]), int(parts[1]), int(parts[2]))
+        _FIRE_ESCAPES[coord] = {
+            "platform_dir": escape_data.get("platform_dir"),
+            "platform_pos": escape_data.get("platform_pos"),
+            "z": escape_data.get("z", coord[2]),
+            "complete": escape_data.get("complete", False),
+        }

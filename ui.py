@@ -73,6 +73,19 @@ class Button:
     
     def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
         """Draw the button."""
+        # Debug: Force bright color for Rooms button and skip normal rendering
+        if self.text == "Rooms":
+            pygame.draw.rect(surface, (60, 65, 75), self.rect, border_radius=6)  # Normal button color
+            pygame.draw.rect(surface, (100, 100, 110), self.rect, 1, border_radius=6)  # Border
+            # Draw text
+            kb_surface = font.render(f"[{self.keybind}]", True, (140, 180, 220))
+            kb_rect = kb_surface.get_rect(midleft=(self.rect.left + 8, self.rect.centery))
+            surface.blit(kb_surface, kb_rect)
+            text_surface = font.render(self.text, True, (220, 220, 230))
+            text_rect = text_surface.get_rect(midleft=(kb_rect.right + 6, self.rect.centery))
+            surface.blit(text_surface, text_rect)
+            return  # Skip normal rendering
+        
         # Background color based on state
         if self.active:
             color = COLOR_UI_BUTTON_ACTIVE
@@ -503,6 +516,18 @@ class ActionBar:
         {"id": "roof", "name": "Roof", "keybind": "3"},
     ]
     
+    # Rooms - manual designation system
+    ROOMS_MENU = [
+        {"id": "room_bedroom", "name": "Bedroom", "keybind": "1"},
+        {"id": "room_kitchen", "name": "Kitchen", "keybind": "2"},
+        {"id": "room_workshop", "name": "Workshop", "keybind": "3"},
+        {"id": "room_barracks", "name": "Barracks", "keybind": "4"},
+        {"id": "room_prison", "name": "Prison", "keybind": "5"},
+        {"id": "room_hospital", "name": "Hospital", "keybind": "6"},
+        {"id": "room_rec_room", "name": "Rec Room", "keybind": "7"},
+        {"id": "room_dining_hall", "name": "Dining Hall", "keybind": "8"},
+    ]
+    
     def __init__(self):
         self.font: Optional[pygame.font.Font] = None
         
@@ -606,6 +631,7 @@ class ActionBar:
             ("access", "Access", "E"),  # E for Entry/Exit points
             ("stations", "Stations", "T"),
             ("furniture", "Furniture", "R"),  # R for fुRniture
+            ("rooms", "Rooms", "M"),  # M for rooM
             ("zone", "Zone", "Z"),
             ("demolish", "Demolish", "X"),
             ("salvage", "Salvage", "V"),  # V for salVage
@@ -646,7 +672,13 @@ class ActionBar:
         self.submenus["access"] = SubMenu(self.ACCESS_MENU, self.main_buttons["access"])
         self.submenus["stations"] = SubMenu(self.STATIONS_MENU, self.main_buttons["stations"])
         self.submenus["furniture"] = SubMenu(self.FURNITURE_MENU, self.main_buttons["furniture"])
+        self.submenus["rooms"] = SubMenu(self.ROOMS_MENU, self.main_buttons["rooms"])
         self.submenus["zone"] = SubMenu(self.ZONE_MENU, self.main_buttons["zone"])
+        
+        # Debug: Print button info with positions
+        print(f"[UI] Created {len(self.main_buttons)} buttons:")
+        for btn_id, btn in self.main_buttons.items():
+            print(f"  {btn_id:12} x={btn.rect.x:4} y={btn.rect.y:4} w={btn.rect.width:3} text='{btn.text}'")
         
         # No submenus needed for demolish/salvage/harvest - they're direct tools
     
@@ -726,6 +758,13 @@ class ActionBar:
                 self.cancel_tool()
             else:
                 self._open_menu("furniture")
+            return True
+        
+        if key == pygame.K_m:
+            if self.active_menu == "rooms":
+                self.cancel_tool()
+            else:
+                self._open_menu("rooms")
             return True
         
         if key == pygame.K_z:
@@ -893,8 +932,16 @@ class ActionBar:
             surface.blit(hint_surface, hint_rect)
         
         # Draw main buttons
-        for btn in self.main_buttons.values():
-            btn.draw(surface, self.font)
+        for btn_id in ["build", "floors", "access", "stations", "furniture", "rooms", "zone", "demolish", "salvage", "harvest"]:
+            if btn_id in self.main_buttons:
+                try:
+                    self.main_buttons[btn_id].draw(surface, self.font)
+                except Exception as e:
+                    print(f"[UI DRAW ERROR] Failed to draw button '{btn_id}': {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"[UI DRAW ERROR] Button '{btn_id}' missing from main_buttons dict!")
         
         # Draw submenus with tooltips
         for menu in self.submenus.values():
@@ -2110,8 +2157,8 @@ class ColonistJobTagsPanel:
             # Two columns for compact display
             col1 = [
                 f"Int:{recent.get('interference', 0.0):.1f}",
-                f"Prs:{recent.get('pressure', 0.0):.1f}",
                 f"Ech:{recent.get('echo', 0.0):.1f}",
+                f"Itg:{recent.get('integrity', 1.0):.1f}",
             ]
             col2 = [
                 f"Itg:{recent.get('integrity', 1.0):.1f}",
@@ -2136,7 +2183,6 @@ class ColonistJobTagsPanel:
             affinities = [
                 ("Int", self.colonist.affinity_interference),
                 ("Ech", self.colonist.affinity_echo),
-                ("Prs", self.colonist.affinity_pressure),
                 ("Itg", self.colonist.affinity_integrity),
                 ("Out", self.colonist.affinity_outside),
                 ("Crw", self.colonist.affinity_crowding),
@@ -2253,7 +2299,7 @@ class ColonistManagementPanel:
     ]
     
     # Tab definitions - short cyberpunk names to fit
-    TABS = ["Status", "Bio", "Body", "Links", "Stats", "Mind", "Chat", "Help"]
+    TABS = ["Status", "Bio", "Body", "Links", "Stats", "Drives", "Mind", "Chat", "Help"]
     
     def __init__(self):
         self.visible = False
@@ -2542,10 +2588,12 @@ class ColonistManagementPanel:
         elif self.current_tab == 4:
             self._draw_stats_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 5:
-            self._draw_thoughts_tab(surface, colonist, x, content_y, content_w, col1_x)
+            self._draw_drives_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 6:
-            self._draw_chat_tab(surface, x, content_y, content_w, col1_x)
+            self._draw_thoughts_tab(surface, colonist, x, content_y, content_w, col1_x)
         elif self.current_tab == 7:
+            self._draw_chat_tab(surface, x, content_y, content_w, col1_x)
+        elif self.current_tab == 8:
             self._draw_help_tab(surface, x, content_y, content_w, col1_x)
         
         # Draw navigation buttons (shared by all tabs)
@@ -2606,6 +2654,28 @@ class ColonistManagementPanel:
         stress_color = (200, 100, 100) if stress_val > 2 else (200, 200, 100) if stress_val > 0 else (100, 150, 200)
         stress_display = (stress_val + 10) / 20 * 100  # Map -10..10 to 0..100
         self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, stress_display, 100, stress_color)
+        content_y += 32
+        
+        # Role
+        role = getattr(colonist, 'role', 'generalist')
+        role_display = role.capitalize()
+        role_text = self.font_small.render(f"Role: {role_display}", True, (200, 200, 255))
+        surface.blit(role_text, (col1_x + 8, content_y))
+        content_y += 28
+        
+        # Needs of the Many
+        self._draw_section_header(surface, "Needs of the Many", col1_x, content_y, section_color)
+        content_y += 20
+        needs_val = getattr(colonist, 'needs_of_the_many', 5)
+        # Color: Red (1-3 selfish), Yellow (4-7 moderate), Green (8-10 collectivist)
+        if needs_val <= 3:
+            needs_color = (255, 100, 100)
+        elif needs_val <= 7:
+            needs_color = (255, 200, 100)
+        else:
+            needs_color = (100, 255, 100)
+        needs_display = (needs_val / 10.0) * 100  # Map 1-10 to 0-100
+        self._draw_stat_bar(surface, col1_x + 8, content_y, bar_width, needs_display, 100, needs_color)
         content_y += 40
         
         # === Preferences Section ===
@@ -2613,19 +2683,29 @@ class ColonistManagementPanel:
         content_y += 26
         
         preferences = getattr(colonist, 'preferences', {})
-        pref_items = [
-            ("Outside", preferences.get('likes_outside', 0.0)),
-            ("Integrity", preferences.get('likes_integrity', 0.0)),
-            ("Interference", preferences.get('likes_interference', 0.0)),
-            ("Echo", preferences.get('likes_echo', 0.0)),
-            ("Pressure", preferences.get('likes_pressure', 0.0)),
-            ("Crowding", preferences.get('likes_crowding', 0.0)),
-        ]
         
-        for pref_name, pref_val in pref_items:
-            pref_color = (100, 200, 100) if pref_val > 0.5 else (200, 100, 100) if pref_val < -0.5 else (150, 150, 150)
-            pref_text = self.font_small.render(f"{pref_name}: {pref_val:+.1f}", True, pref_color)
-            surface.blit(pref_text, (col1_x + 8, content_y))
+        # Only show preferences that are non-zero (colonist actually has this trait)
+        pref_display = {
+            "Outside": preferences.get('likes_outside', 0.0),
+            "Integrity": preferences.get('likes_integrity', 0.0),
+            "Interference": preferences.get('likes_interference', 0.0),
+            "Echo": preferences.get('likes_echo', 0.0),
+            "Crowding": preferences.get('likes_crowding', 0.0),
+        }
+        
+        # Filter to only non-zero preferences
+        active_prefs = [(name, val) for name, val in pref_display.items() if abs(val) > 0.1]
+        
+        if active_prefs:
+            for pref_name, pref_val in active_prefs:
+                pref_color = (100, 200, 100) if pref_val > 0.5 else (200, 100, 100) if pref_val < -0.5 else (150, 150, 150)
+                pref_text = self.font_small.render(f"{pref_name}: {pref_val:+.1f}", True, pref_color)
+                surface.blit(pref_text, (col1_x + 8, content_y))
+                content_y += 24
+        else:
+            # No strong preferences yet
+            none_text = self.font_small.render("(no strong preferences)", True, muted_color)
+            surface.blit(none_text, (col1_x + 8, content_y))
             content_y += 24
         
         content_y += 28
@@ -2679,7 +2759,7 @@ class ColonistManagementPanel:
             self._draw_inventory_slot(surface, slot_x, slot_y, inv_slot_size, item)
         right_y += 2 * (inv_slot_size + inv_gap) + 20
         
-        # Mood display
+        # Mood display (simplified - details in Drives tab)
         self._draw_section_header(surface, "Mood", col2_x, right_y, (255, 180, 220))
         right_y += 22
         
@@ -2693,7 +2773,13 @@ class ColonistManagementPanel:
         
         score_surf = self.font_small.render(f"({mood_score:+.1f})", True, muted_color)
         surface.blit(score_surf, (col2_x + 8 + mood_surf.get_width() + 8, right_y + 2))
-        right_y += 40
+        right_y += 26
+        
+        # Link to Drives tab for details
+        details_text = "(See 'Drives' tab for details)"
+        details_surf = self.font_small.render(details_text, True, muted_color)
+        surface.blit(details_surf, (col2_x + 8, right_y))
+        right_y += 30
         
         # === Job Tags Section - spread out vertically ===
         self._draw_section_header(surface, "Work Assignments", col2_x, right_y, (180, 220, 180))
@@ -2766,6 +2852,59 @@ class ColonistManagementPanel:
                 pygame.Rect(slot_x, slot_y, slot_width, slot_height),
                 item
             )
+    
+    def _draw_drives_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
+        """Draw the Drives tab - ONLY unmet needs that require action."""
+        muted_color = (140, 140, 150)
+        
+        # Collect ONLY unmet needs
+        needs = []
+        
+        # === Bed Need ===
+        try:
+            from beds import get_colonist_bed
+            colonist_id = id(colonist)
+            bed_pos = get_colonist_bed(colonist_id)
+            
+            if bed_pos is None:
+                needs.append(("Needs: Assigned bed", (200, 100, 100)))
+        except Exception:
+            pass
+        
+        # === Sleep Need ===
+        tiredness = getattr(colonist, 'tiredness', 0.0)
+        if tiredness > 60:
+            needs.append(("Needs: Sleep", (200, 100, 100)))
+        
+        # === Social Need ===
+        try:
+            from relationships import get_all_relationships
+            relationships = get_all_relationships(colonist, self.colonists)
+            
+            if not relationships:
+                needs.append(("Needs: Social interaction", (200, 200, 100)))
+        except Exception:
+            pass
+        
+        # === Hunger Need ===
+        hunger = getattr(colonist, 'hunger', 0.0)
+        if hunger > 40:
+            needs.append(("Needs: Food", (200, 100, 100)))
+        
+        # Future needs will be added here as systems are implemented
+        # (Recreation, prayer/spirituality, crafting urges, combat training, etc.)
+        
+        # Draw needs list or "All needs met" message
+        if needs:
+            for need_text, need_color in needs:
+                need_surf = self.font_small.render(f"• {need_text}", True, need_color)
+                surface.blit(need_surf, (col1_x + 8, content_y))
+                content_y += 13
+        else:
+            # No unmet needs
+            satisfied_text = "All needs met"
+            satisfied_surf = self.font_small.render(satisfied_text, True, (100, 200, 100))
+            surface.blit(satisfied_surf, (col1_x + 8, content_y))
     
     def _draw_stats_tab(self, surface, colonist, x: int, content_y: int, w: int, col1_x: int) -> None:
         """Draw the Stats tab - D&D style wall of text with all stats."""
@@ -3447,7 +3586,10 @@ class ColonistManagementPanel:
         content_y += 18
         
         # Get recent conversations from this colonist's perspective
-        conversations = get_conversation_log(id(colonist), 15)  # Show up to 15 conversations
+        colonist_key = getattr(colonist, "uid", None)
+        if colonist_key is None:
+            colonist_key = id(colonist)
+        conversations = get_conversation_log(colonist_key, 15)  # Show up to 15 conversations
         
         if not conversations:
             no_chat = self.font_small.render("(no conversations yet)", True, muted_color)
@@ -3892,10 +4034,10 @@ class VisitorPanel(ColonistManagementPanel):
     ACCEPT_TEXT = ">> JACK IN <<"
     DENY_TEXT = "// FLATLINE //"
     
-    # Use same tabs as parent but exclude Chat and Help (indices 6, 7)
-    # Parent: ["Status", "Bio", "Body", "Links", "Stats", "Mind", "Chat", "Help"]
-    # We keep indices 0-5 so content drawing works correctly
-    TABS = ["Status", "Bio", "Body", "Links", "Stats", "Mind"]
+    # Use same tabs as parent but exclude Chat and Help (indices 7, 8)
+    # Parent: ["Status", "Bio", "Body", "Links", "Stats", "Drives", "Mind", "Chat", "Help"]
+    # We keep indices 0-6 so content drawing works correctly
+    TABS = ["Status", "Bio", "Body", "Links", "Stats", "Drives", "Mind"]
     
     def __init__(self):
         super().__init__()
@@ -4076,19 +4218,29 @@ class VisitorPanel(ColonistManagementPanel):
         content_y += 18
         
         preferences = getattr(colonist, 'preferences', {})
-        pref_items = [
-            ("Outside", preferences.get('likes_outside', 0.0)),
-            ("Integrity", preferences.get('likes_integrity', 0.0)),
-            ("Interference", preferences.get('likes_interference', 0.0)),
-            ("Echo", preferences.get('likes_echo', 0.0)),
-            ("Pressure", preferences.get('likes_pressure', 0.0)),
-            ("Crowding", preferences.get('likes_crowding', 0.0)),
-        ]
         
-        for pref_name, pref_val in pref_items:
-            pref_color = (100, 200, 100) if pref_val > 0.5 else (200, 100, 100) if pref_val < -0.5 else (150, 150, 150)
-            pref_text = self.font_small.render(f"{pref_name}: {pref_val:+.1f}", True, pref_color)
-            surface.blit(pref_text, (col1_x + 8, content_y))
+        # Only show preferences that are non-zero (colonist actually has this trait)
+        pref_display = {
+            "Outside": preferences.get('likes_outside', 0.0),
+            "Integrity": preferences.get('likes_integrity', 0.0),
+            "Interference": preferences.get('likes_interference', 0.0),
+            "Echo": preferences.get('likes_echo', 0.0),
+            "Crowding": preferences.get('likes_crowding', 0.0),
+        }
+        
+        # Filter to only non-zero preferences
+        active_prefs = [(name, val) for name, val in pref_display.items() if abs(val) > 0.1]
+        
+        if active_prefs:
+            for pref_name, pref_val in active_prefs:
+                pref_color = (100, 200, 100) if pref_val > 0.5 else (200, 100, 100) if pref_val < -0.5 else (150, 150, 150)
+                pref_text = self.font_small.render(f"{pref_name}: {pref_val:+.1f}", True, pref_color)
+                surface.blit(pref_text, (col1_x + 8, content_y))
+                content_y += 14
+        else:
+            # No strong preferences yet
+            none_text = self.font_small.render("(no strong preferences)", True, (140, 140, 150))
+            surface.blit(none_text, (col1_x + 8, content_y))
             content_y += 14
         
         content_y += 10

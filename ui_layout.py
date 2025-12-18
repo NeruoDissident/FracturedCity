@@ -860,23 +860,26 @@ class LeftSidebar:
                     break
     
     def _draw_rooms_content(self, surface: pygame.Surface, start_y: int, game_data: dict) -> None:
-        """Draw rooms list."""
-        import rooms
+        """Draw rooms list - using manual room system."""
+        import room_system
         
         y = start_y
         header_surf = self.font_small.render("ROOMS", True, COLOR_ACCENT_CYAN)
         surface.blit(header_surf, (12, y))
         y += 20
         
-        all_rooms = rooms.get_all_rooms()
+        all_rooms = room_system.get_all_rooms()
         
         if not all_rooms:
-            empty_surf = self.font_small.render("No rooms detected", True, COLOR_TEXT_DIM)
+            empty_surf = self.font_small.render("No rooms created", True, COLOR_TEXT_DIM)
             surface.blit(empty_surf, (12, y))
+            y += 18
+            hint_surf = self.font_tiny.render("Press M to create rooms", True, COLOR_TEXT_DIM)
+            surface.blit(hint_surf, (12, y))
         else:
             room_counts = {}
-            for room in all_rooms:
-                rtype = room.get("type", "Unknown")
+            for room_data in all_rooms.values():
+                rtype = room_data.get("type", "Unknown")
                 room_counts[rtype] = room_counts.get(rtype, 0) + 1
             
             for rtype, count in sorted(room_counts.items()):
@@ -1048,6 +1051,7 @@ class BottomBuildBar:
         ("Access", "E", "access"),
         ("Stations", "T", "stations"),
         ("Furniture", "R", "furniture"),
+        ("Rooms", "M", "rooms"),
         ("Zone", "Z", "zone"),
         ("Demolish", "X", "demolish"),
         ("Salvage", "V", "salvage"),
@@ -1068,6 +1072,16 @@ class BottomBuildBar:
             {"id": "window", "name": "Window", "cost": "1 wood, 1 mineral"},
             {"id": "fire_escape", "name": "Fire Escape", "cost": "1 wood, 1 metal"},
             {"id": "bridge", "name": "Bridge", "cost": "2 wood, 1 metal"},
+        ],
+        "rooms": [
+            {"id": "room_bedroom", "name": "Bedroom", "cost": ""},
+            {"id": "room_kitchen", "name": "Kitchen", "cost": ""},
+            {"id": "room_workshop", "name": "Workshop", "cost": ""},
+            {"id": "room_barracks", "name": "Barracks", "cost": ""},
+            {"id": "room_prison", "name": "Prison", "cost": ""},
+            {"id": "room_hospital", "name": "Hospital", "cost": ""},
+            {"id": "room_rec_room", "name": "Rec Room", "cost": ""},
+            {"id": "room_dining_hall", "name": "Dining Hall", "cost": ""},
         ],
         "zone": [
             {"id": "stockpile", "name": "Stockpile", "cost": ""},

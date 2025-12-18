@@ -65,21 +65,23 @@ class DebugOverlay:
         print(f"[DEBUG] Overlay {'enabled' if self.enabled else 'disabled'}")
     
     def draw(self, screen: pygame.Surface, grid, colonists, jobs_module, resources_module, zones_module, buildings_module, rooms_module=None):
-        """Draw the complete debug overlay."""
+        """Draw the complete debug overlay - detail overlays only.
+        
+        Shows:
+        - Stack size on resource tiles
+        - Room outlines (neon colored by type)
+        - Stockpile zone overlays
+        - Mouseover tooltip with tile details
+        """
         if not self.enabled:
             return
         
         self._init_fonts()
         
-        # Draw tile overlays first (under everything) - pass camera offset
+        # Draw tile overlays (stack sizes, room outlines, stockpile zones)
         self._draw_tile_overlays(screen, grid, resources_module, zones_module, buildings_module, rooms_module)
         
-        # Draw info panels (reduced - colonist/jobs/rooms now in sidebar)
-        self._draw_resource_panel(screen, resources_module, zones_module)
-        self._draw_construction_panel(screen, buildings_module)
-        # Removed: _draw_jobs_panel, _draw_colonist_panel, _draw_rooms_panel (now in sidebar)
-        
-        # Draw tile hover tooltip with environmental data
+        # Draw mouseover tooltip with environmental data
         self._draw_tile_hover_tooltip(screen, grid)
     
     def _draw_tile_overlays(self, screen, grid, resources_module, zones_module, buildings_module, rooms_module=None):
@@ -88,14 +90,16 @@ class DebugOverlay:
         camera_y = grid.camera_y
         
         # Draw room overlays first (under other info)
-        if rooms_module:
+        # Try new room_system first, fall back to old rooms module
+        try:
+            import room_system
             current_z = grid.current_z
-            for room_id, room_data in rooms_module.get_all_rooms().items():
+            for room_id, room_data in room_system.get_all_rooms().items():
                 room_z = room_data.get("z", 0)
                 if room_z != current_z:
                     continue  # Only show rooms on current Z-level
 
-                room_type = room_data.get("room_type")
+                room_type = room_data.get("type")
                 color = ROOM_TYPE_OVERLAY_COLORS.get(room_type, COLOR_OVERLAY_ROOM)
 
                 # Outline-only overlay per tile for this room, using neon room-type color
@@ -108,6 +112,28 @@ class DebugOverlay:
                     screen_y = y * TILE_SIZE - camera_y
                     rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
                     screen.blit(overlay_surf, rect)
+        except ImportError:
+            # Fall back to old rooms module if room_system doesn't exist
+            if rooms_module:
+                current_z = grid.current_z
+                for room_id, room_data in rooms_module.get_all_rooms().items():
+                    room_z = room_data.get("z", 0)
+                    if room_z != current_z:
+                        continue  # Only show rooms on current Z-level
+
+                    room_type = room_data.get("room_type")
+                    color = ROOM_TYPE_OVERLAY_COLORS.get(room_type, COLOR_OVERLAY_ROOM)
+
+                    # Outline-only overlay per tile for this room, using neon room-type color
+                    overlay_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    pygame.draw.rect(overlay_surf, color, overlay_surf.get_rect(), 2)
+
+                    tiles = room_data.get("tiles", [])
+                    for (x, y) in tiles:
+                        screen_x = x * TILE_SIZE - camera_x
+                        screen_y = y * TILE_SIZE - camera_y
+                        rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
+                        screen.blit(overlay_surf, rect)
         
         # Get dropped items for reference
         dropped_items = resources_module.get_all_resource_items()
@@ -218,283 +244,6 @@ class DebugOverlay:
         bg_surf.fill((0, 0, 0, 180))
         screen.blit(bg_surf, bg_rect)
         screen.blit(text_surf, text_rect)
-    
-    def _draw_panel(self, screen, x: int, y: int, width: int, height: int, title: str) -> int:
-        """Draw a panel background and title. Returns y position for content."""
-        # Semi-transparent background
-        panel_surf = pygame.Surface((width, height), pygame.SRCALPHA)
-        panel_surf.fill(COLOR_DEBUG_BG)
-        screen.blit(panel_surf, (x, y))
-        
-        # Border
-        pygame.draw.rect(screen, COLOR_DEBUG_HEADER, (x, y, width, height), 1)
-        
-        # Title bar
-        pygame.draw.rect(screen, (*COLOR_DEBUG_HEADER[:3], 100), (x, y, width, 20))
-        title_surf = self.font_medium.render(title, True, COLOR_DEBUG_TEXT)
-        screen.blit(title_surf, (x + 5, y + 2))
-        
-        return y + 24
-    
-    def _draw_resource_panel(self, screen, resources_module, zones_module):
-        """Draw panel showing global resource counts."""
-        x, y = 10, 10
-        width, height = 180, 160
-        
-        content_y = self._draw_panel(screen, x, y, width, height, "📦 Resources")
-        
-        stockpile = resources_module.get_stockpile()
-        
-        # Header row
-        header = "Type     Inv  Stored"
-        header_surf = self.font_small.render(header, True, COLOR_DEBUG_HEADER)
-        screen.blit(header_surf, (x + 8, content_y))
-        content_y += 14
-        
-        for i, (res_type, amount) in enumerate(stockpile.items()):
-            stored = zones_module.get_total_stored(res_type)
-            
-            # Color: green if inventory matches stored, yellow if mismatch
-            if amount == stored:
-                color = COLOR_DEBUG_GOOD
-            else:
-                color = COLOR_DEBUG_NEUTRAL
-            
-            # Format: "Wood      5     3"
-            name = res_type.capitalize()[:8].ljust(8)
-            inv_str = str(amount).rjust(3)
-            stored_str = str(stored).rjust(5)
-            text = f"{name} {inv_str}  {stored_str}"
-            text_surf = self.font_small.render(text, True, color)
-            screen.blit(text_surf, (x + 8, content_y + i * 14))
-        
-        # Show dropped items waiting for stockpile
-        dropped_items = resources_module.get_all_resource_items()
-        row = len(stockpile)
-        waiting = len([i for i in dropped_items.values() if i.get("haul_requested")])
-        being_hauled = len(dropped_items) - waiting
-        
-        content_y += row * 14 + 6
-        
-        # Dropped items line
-        text = f"On ground: {len(dropped_items)}"
-        color = COLOR_DEBUG_NEUTRAL if len(dropped_items) > 0 else COLOR_DEBUG_TEXT
-        text_surf = self.font_small.render(text, True, color)
-        screen.blit(text_surf, (x + 8, content_y))
-        
-        if len(dropped_items) > 0:
-            # Detail: waiting vs being hauled
-            detail = f"  ({waiting} wait, {being_hauled} haul)"
-            detail_surf = self.font_small.render(detail, True, COLOR_DEBUG_TEXT)
-            screen.blit(detail_surf, (x + 8, content_y + 12))
-    
-    def _draw_jobs_panel(self, screen, jobs_module):
-        """Draw panel showing job queue status."""
-        x, y = 10, 180
-        width, height = 180, 100
-        
-        content_y = self._draw_panel(screen, x, y, width, height, "📋 Jobs")
-        
-        # Count jobs by type
-        job_counts: Dict[str, Tuple[int, int]] = {}  # type -> (total, assigned)
-        for job in jobs_module.JOB_QUEUE:
-            jtype = job.type
-            total, assigned = job_counts.get(jtype, (0, 0))
-            job_counts[jtype] = (total + 1, assigned + (1 if job.assigned else 0))
-        
-        if not job_counts:
-            text_surf = self.font_small.render("No jobs", True, COLOR_DEBUG_NEUTRAL)
-            screen.blit(text_surf, (x + 8, content_y))
-        else:
-            for i, (jtype, (total, assigned)) in enumerate(job_counts.items()):
-                pending = total - assigned
-                color = COLOR_DEBUG_GOOD if pending == 0 else COLOR_DEBUG_NEUTRAL
-                text = f"{jtype}: {assigned}/{total}"
-                text_surf = self.font_small.render(text, True, color)
-                screen.blit(text_surf, (x + 8, content_y + i * 14))
-    
-    def _draw_construction_panel(self, screen, buildings_module):
-        """Draw panel showing construction site status."""
-        x, y = 10, 290
-        width, height = 180, 120
-        
-        sites = buildings_module.get_all_construction_sites()
-        if not sites:
-            return
-        
-        content_y = self._draw_panel(screen, x, y, width, height, "🔨 Construction")
-        
-        # Show summary
-        ready = 0
-        waiting = 0
-        for (sx, sy, sz), site in sites.items():
-            if buildings_module.has_required_materials(sx, sy, sz):
-                ready += 1
-            else:
-                waiting += 1
-        
-        text = f"Ready: {ready}  Waiting: {waiting}"
-        color = COLOR_DEBUG_GOOD if waiting == 0 else COLOR_DEBUG_NEUTRAL
-        text_surf = self.font_small.render(text, True, color)
-        screen.blit(text_surf, (x + 8, content_y))
-        
-        # Show pending supply jobs
-        pending = len(buildings_module._PENDING_SUPPLY_JOBS)
-        text = f"Pending supplies: {pending}"
-        color = COLOR_DEBUG_NEUTRAL if pending > 0 else COLOR_DEBUG_TEXT
-        text_surf = self.font_small.render(text, True, color)
-        screen.blit(text_surf, (x + 8, content_y + 16))
-        
-        # List first few sites
-        content_y += 36
-        for i, ((sx, sy, sz), site) in enumerate(list(sites.items())[:3]):
-            needed = site.get("materials_needed", {})
-            delivered = site.get("materials_delivered", {})
-            
-            parts = []
-            all_done = True
-            for res_type in needed.keys():
-                d = delivered.get(res_type, 0)
-                n = needed.get(res_type, 0)
-                if d < n:
-                    all_done = False
-                parts.append(f"{res_type[0].upper()}:{d}/{n}")
-            
-            status = " ".join(parts)
-            color = COLOR_DEBUG_GOOD if all_done else COLOR_DEBUG_BAD
-            z_str = f"z{sz}" if sz > 0 else ""
-            text = f"({sx},{sy}{z_str}): {status}"
-            text_surf = self.font_small.render(text, True, color)
-            screen.blit(text_surf, (x + 8, content_y + i * 14))
-    
-    def _draw_colonist_panel(self, screen, colonists):
-        """Draw panel showing colonist states, mood, and hunger."""
-        screen_w = screen.get_width()
-        x, y = screen_w - 220, 10
-        width = 210
-        
-        # Calculate height based on colonist count (more space per colonist)
-        height = 50 + len(colonists) * 38
-        
-        content_y = self._draw_panel(screen, x, y, width, height, "Colonists")
-        
-        # Show each colonist
-        for i, c in enumerate(colonists):
-            row_y = content_y + i * 38
-            
-            # Get colonist name (fallback to index if no name)
-            name = getattr(c, 'name', f'Colonist {i+1}')
-            # Truncate long names
-            if len(name) > 18:
-                name = name[:16] + ".."
-            
-            if c.is_dead:
-                # Dead colonist - show in red, strikethrough effect
-                text_surf = self.font_small.render(f"{name}: DEAD", True, COLOR_DEBUG_BAD)
-                screen.blit(text_surf, (x + 8, row_y))
-            else:
-                # Row 1: Name and mood
-                from colonist import Colonist
-                mood = getattr(c, 'mood_state', 'Focused')
-                mood_color = Colonist.get_mood_color(mood)
-                
-                name_surf = self.font_small.render(name, True, (220, 210, 180))
-                screen.blit(name_surf, (x + 8, row_y))
-                
-                # Mood indicator (right-aligned)
-                mood_surf = self.font_small.render(mood, True, mood_color)
-                mood_x = x + width - 8 - mood_surf.get_width()
-                screen.blit(mood_surf, (mood_x, row_y))
-                
-                # Row 2: State and stats
-                row2_y = row_y + 13
-                state_short = c.state[:10] if len(c.state) > 10 else c.state
-                state_surf = self.font_small.render(state_short, True, (140, 140, 150))
-                screen.blit(state_surf, (x + 8, row2_y))
-                
-                # Hunger bar (compact)
-                bar_x = x + 80
-                bar_y = row2_y + 2
-                bar_width = 50
-                bar_height = 5
-                
-                pygame.draw.rect(screen, (40, 40, 40), (bar_x, bar_y, bar_width, bar_height))
-                
-                hunger_ratio = c.hunger / 100.0
-                if hunger_ratio < 0.5:
-                    bar_color = COLOR_DEBUG_GOOD
-                elif hunger_ratio < 0.7:
-                    bar_color = COLOR_DEBUG_NEUTRAL
-                else:
-                    bar_color = COLOR_DEBUG_BAD
-                
-                fill_width = int(bar_width * hunger_ratio)
-                if fill_width > 0:
-                    pygame.draw.rect(screen, bar_color, (bar_x, bar_y, fill_width, bar_height))
-                
-                # Hunger value
-                hunger_surf = self.font_small.render(f"{c.hunger:.0f}", True, bar_color)
-                screen.blit(hunger_surf, (bar_x + bar_width + 4, row2_y))
-                
-                # Health if damaged (right side)
-                if c.health < 100:
-                    health_surf = self.font_small.render(f"HP:{c.health:.0f}", True, COLOR_DEBUG_BAD)
-                    screen.blit(health_surf, (x + width - 8 - health_surf.get_width(), row2_y))
-                
-                # Separator line between colonists
-                if i < len(colonists) - 1:
-                    sep_y = row_y + 34
-                    pygame.draw.line(screen, (50, 50, 55), (x + 8, sep_y), (x + width - 8, sep_y), 1)
-    
-    def _draw_rooms_panel(self, screen, rooms_module, colonist_count: int = 3):
-        """Draw panel showing room status."""
-        if rooms_module is None:
-            return
-        
-        screen_w = screen.get_width()
-        # Position below colonist panel (which varies in height)
-        colonist_panel_height = 50 + colonist_count * 38
-        # Make panel wider so text doesn't clip
-        width = 210
-        x, y = screen_w - width - 10, 20 + colonist_panel_height
-        height = 110
-        
-        content_y = self._draw_panel(screen, x, y, width, height, "🏠 Rooms")
-        
-        rooms = rooms_module.get_all_rooms()
-        
-        if not rooms:
-            text_surf = self.font_small.render("No rooms", True, COLOR_DEBUG_NEUTRAL)
-            screen.blit(text_surf, (x + 8, content_y))
-        else:
-            roof_tiles = rooms_module.get_all_roof_tiles()
-            kitchen_count = 0
-            for data in rooms.values():
-                if data.get("room_type") == "Kitchen":
-                    kitchen_count += 1
-            if kitchen_count > 0:
-                header = f"Rooms: {len(rooms)}   Kitchens: {kitchen_count}   Roofs: {len(roof_tiles)}"
-            else:
-                header = f"Rooms: {len(rooms)}   Roofs: {len(roof_tiles)}"
-            text_surf = self.font_small.render(header, True, COLOR_DEBUG_GOOD)
-            screen.blit(text_surf, (x + 8, content_y))
-            
-            # List a few rooms with very clear type label
-            for i, (room_id, room_data) in enumerate(list(rooms.items())[:4]):
-                tiles = room_data.get("tiles", [])
-                exits = len(room_data.get("entrances", []))
-                room_type = room_data.get("room_type")
-                if room_type:
-                    label = f"R{room_id}: {len(tiles)} tiles, {exits} exits  [ {room_type} ]"
-                    if room_type == "Kitchen":
-                        color = COLOR_DEBUG_GOOD
-                    else:
-                        color = (200, 200, 255)
-                else:
-                    label = f"R{room_id}: {len(tiles)} tiles, {exits} exits"
-                    color = (200, 150, 255)
-                text_surf = self.font_small.render(label, True, color)
-                screen.blit(text_surf, (x + 8, content_y + 14 + i * 14))
     
     def _draw_tile_hover_tooltip(self, screen, grid):
         """Draw tooltip showing environmental data for hovered tile."""

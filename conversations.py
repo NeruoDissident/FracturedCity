@@ -113,8 +113,35 @@ WORK_CONVERSATIONS = [
     ('"How\'s the work going?"', '"Getting there."'),
     ('"Need a hand?"', '"I got it. Thanks though."'),
     ('"Taking a break?"', '"Just for a minute."'),
-    ('"Good work on that wall."', '"Thanks. Took forever."'),
-    ('"You see what they built?"', '"Not bad, right?"'),
+]
+
+CONSTRUCTION_CONVERSATIONS = [
+    ('"That structure is solid."', '"Yeah, it\'ll hold."'),
+    ('"Building takes time."', '"But it pays off."'),
+    ('"Finished that {subtype}."', '"Looks good."'),
+    ('"Hard work, laying those foundations."', '"Better than sleeping in the dirt."'),
+    ('"The city grows."', '"One brick at a time."'),
+]
+
+HARVEST_CONVERSATIONS = [
+    ('"Found some good {subtype}."', '"We needed that."'),
+    ('"Gathering is honest work."', '"If you like dirt under your nails."'),
+    ('"Resources are scarce these days."', '"We take what we can get."'),
+    ('"The land provides."', '"Sometimes."'),
+]
+
+SALVAGE_CONVERSATIONS = [
+    ('"This scrap has history."', '"Don\'t think about it. Just melt it."'),
+    ('"Found something useful in the junk."', '"One man\'s trash..."'),
+    ('"Salvaging the old world."', '"Building the new one."'),
+    ('"Rust everywhere."', '"It\'s what we have."'),
+]
+
+HAUL_CONVERSATIONS = [
+    ('"Heavy lifting today."', '"Keeps you strong."'),
+    ('"Moving supplies never ends."', '"Logistics wins wars."'),
+    ('"Stockpiles are looking better."', '"Good to hear."'),
+    ('"My back aches from all this hauling."', '"Careful now."'),
 ]
 
 # General idle chatter
@@ -303,6 +330,119 @@ CONFLICT_CONVERSATIONS = {
 
 
 # =============================================================================
+# COMBAT DIALOGUE
+# =============================================================================
+
+# Mid-fight barks (Attacker line, Defender line)
+COMBAT_HIT_CONVERSATIONS = [
+    ('"Take that!"', '"Ugh!"'),
+    ('"Got you!"', '"Damn it!"'),
+    ('"Had enough?"', '"Not even close!"'),
+    ('"You\'re slow!"', '"Shut up!"'),
+    ('"Bleed!"', '"Is that all you got?"'),
+    ('"Just stay down!"', '"Make me!"'),
+]
+
+# Retreat barks (Retreater line, Winner line)
+COMBAT_RETREAT_CONVERSATIONS = [
+    ('"I\'m out! Enough!"', '"Yeah, run!"'),
+    ('"Mercy! I yield!"', '"Get out of my sight."'),
+    ('"Too much... can\'t..."', '"Coward."'),
+    ('"I\'m done! Stop!"', '"Next time I finish it."'),
+    ('"Retreating!"', '"Keep running!"'),
+]
+
+# Victory barks (Winner line, Loser line - usually silence/gurgle)
+COMBAT_VICTORY_CONVERSATIONS = [
+    ('"Stay down."', '...'),
+    ('"Told you."', '...'),
+    ('"Another one gone."', '...'),
+    ('"Mess with the bull..."', '...'),
+    ('"Finally quiet."', '...'),
+]
+
+# Start fight barks (Attacker line, Defender line)
+COMBAT_START_CONVERSATIONS = [
+    ('"You asked for this!"', '"Bring it!"'),
+    ('"I\'m ending you!"', '"Try it!"'),
+    ('"Time to bleed!"', '"You first!"'),
+    ('"Get out of my face!"', '"Make me!"'),
+    ('"Die!"', '"Not today!"'),
+]
+
+# Trait-specific hit barks (Attacker has trait)
+COMBAT_TRAIT_HITS = {
+    "former_mercenary": [
+        ('"Sloppy form."', '"Grr!"'),
+        ('"Target damaged."', '"Agh!"'),
+        ('"Stay focused."', '"Shut up!"'),
+    ],
+    "rustborn": [
+        ('"Rust take you!"', '"Ugh!"'),
+        ('"Bleed for the pipes!"', '"Crazy bastard!"'),
+    ],
+    "echo_touched": [
+        ('"The noise... it wants blood!"', '"What?!"'),
+        ('"Silence the flesh!"', '"Get away!"'),
+    ],
+    "mild_paranoia": [
+        ('"Get back! Get back!"', '"Calm down!"'),
+        ('"Don\'t touch me!"', '"You started this!"'),
+    ],
+}
+
+# Relationship-specific idle chatter
+RELATIONSHIP_IDLE_CONVERSATIONS = {
+    "stranger": [
+        ('"..."', '"..."'),
+        ('"Hmph."', '"Mmh."'),
+        ('"Watch yourself."', '"You too."'),
+        ('"Keep moving."', '"Just passing through."'),
+    ],
+    "acquaintance": [
+        ('"Quiet today."', '"Too quiet, maybe."'),
+        ('"Nice weather."', '"If you can call it that."'),
+        ('"Hungry?"', '"Always."'),
+        ('"Sleep well?"', '"Well enough."'),
+    ],
+    "friend": [
+        ('"Good to see you."', '"You too."'),
+        ('"Got your back."', '"I know."'),
+        ('"We\'ll get through this."', '"Together."'),
+        ('"Beer later?"', '"You know it."'),
+        ('"How are you holding up?"', '"Better now."'),
+    ],
+    "close_friend": [
+        ('"Remember the old days?"', '"Don\'t make me cry."'),
+        ('"I\'d be dead without you."', '"Shut up, idiot. You\'re fine."'),
+        ('"You look like hell."', '"Thanks. You look worse."'),
+    ],
+    "rival": [
+        ('"You\'re in my way."', '"Go around."'),
+        ('"Still breathing?"', '"Disappointed?"'),
+        ('"Watch your step."', '"Is that a threat?"'),
+        ('"I\'m watching you."', '"Enjoy the show."'),
+    ],
+    "enemy": [
+        ('"..."', '"...scum."'),
+        ('"Get lost."', '"Make me."'),
+        ('"One day..."', '"Bring it."'),
+    ],
+    "romantic": [
+        ('"Hey you."', '"Hey yourself."'),
+        ('"Be careful out there."', '"Always am. You too."'),
+        ('"Thinking about you."', '"Good things, I hope?"'),
+        ('"You look good."', '"Flatterer."'),
+    ],
+    "family": [
+        ('"You eating enough?"', '"Yes, yes, I\'m fine."'),
+        ('"Be safe."', '"Don\'t worry about me."'),
+        ('"Family first."', '"Always."'),
+    ],
+}
+
+
+# =============================================================================
 # CONVERSATION LOG - Per-colonist perspective
 # =============================================================================
 
@@ -311,10 +451,25 @@ _colonist_conversation_logs: dict[int, list[dict]] = {}
 _max_log_entries = 100
 
 
+def _get_colonist_log_key(colonist) -> int | None:
+    """Get stable per-colonist log key.
+
+    Prefers colonist.uid (persistent across save/load). Falls back to id(colonist)
+    if uid is missing.
+    """
+    if colonist is None:
+        return None
+    uid = getattr(colonist, "uid", None)
+    if uid is not None:
+        return uid
+    return id(colonist)
+
+
 def add_conversation(speaker_name: str, listener_name: str, 
                      speaker_line: str, listener_line: str,
                      game_tick: int, conversation_type: str = "chat",
-                     speaker_id: int = None, listener_id: int = None) -> None:
+                     speaker_id: int = None, listener_id: int = None,
+                     speaker=None, listener=None) -> None:
     """Add a conversation to both participants' logs from their perspective.
     
     Args:
@@ -329,6 +484,11 @@ def add_conversation(speaker_name: str, listener_name: str,
     """
     global _colonist_conversation_logs
     
+    if speaker_id is None:
+        speaker_id = _get_colonist_log_key(speaker)
+    if listener_id is None:
+        listener_id = _get_colonist_log_key(listener)
+
     # Add to speaker's log (they spoke first)
     if speaker_id is not None:
         if speaker_id not in _colonist_conversation_logs:
@@ -386,8 +546,8 @@ def get_conversation_log(colonist_id: int, limit: int = 20) -> list[dict]:
 
 def clear_conversation_log() -> None:
     """Clear the conversation log."""
-    global _conversation_log
-    _conversation_log = []
+    global _colonist_conversation_logs
+    _colonist_conversation_logs = {}
 
 
 # =============================================================================
@@ -400,31 +560,39 @@ def generate_conversation(speaker: "Colonist", listener: "Colonist",
     
     Returns tuple of (speaker_line, listener_line, conversation_type) or None.
     """
+    from relationships import has_discussed_topic, record_topic, get_relationship, RelationType
+    
     # Check for recent events first (most contextual)
     
     # Check if listener has visible injuries (health < 75%)
-    listener_body = getattr(listener, 'body', None)
-    if listener_body and random.random() < 0.4:  # 40% chance to comment on injuries
-        # Find worst injury
-        worst_health = 100.0
-        for part in listener_body.parts.values():
-            if part.health < worst_health:
-                worst_health = part.health
-        
-        if worst_health < 75:
-            speaker_line, listener_line = random.choice(INJURY_CONVERSATIONS)
-            return (speaker_line, listener_line, "injury_checkin")
+    # Topic: injury_checkin
+    if not has_discussed_topic(speaker, listener, "injury_checkin", game_tick, duration=10000):
+        listener_body = getattr(listener, 'body', None)
+        if listener_body and random.random() < 0.4:  # 40% chance to comment on injuries
+            # Find worst injury
+            worst_health = 100.0
+            for part in listener_body.parts.values():
+                if part.health < worst_health:
+                    worst_health = part.health
+            
+            if worst_health < 75:
+                record_topic(speaker, listener, "injury_checkin", game_tick)
+                speaker_line, listener_line = random.choice(INJURY_CONVERSATIONS)
+                return (speaker_line, listener_line, "injury_checkin")
     
     # Check if listener was recently in combat (last 3000 ticks = ~50 seconds)
-    listener_last_combat = getattr(listener, 'last_combat_tick', 0)
-    if game_tick - listener_last_combat < 3000 and random.random() < 0.3:
-        # Find who they fought
-        recent_target = getattr(listener, 'combat_target', None)
-        if recent_target:
-            other_name = recent_target.name.split()[0]
-            speaker_line, listener_line = random.choice(FIGHT_AFTERMATH_CONVERSATIONS)
-            speaker_line = speaker_line.format(other=other_name)
-            return (speaker_line, listener_line, "fight_aftermath")
+    # Topic: fight_aftermath
+    if not has_discussed_topic(speaker, listener, "fight_aftermath", game_tick, duration=5000):
+        listener_last_combat = getattr(listener, 'last_combat_tick', 0)
+        if game_tick - listener_last_combat < 3000 and random.random() < 0.3:
+            # Find who they fought
+            recent_target = getattr(listener, 'combat_target', None)
+            if recent_target:
+                record_topic(speaker, listener, "fight_aftermath", game_tick)
+                other_name = recent_target.name.split()[0]
+                speaker_line, listener_line = random.choice(FIGHT_AFTERMATH_CONVERSATIONS)
+                speaker_line = speaker_line.format(other=other_name)
+                return (speaker_line, listener_line, "fight_aftermath")
     
     # Check for shared traits (more interesting)
     
@@ -432,71 +600,184 @@ def generate_conversation(speaker: "Colonist", listener: "Colonist",
     speaker_origin = speaker.traits.get("origin", "")
     listener_origin = listener.traits.get("origin", "")
     if speaker_origin and speaker_origin == listener_origin:
-        if speaker_origin in SHARED_ORIGIN_CONVERSATIONS:
-            templates = SHARED_ORIGIN_CONVERSATIONS[speaker_origin]
-            if templates and random.random() < 0.3:  # 30% chance to use shared origin
-                speaker_line, listener_line = random.choice(templates)
-                speaker_line = speaker_line.format(
-                    listener_first=listener.name.split()[0]
-                )
-                return (speaker_line, listener_line, "shared_origin")
+        topic_id = f"origin_{speaker_origin}"
+        if not has_discussed_topic(speaker, listener, topic_id, game_tick, duration=20000):
+            if speaker_origin in SHARED_ORIGIN_CONVERSATIONS:
+                templates = SHARED_ORIGIN_CONVERSATIONS[speaker_origin]
+                if templates and random.random() < 0.3:
+                    record_topic(speaker, listener, topic_id, game_tick)
+                    speaker_line, listener_line = random.choice(templates)
+                    speaker_line = speaker_line.format(
+                        listener_first=listener.name.split()[0]
+                    )
+                    return (speaker_line, listener_line, "shared_origin")
     
     # Shared experience?
     speaker_exp = speaker.traits.get("experience", "")
     listener_exp = listener.traits.get("experience", "")
     if speaker_exp and speaker_exp == listener_exp:
-        if speaker_exp in SHARED_EXPERIENCE_CONVERSATIONS:
-            templates = SHARED_EXPERIENCE_CONVERSATIONS[speaker_exp]
-            if templates and random.random() < 0.25:
-                speaker_line, listener_line = random.choice(templates)
-                return (speaker_line, listener_line, "shared_experience")
+        topic_id = f"exp_{speaker_exp}"
+        if not has_discussed_topic(speaker, listener, topic_id, game_tick, duration=20000):
+            if speaker_exp in SHARED_EXPERIENCE_CONVERSATIONS:
+                templates = SHARED_EXPERIENCE_CONVERSATIONS[speaker_exp]
+                if templates and random.random() < 0.25:
+                    record_topic(speaker, listener, topic_id, game_tick)
+                    speaker_line, listener_line = random.choice(templates)
+                    return (speaker_line, listener_line, "shared_experience")
     
     # Speaker has a major trait?
     speaker_major = speaker.traits.get("major_trait", "")
     if speaker_major and speaker_major in MAJOR_TRAIT_CONVERSATIONS:
-        if random.random() < 0.2:  # 20% chance
-            templates = MAJOR_TRAIT_CONVERSATIONS[speaker_major]
-            speaker_line, listener_line = random.choice(templates)
-            return (speaker_line, listener_line, "major")
+        topic_id = f"major_{speaker_major}"
+        if not has_discussed_topic(speaker, listener, topic_id, game_tick, duration=30000):
+            if random.random() < 0.2:
+                record_topic(speaker, listener, topic_id, game_tick)
+                templates = MAJOR_TRAIT_CONVERSATIONS[speaker_major]
+                speaker_line, listener_line = random.choice(templates)
+                return (speaker_line, listener_line, "major")
     
     # Listener has a major trait? (speaker asks about it)
     listener_major = listener.traits.get("major_trait", "")
     if listener_major and listener_major in MAJOR_TRAIT_CONVERSATIONS:
-        if random.random() < 0.15:
-            templates = MAJOR_TRAIT_CONVERSATIONS[listener_major]
-            # Swap - speaker asks, listener answers
-            listener_line, speaker_line = random.choice(templates)
-            return (speaker_line, listener_line, "major")
+        topic_id = f"major_{listener_major}"
+        if not has_discussed_topic(speaker, listener, topic_id, game_tick, duration=30000):
+            if random.random() < 0.15:
+                record_topic(speaker, listener, topic_id, game_tick)
+                templates = MAJOR_TRAIT_CONVERSATIONS[listener_major]
+                # Swap - speaker asks, listener answers
+                listener_line, speaker_line = random.choice(templates)
+                return (speaker_line, listener_line, "major")
     
     # Speaker has a quirk that triggers conversation?
     for quirk in speaker.traits.get("quirks", []):
         if quirk in QUIRK_CONVERSATIONS and random.random() < 0.15:
-            templates = QUIRK_CONVERSATIONS[quirk]
-            # Listener notices speaker's quirk
-            listener_line, speaker_line = random.choice(templates)
-            return (speaker_line, listener_line, "quirk")
+            topic_id = f"quirk_{quirk}"
+            if not has_discussed_topic(speaker, listener, topic_id, game_tick, duration=15000):
+                record_topic(speaker, listener, topic_id, game_tick)
+                templates = QUIRK_CONVERSATIONS[quirk]
+                # Listener notices speaker's quirk
+                listener_line, speaker_line = random.choice(templates)
+                return (speaker_line, listener_line, "quirk")
     
     # Mood-based conversation?
     listener_mood = listener.mood_state
     if listener_mood in MOOD_CONVERSATIONS:
-        if listener_mood in ("Stressed", "Overwhelmed") and random.random() < 0.3:
-            # More likely to check in on stressed colonists
-            templates = MOOD_CONVERSATIONS[listener_mood]
-            speaker_line, listener_line = random.choice(templates)
-            return (speaker_line, listener_line, "mood")
-        elif random.random() < 0.1:
-            templates = MOOD_CONVERSATIONS[listener_mood]
-            speaker_line, listener_line = random.choice(templates)
-            return (speaker_line, listener_line, "mood")
+        topic_id = f"mood_{listener_mood}"
+        # Shorter duration for mood checks (can ask again later)
+        if not has_discussed_topic(speaker, listener, topic_id, game_tick, duration=5000):
+            if listener_mood in ("Stressed", "Overwhelmed") and random.random() < 0.3:
+                record_topic(speaker, listener, topic_id, game_tick)
+                templates = MOOD_CONVERSATIONS[listener_mood]
+                speaker_line, listener_line = random.choice(templates)
+                return (speaker_line, listener_line, "mood")
+            elif random.random() < 0.1:
+                record_topic(speaker, listener, topic_id, game_tick)
+                templates = MOOD_CONVERSATIONS[listener_mood]
+                speaker_line, listener_line = random.choice(templates)
+                return (speaker_line, listener_line, "mood")
     
     # Work conversation?
-    if random.random() < 0.2:
+    # Check for recent completed jobs (within last 3000 ticks = ~50 seconds)
+    last_job = getattr(speaker, "last_completed_job", None)
+    if last_job and (game_tick - last_job[2] < 3000):
+        job_type, job_subtype, _ = last_job
+        topic = f"work_{job_type}"
+        
+        if random.random() < 0.4 and not has_discussed_topic(speaker, listener, topic, game_tick, duration=10000):
+            record_topic(speaker, listener, topic, game_tick)
+            
+            if job_type == "construction":
+                speaker_line, listener_line = random.choice(CONSTRUCTION_CONVERSATIONS)
+                speaker_line = speaker_line.format(subtype=job_subtype)
+                return (speaker_line, listener_line, "work")
+            elif job_type == "gathering":
+                speaker_line, listener_line = random.choice(HARVEST_CONVERSATIONS)
+                speaker_line = speaker_line.format(subtype=job_subtype)
+                return (speaker_line, listener_line, "work")
+            elif job_type == "salvage":
+                speaker_line, listener_line = random.choice(SALVAGE_CONVERSATIONS)
+                return (speaker_line, listener_line, "work")
+            elif job_type == "haul" or job_type == "supply":
+                speaker_line, listener_line = random.choice(HAUL_CONVERSATIONS)
+                return (speaker_line, listener_line, "work")
+    
+    # Generic work chatter if no specific job or low chance
+    if random.random() < 0.1 and not has_discussed_topic(speaker, listener, "work_generic", game_tick, duration=8000):
+        record_topic(speaker, listener, "work_generic", game_tick)
         speaker_line, listener_line = random.choice(WORK_CONVERSATIONS)
         return (speaker_line, listener_line, "work")
     
-    # Default: idle chatter
-    speaker_line, listener_line = random.choice(IDLE_CONVERSATIONS)
+    # Default: idle chatter based on relationship
+    rel = get_relationship(speaker, listener)
+    rel_type = rel["type"]
+    
+    # Map RelationType enum to string keys in RELATIONSHIP_IDLE_CONVERSATIONS
+    key_map = {
+        RelationType.STRANGER: "stranger",
+        RelationType.ACQUAINTANCE: "acquaintance",
+        RelationType.FRIEND: "friend",
+        RelationType.CLOSE_FRIEND: "close_friend",
+        RelationType.RIVAL: "rival",
+        RelationType.ENEMY: "enemy",
+        RelationType.ROMANTIC: "romantic",
+        RelationType.FAMILY: "family",
+    }
+    
+    # Fallback to acquaintance if key missing
+    key = key_map.get(rel_type, "acquaintance")
+    templates = RELATIONSHIP_IDLE_CONVERSATIONS.get(key, RELATIONSHIP_IDLE_CONVERSATIONS["acquaintance"])
+    
+    speaker_line, listener_line = random.choice(templates)
     return (speaker_line, listener_line, "chat")
+
+
+# =============================================================================
+# SAVE/LOAD
+# =============================================================================
+
+def get_save_state(all_colonists: list) -> dict:
+    """Get conversation log state for saving."""
+    # Convert keys to UIDs where possible
+    saved_logs = {}
+    
+    # Map ID -> UID for current colonists
+    id_to_uid = {}
+    for c in all_colonists:
+        if hasattr(c, "uid") and c.uid is not None:
+            id_to_uid[id(c)] = c.uid
+            
+    for key, log in _colonist_conversation_logs.items():
+        # Key might already be a UID (int) or an object ID
+        # We prefer storing as UID string
+        final_key = str(key)
+        
+        # If key matches a known object ID, use the UID instead
+        if key in id_to_uid:
+            final_key = str(id_to_uid[key])
+            
+        saved_logs[final_key] = log
+        
+    return {
+        "logs": saved_logs
+    }
+
+
+def load_save_state(state: dict, all_colonists: list) -> None:
+    """Restore conversation logs from save."""
+    global _colonist_conversation_logs
+    _colonist_conversation_logs = {}
+    
+    # Map UID -> ID to restore ID-based keys if needed (though we prefer UIDs now)
+    # The system now uses UIDs primarily if available.
+    
+    for key_str, log in state.get("logs", {}).items():
+        try:
+            # Keys are stored as strings in JSON
+            # Try to convert to int (UID)
+            key = int(key_str)
+            _colonist_conversation_logs[key] = log
+        except ValueError:
+            pass
 
 
 def generate_conflict_conversation(colonist_a: "Colonist", colonist_b: "Colonist") -> Optional[tuple[str, str]]:
@@ -539,7 +820,49 @@ def generate_conflict_conversation(colonist_a: "Colonist", colonist_b: "Colonist
                 # Swap speaker and listener
                 listener_line, speaker_line = random.choice(templates)
                 return (speaker_line, listener_line)
+
+    return None
+
+
+def generate_combat_bark(bark_type: str, speaker: "Colonist", listener: "Colonist") -> Optional[tuple[str, str]]:
+    """Generate a combat bark based on context/traits.
     
+    Args:
+        bark_type: "hit", "retreat", "victory"
+        speaker: The one acting (attacking, retreating, or killing)
+        listener: The target
+        
+    Returns:
+        (speaker_line, listener_line) or None
+    """
+    if bark_type == "hit":
+        # Check speaker traits for custom hit lines
+        traits = getattr(speaker, 'traits', {})
+        
+        # Collect speaker traits
+        speaker_traits = set()
+        speaker_traits.add(traits.get("experience", ""))
+        speaker_traits.update(traits.get("quirks", []))
+        if traits.get("major_trait"):
+            speaker_traits.add(traits["major_trait"])
+            
+        # 30% chance to use trait-specific line if available
+        if random.random() < 0.3:
+            for trait in speaker_traits:
+                if trait in COMBAT_TRAIT_HITS:
+                    return random.choice(COMBAT_TRAIT_HITS[trait])
+                    
+        return random.choice(COMBAT_HIT_CONVERSATIONS)
+        
+    elif bark_type == "retreat":
+        return random.choice(COMBAT_RETREAT_CONVERSATIONS)
+        
+    elif bark_type == "victory":
+        return random.choice(COMBAT_VICTORY_CONVERSATIONS)
+        
+    elif bark_type == "start":
+        return random.choice(COMBAT_START_CONVERSATIONS)
+        
     return None
 
 
@@ -587,7 +910,7 @@ def try_start_conversation(speaker: "Colonist", listener: "Colonist",
         speaker.name, listener.name,
         speaker_line, listener_line,
         game_tick, convo_type,
-        speaker_id=id(speaker), listener_id=id(listener)
+        speaker=speaker, listener=listener
     )
     
     # Record interaction in relationship system

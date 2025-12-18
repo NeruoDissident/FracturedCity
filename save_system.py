@@ -22,16 +22,19 @@ def get_game_state(grid, colonists, zones_module, buildings_module, resources_mo
     """Capture entire game state as a serializable dictionary."""
     
     # Grid state
+    depth = getattr(grid, "depth", getattr(grid, "z_levels", 1))
+    current_z = getattr(grid, "current_z", 0)
     grid_state = {
         "width": grid.width,
         "height": grid.height,
-        "z_levels": grid.z_levels,
-        "current_z": grid.current_z,
+        "depth": depth,
+        "z_levels": depth,
+        "current_z": current_z,
         "tiles": {}
     }
     
     # Save non-empty tiles
-    for z in range(grid.z_levels):
+    for z in range(depth):
         for y in range(grid.height):
             for x in range(grid.width):
                 tile = grid.get_tile(x, y, z)
@@ -43,6 +46,7 @@ def get_game_state(grid, colonists, zones_module, buildings_module, resources_mo
     colonist_state = []
     for c in colonists:
         colonist_state.append({
+            "uid": getattr(c, "uid", None),
             "x": c.x,
             "y": c.y,
             "z": c.z,
@@ -65,6 +69,15 @@ def get_game_state(grid, colonists, zones_module, buildings_module, resources_mo
     # Jobs state
     jobs_state = jobs_module.get_save_state() if hasattr(jobs_module, 'get_save_state') else {}
     
+    # Social state (relationships, conversations)
+    # We need to import these modules dynamically or pass them in
+    # For now, we'll import them here since they are singletons essentially
+    import relationships as relationships_module
+    import conversations as conversations_module
+    
+    relationships_state = relationships_module.get_save_state(colonists)
+    conversations_state = conversations_module.get_save_state(colonists)
+    
     return {
         "version": 1,
         "timestamp": datetime.now().isoformat(),
@@ -74,6 +87,8 @@ def get_game_state(grid, colonists, zones_module, buildings_module, resources_mo
         "buildings": buildings_state,
         "resources": resources_state,
         "jobs": jobs_state,
+        "relationships": relationships_state,
+        "conversations": conversations_state,
     }
 
 
@@ -112,26 +127,42 @@ def load_game(grid, colonists, zones_module, buildings_module, resources_module,
         
         # Restore grid
         grid_state = state.get("grid", {})
+        depth = getattr(grid, "depth", getattr(grid, "z_levels", 1))
         
         # Clear existing tiles
-        for z in range(grid.z_levels):
+        for z in range(depth):
             for y in range(grid.height):
                 for x in range(grid.width):
-                    grid.set_tile(x, y, z, "empty")
+                    grid.set_tile(x, y, "empty", z)
         
         # Restore tiles
         for key, tile in grid_state.get("tiles", {}).items():
             parts = key.split(",")
             x, y, z = int(parts[0]), int(parts[1]), int(parts[2])
-            grid.set_tile(x, y, z, tile)
+            if 0 <= z < depth:
+                grid.set_tile(x, y, tile, z)
         
-        grid.current_z = grid_state.get("current_z", 0)
+        saved_z = grid_state.get("current_z", 0)
+        try:
+            if hasattr(grid, "set_current_z"):
+                grid.set_current_z(saved_z)
+            else:
+                grid.current_z = saved_z
+        except Exception:
+            pass
         
         # Restore colonists
         colonist_state = state.get("colonists", [])
+        max_uid = 0
         for i, c_state in enumerate(colonist_state):
             if i < len(colonists):
                 c = colonists[i]
+                if "uid" in c_state and c_state["uid"] is not None:
+                    c.uid = c_state["uid"]
+                    try:
+                        max_uid = max(max_uid, int(c.uid))
+                    except Exception:
+                        pass
                 c.x = c_state.get("x", c.x)
                 c.y = c_state.get("y", c.y)
                 c.z = c_state.get("z", 0)
@@ -144,6 +175,14 @@ def load_game(grid, colonists, zones_module, buildings_module, resources_module,
                 c.carrying = None
                 if "capabilities" in c_state:
                     c.capabilities = c_state["capabilities"]
+
+        # Advance uid counter to avoid collisions for newly spawned colonists
+        try:
+            from colonist import Colonist
+            if max_uid > 0:
+                Colonist._uid_counter = max(Colonist._uid_counter, max_uid + 1)
+        except Exception:
+            pass
         
         # Restore zones
         if hasattr(zones_module, 'load_save_state'):
@@ -160,6 +199,16 @@ def load_game(grid, colonists, zones_module, buildings_module, resources_module,
         # Restore jobs
         if hasattr(jobs_module, 'load_save_state'):
             jobs_module.load_save_state(state.get("jobs", {}))
+        
+        # Restore social state
+        import relationships as relationships_module
+        import conversations as conversations_module
+        
+        if hasattr(relationships_module, 'load_save_state'):
+            relationships_module.load_save_state(state.get("relationships", {}), colonists)
+            
+        if hasattr(conversations_module, 'load_save_state'):
+            conversations_module.load_save_state(state.get("conversations", {}), colonists)
         
         print(f"[Load] Game loaded from {filepath}")
         return True

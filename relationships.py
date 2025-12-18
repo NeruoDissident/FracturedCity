@@ -85,6 +85,7 @@ def get_relationship(colonist_a: "Colonist", colonist_b: "Colonist") -> dict:
             "shared_origin": False,
             "shared_experience": False,
             "history": [],
+            "recent_topics": [],  # List of (topic_id, game_tick)
         }
         
         # Check for shared traits
@@ -160,6 +161,35 @@ def record_interaction(colonist_a: "Colonist", colonist_b: "Colonist",
     
     rel["score"] = max(-100, min(100, rel["score"] + delta))
     rel["type"] = _score_to_type(rel["score"], rel)
+
+
+def record_topic(colonist_a: "Colonist", colonist_b: "Colonist", topic: str, game_tick: int) -> None:
+    """Record a topic discussed between two colonists."""
+    rel = get_relationship(colonist_a, colonist_b)
+    
+    # Add new topic
+    rel["recent_topics"].append((topic, game_tick))
+    
+    # Clean up old topics (older than 1 day / ~5000 ticks)
+    # We'll just keep the last 10 to be safe and simple
+    if len(rel["recent_topics"]) > 10:
+        rel["recent_topics"] = rel["recent_topics"][-10:]
+
+
+def has_discussed_topic(colonist_a: "Colonist", colonist_b: "Colonist", topic: str, 
+                        game_tick: int, duration: int = 5000) -> bool:
+    """Check if a topic has been discussed recently.
+    
+    Args:
+        duration: How long a topic remains 'fresh' in ticks (default 5000 = ~1 day)
+    """
+    rel = get_relationship(colonist_a, colonist_b)
+    
+    for t, tick in rel["recent_topics"]:
+        if t == topic and (game_tick - tick) < duration:
+            return True
+            
+    return False
 
 
 def _score_to_type(score: int, rel_data: dict) -> RelationType:
@@ -510,3 +540,100 @@ def get_relationship_color(colonist_a: "Colonist", colonist_b: "Colonist") -> tu
         return (220, 150, 100)  # Orange
     else:
         return (220, 100, 100)  # Red
+
+
+# =============================================================================
+# SAVE/LOAD
+# =============================================================================
+
+def get_save_state(all_colonists: list) -> dict:
+    """Get relationship state for saving.
+    
+    Converts runtime IDs to persistent UIDs.
+    """
+    # Map runtime ID to UID
+    id_to_uid = {}
+    for c in all_colonists:
+        if hasattr(c, "uid"):
+            id_to_uid[id(c)] = c.uid
+            
+    # Save relationships
+    saved_rels = {}
+    for (id_a, id_b), rel_data in _relationships.items():
+        if id_a in id_to_uid and id_b in id_to_uid:
+            key = f"{id_to_uid[id_a]},{id_to_uid[id_b]}"
+            # Create a copy to avoid modifying runtime state
+            data_copy = rel_data.copy()
+            # Convert enums to strings for JSON
+            data_copy["type"] = data_copy["type"].value
+            saved_rels[key] = data_copy
+            
+    # Save family bonds
+    saved_bonds = {}
+    for colonist_id, bonds in _family_bonds.items():
+        if colonist_id in id_to_uid:
+            uid = id_to_uid[colonist_id]
+            # Convert bonds list: [(other_id, bond_type), ...]
+            converted_bonds = []
+            for other_id, bond_type in bonds:
+                if other_id in id_to_uid:
+                    converted_bonds.append((id_to_uid[other_id], bond_type.value))
+            if converted_bonds:
+                saved_bonds[str(uid)] = converted_bonds
+                
+    return {
+        "relationships": saved_rels,
+        "family_bonds": saved_bonds
+    }
+
+
+def load_save_state(state: dict, all_colonists: list) -> None:
+    """Restore relationship state from save."""
+    global _relationships, _family_bonds
+    _relationships.clear()
+    _family_bonds.clear()
+    
+    # Map UID to runtime ID
+    uid_to_id = {}
+    for c in all_colonists:
+        if hasattr(c, "uid"):
+            uid_to_id[c.uid] = id(c)
+            
+    # Restore relationships
+    for key, data in state.get("relationships", {}).items():
+        try:
+            uid_a_str, uid_b_str = key.split(",")
+            uid_a, uid_b = int(uid_a_str), int(uid_b_str)
+            
+            if uid_a in uid_to_id and uid_b in uid_to_id:
+                id_a = uid_to_id[uid_a]
+                id_b = uid_to_id[uid_b]
+                pair_key = (min(id_a, id_b), max(id_a, id_b))
+                
+                # Restore data
+                restored_data = data.copy()
+                # Restore Enum
+                restored_data["type"] = RelationType(restored_data["type"])
+                # Ensure recent_topics exists (migration)
+                if "recent_topics" not in restored_data:
+                    restored_data["recent_topics"] = []
+                
+                _relationships[pair_key] = restored_data
+        except Exception as e:
+            print(f"Error loading relationship {key}: {e}")
+
+    # Restore family bonds
+    for uid_str, bonds in state.get("family_bonds", {}).items():
+        try:
+            uid = int(uid_str)
+            if uid in uid_to_id:
+                id_val = uid_to_id[uid]
+                restored_bonds = []
+                for other_uid, bond_type_str in bonds:
+                    if other_uid in uid_to_id:
+                        restored_bonds.append((uid_to_id[other_uid], FamilyBond(bond_type_str)))
+                
+                if restored_bonds:
+                    _family_bonds[id_val] = restored_bonds
+        except Exception as e:
+            print(f"Error loading family bonds for {uid_str}: {e}")

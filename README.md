@@ -457,6 +457,63 @@ Fractured City/
 
 ## Future Plans
 
+## Due North — Core Loop & Progression Roadmap
+
+### Game Identity
+- Forever colony-sim in a collapsed vertical cyberpunk megacity
+- You control Remnants trying to survive, rebuild, expand, and dominate
+- No mandatory win state; a run ends when the colony collapses or the city becomes automated/self-sustaining
+
+### Core Game Loop (4 interacting loops)
+
+#### A) Survive (Micro Loop)
+- Secure shelter
+- Collect resources
+- Maintain power
+- Keep Remnants stable; stabilize local Echo disruptions
+- Handle early raider pressure
+
+#### B) Build & Expand (Macro Loop)
+- Capture new buildings, open Z-levels
+- Convert ruins into operational structures
+- Establish industries/logistics, manage districts
+- Improve living conditions
+
+#### C) Respond to Pressure (Threat Loop)
+Threats escalate over time:
+- Raiders (chaotic, aggressive, steal/destroy/occupy)
+- Private Security Corps (organized, equipped, political; growth draws attention)
+- The Echo (reality distortion; destabilizes tiles/structures/minds)
+
+#### D) Automate & Optimize (Mastery Loop)
+- Automated production lines, drones, repair units
+- Reduce micromanagement, optimize power grid
+- Install Echo stabilizers, appoint district managers/AI directors
+
+### Progression Phases
+
+#### Early Game — “Survive the Block”
+- Secure first building, basic power, scavenge, food/water
+- Stabilize low-level Echo, defeat lone raiders, recruit Remnants
+- Feel: fragile, tense, gritty; every mistake is dangerous
+
+#### Mid Game — “District Expansion”
+- Capture multiple buildings, vertical infrastructure
+- Specialize industries (fabrication, recycling, cybernetics, data-mining)
+- Defensive perimeters, organized raider factions, PMC encounters
+- Echo becomes district-scale hazard
+- Feel: stable but threatened; growth invites enemies
+
+#### Late Game — “City Takeover”
+- Operate entire districts, run guilds/corpo branches
+- Automated supply chains, political tensions
+- Echo storms disrupt sectors; build megastructures
+- Feel: powerful, but existential threats require vigilance
+
+### End States (Soft Outcomes)
+- Self-sustaining city (peaceful victory): automation + governance, threats controlled, Echo stabilized
+- Collapse (story ending): Echo corruption, PMC siege, raider domination, power failure, Remnant destabilization, structural collapse
+
 - [ ] Hazards (environmental dangers)
 - [ ] Events (random occurrences)
 - [ ] Factions (external groups)

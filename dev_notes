@@ -411,3 +411,37 @@ No severe FPS drops or rendering glitches.
 
 
 UI elements remain readable on top of the new lighting.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+🏠 ROOM SYSTEM IMPLEMENTATION (Dec 17, 2025)
+═══════════════════════════════════════════════════════════════════════════════
+
+## Session Summary: The Great UI Ghost Hunt
+
+**Objective:** Add manual room designation system with drag-selection UI and validation.
+
+**What Actually Happened:**
+- Implemented complete manual room system (`room_system.py`) with 8 room types, validation rules, drag-selection
+- Added room debug overlay showing outlines and validation errors
+- Removed barracks placement restrictions
+- **THE PROBLEM:** Added Rooms button to legacy `ui.py` ActionBar that was still being constructed but NEVER DRAWN
+- Spent 2 hours debugging "invisible button" because prints showed button creation but it never appeared on screen
+- Root cause: Game has TWO UI systems - legacy `ui.py` (constructed, handles some keys) and active `ui_layout.py` (actually visible)
+- **THE FIX:** Added Rooms button + submenu to the ACTUAL visible UI (`ui_layout.py` BottomBuildBar)
+
+**Military Debrief:**
+- Friendly fire incident: Claude kept "fixing" the wrong UI system
+- Casualties: User's patience, 2 hours of circular debugging, several rejected code changes
+- Lesson learned: Always verify which UI system is actually being rendered before adding buttons to it
+- Mission status: Eventually successful after identifying the ghost UI
+
+**Technical Changes:**
+1. `room_system.py`: Full manual room designation with validation (Bedroom, Kitchen, Workshop, Barracks, Prison, Hospital, Rec Room, Dining Hall)
+2. `main.py`: Drag-selection integration for room creation with error feedback
+3. `debug_overlay.py`: Room outline visualization
+4. `ui_layout.py`: Added Rooms button (M hotkey) + submenu to BottomBuildBar (THE ACTUAL VISIBLE UI)
+
+**Mood:** Started optimistic, descended into confusion, ended with relief and mild PTSD
+**Vibe:** "Why is the button not showing up when the console says it's there?" → "Oh. OH. There are TWO UIs."
+**Lesson:** Sometimes the problem isn't the code you're looking at, it's the code you're NOT looking at that's actually running.

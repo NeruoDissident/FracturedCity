@@ -686,6 +686,9 @@ def _flood_fill_room(grid, start_x: int, start_y: int, z: int, visited: Set[Coor
 
 def detect_rooms(grid) -> None:
     """
+    DISABLED: Old auto-room detection system.
+    Manual room system (room_system.py) is now used instead.
+    
     Scan the grid and detect all rooms on ALL Z-levels.
     
     A room is defined as:
@@ -797,20 +800,21 @@ def detect_rooms(grid) -> None:
 
 
 def mark_rooms_dirty() -> None:
-    """Mark rooms as needing re-detection. Call when construction completes."""
-    global _needs_update
-    _needs_update = True
+    """DISABLED: Old auto-room detection system. Manual room system (room_system.py) is now used instead."""
+    # Disabled - manual room system is now used
+    pass
 
 
 def update_rooms(grid) -> None:
     """
+    DISABLED: Old auto-room detection system.
+    Manual room system (room_system.py) is now used instead.
+    
     Update room detection if needed.
     Only re-detects when marked dirty (after construction completes).
     """
-    global _needs_update
-    if _needs_update:
-        detect_rooms(grid)
-        _needs_update = False
+    # Disabled - manual room system is now used
+    pass
 
 
 def get_room_count() -> int:

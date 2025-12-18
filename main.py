@@ -277,6 +277,10 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
             # Start drag for stockpile zone (rectangle) - works on both Z levels
             _drag_start = (gx, gy)
             _drag_mode = "stockpile"
+        elif build_mode and build_mode.startswith("room_"):
+            # Room designation - drag to create room
+            _drag_start = (gx, gy)
+            _drag_mode = build_mode  # "room_bedroom", "room_kitchen", etc.
         elif build_mode == "harvest":
             # Combined harvest + haul tool - ground level only
             if current_z != 0:
@@ -470,6 +474,41 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                     tile_count = zone_info["tile_count"] if zone_info else len(tiles)
                     z_info = f" on z={current_z}" if current_z > 0 else ""
                     print(f"Created stockpile zone with {tile_count} tile(s){z_info}")
+            
+            elif _drag_mode and _drag_mode.startswith("room_"):
+                # Room designation - create room
+                import room_system
+                
+                # Extract room type from drag mode
+                room_type_map = {
+                    "room_bedroom": "Bedroom",
+                    "room_kitchen": "Kitchen",
+                    "room_workshop": "Workshop",
+                    "room_barracks": "Barracks",
+                    "room_prison": "Prison",
+                    "room_hospital": "Hospital",
+                    "room_rec_room": "Rec Room",
+                    "room_dining_hall": "Dining Hall",
+                }
+                room_type = room_type_map.get(_drag_mode)
+                
+                if room_type:
+                    # Get all tiles in rectangle
+                    tiles = get_drag_rect(_drag_start, (gx, gy))
+                    
+                    # Attempt to create room
+                    success, room_id, errors = room_system.create_room(grid, tiles, current_z, room_type)
+                    
+                    if success:
+                        room_data = room_system.get_room_data(room_id)
+                        quality = room_data.get("quality", 0)
+                        z_info = f" on z={current_z}" if current_z > 0 else ""
+                        print(f"[Room] Created {room_type} (ID {room_id}) with {len(tiles)} tiles, quality {quality}{z_info}")
+                    else:
+                        # Show validation errors
+                        print(f"[Room] Cannot create {room_type}:")
+                        for error in errors:
+                            print(f"  - {error}")
             
             elif _drag_mode == "harvest":
                 # Combined harvest + haul tool
@@ -842,6 +881,17 @@ def main() -> None:
                                            click_location=fixer_loc)
                     else:
                         print("[Debug] Fixer already present, skipping")
+                elif event.key == pygame.K_F4:
+                    # Debug: Toggle free build mode (no material requirements)
+                    from buildings import toggle_free_build_mode
+                    new_state = toggle_free_build_mode()
+                    status = "ENABLED" if new_state else "DISABLED"
+                    print(f"[Debug] FREE BUILD MODE: {status}")
+                    from notifications import add_notification, NotificationType
+                    add_notification(NotificationType.INFO, 
+                                   f"FREE BUILD MODE: {status}",
+                                   "No material requirements" if new_state else "Normal building rules",
+                                   duration=180)
                 elif event.key == pygame.K_F8:
                     # Debug: Print construction site status
                     from buildings import get_all_construction_sites, get_missing_materials
@@ -998,6 +1048,14 @@ def main() -> None:
             
             # Process auto-equip (colonists claim items matching preferences)
             process_auto_equip(colonists, zones_module, jobs_module)
+            
+            # Spawn recreation jobs during recreation hours
+            from recreation import spawn_recreation_jobs
+            spawn_recreation_jobs(colonists, grid, tick_count)
+            
+            # Spawn training jobs during morning drill hours
+            from training import spawn_training_jobs
+            spawn_training_jobs(colonists, tick_count)
             
             # Process stockpile relocation (items from zones being removed)
             zones_module.process_stockpile_relocation(jobs_module)
@@ -1175,6 +1233,18 @@ def main() -> None:
         
         # Draw debug overlay (toggle with 'I' key)
         draw_debug(screen, grid, colonists, jobs_module, resources_module, zones_module, buildings_module, rooms_module)
+        
+        # Draw free build mode indicator
+        from buildings import FREE_BUILD_MODE
+        if FREE_BUILD_MODE:
+            font_medium = pygame.font.Font(None, 32)
+            free_build_text = font_medium.render("FREE BUILD MODE", True, (100, 255, 100))
+            free_build_rect = free_build_text.get_rect(center=(SCREEN_W // 2, 30))
+            # Draw background
+            bg_rect = free_build_rect.inflate(20, 10)
+            pygame.draw.rect(screen, (20, 40, 20), bg_rect)
+            pygame.draw.rect(screen, (100, 255, 100), bg_rect, 2)
+            screen.blit(free_build_text, free_build_rect)
         
         # Draw pause indicator (centered in viewport area)
         if paused:

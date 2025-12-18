@@ -91,8 +91,10 @@ CATEGORY_PRIORITY = {
     "supply": 60,         # Supply is hauling
     "harvest": 40,        # Filler work
     "salvage": 40,        # Same as harvest
+    "training": 35,       # Military training
     "equip": 30,          # Personal tasks
-    "misc": 20,           # Everything else
+    "recreation": 25,     # Recreation/social activities
+    "misc": 20,           # Miscellaneous
 }
 
 # Construction subtype priorities (higher = built first)
@@ -141,7 +143,7 @@ def add_job(
 
     Args:
         pressure: Urgency level 1-10 (1=baseline, 10=critical).
-                  Jobs with pressure > colonist.pressure_score can interrupt.
+                  Jobs with pressure > colonist.needs_of_the_many can interrupt.
         subtype: Specific construction type for priority (workstation, door, wall, floor).
 
     Returns the created Job instance.
@@ -163,6 +165,10 @@ def add_job(
             subtype = subtype or "furniture"
         elif job_type == "crafting":
             category = "crafting"
+        elif job_type in ("recreation_social", "recreation_solo"):
+            category = "recreation"
+        elif job_type == "training":
+            category = "training"
         else:
             category = "misc"
     
@@ -278,21 +284,21 @@ def get_all_available_jobs(
     return available
 
 
-def should_take_job(colonist_pressure_score: int, new_job: Job, current_job: Job | None) -> bool:
-    """Determine if a colonist should take/switch to a new job based on pressure rules.
+def should_take_job(colonist_needs_of_the_many: int, new_job: Job, current_job: Job | None) -> bool:
+    """Determine if a colonist should take/switch to a new job based on needs rules.
     
-    Pressure Decision Rules:
-    - Higher colonist pressure_score = more willing to be interrupted
-    - Job pressure is the threshold required to interrupt
-    - colonist_pressure_score >= job.pressure means colonist CAN be interrupted
+    Needs of the Many Decision Rules:
+    - Higher needs_of_the_many = more willing to drop personal work for colony needs
+    - Job pressure is the colony urgency threshold
+    - colonist.needs_of_the_many >= job.pressure means colonist WILL be interrupted
     
     Example:
     - Job pressure 5 (cooking) requires score 5+ to interrupt
-    - Colonist with score 10 will always drop work for urgent jobs
-    - Colonist with score 3 won't be interrupted by pressure 5 jobs
+    - Colonist with score 10 will always drop work for urgent colony needs
+    - Colonist with score 3 won't be interrupted by pressure 5 jobs (selfish)
     
     Args:
-        colonist_pressure_score: Colonist's interruptibility (1-10, higher = more interruptible)
+        colonist_needs_of_the_many: Colonist's collectivism (1-10, higher = more collectivist)
         new_job: The job being considered
         current_job: Colonist's current job, or None if idle
     
@@ -305,7 +311,7 @@ def should_take_job(colonist_pressure_score: int, new_job: Job, current_job: Job
     
     # Working colonist: check if they can be interrupted
     # Colonist score must be >= job pressure to be interruptible
-    if colonist_pressure_score >= new_job.pressure:
+    if colonist_needs_of_the_many >= new_job.pressure:
         # Can be interrupted - but only if new job is higher pressure than current
         if new_job.pressure > current_job.pressure:
             return True

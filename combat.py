@@ -363,6 +363,19 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
                 cause = body.cause_of_death or "injuries"
                 result["cause_of_death"] = cause
                 result["message"] = f"{attacker_name} killed {defender_name}! ({cause})"
+                
+                # Victory bark
+                from conversations import generate_combat_bark, add_conversation
+                bark = generate_combat_bark("victory", attacker, defender)
+                if bark:
+                    s_line, l_line = bark
+                    add_conversation(
+                        attacker.name, defender.name,
+                        s_line, l_line,
+                        game_tick, "combat_shout",
+                        speaker=attacker, listener=defender
+                    )
+                
                 return result
         
         # Check for retreat based on overall body health, not HP bar
@@ -410,6 +423,18 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
                     if random.random() < 0.5:
                         modify_relationship(attacker, defender, 2, "Won a fight")
                 
+                # Retreat bark
+                from conversations import generate_combat_bark, add_conversation
+                bark = generate_combat_bark("retreat", defender, attacker)
+                if bark:
+                    s_line, l_line = bark
+                    add_conversation(
+                        defender.name, attacker.name,
+                        s_line, l_line,
+                        game_tick, "combat_shout",
+                        speaker=defender, listener=attacker
+                    )
+                
                 return result
         else:
             # Include body part in message if available
@@ -418,6 +443,19 @@ def perform_attack(attacker: "Colonist", defender: "Colonist",
                 result["message"] = body_log
             else:
                 result["message"] = f"{attacker_name} hit {defender_name} for {damage:.0f} damage"
+            
+            # Hit bark (30% chance)
+            if random.random() < 0.3:
+                from conversations import generate_combat_bark, add_conversation
+                bark = generate_combat_bark("hit", attacker, defender)
+                if bark:
+                    s_line, l_line = bark
+                    add_conversation(
+                        attacker.name, defender.name,
+                        s_line, l_line,
+                        game_tick, "combat_bark",
+                        speaker=attacker, listener=defender
+                    )
         
         # Add thoughts
         attacker.add_thought("combat", f"Fighting {defender_name}.", -0.1, game_tick=game_tick)
@@ -731,7 +769,7 @@ def check_trait_clash(colonist: "Colonist", other: "Colonist", game_tick: int) -
                 colonist.name, other.name,
                 speaker_line, listener_line,
                 game_tick, "conflict",
-                speaker_id=id(colonist), listener_id=id(other)
+                speaker=colonist, listener=other
             )
             
             # Add thoughts

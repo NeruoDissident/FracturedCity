@@ -617,7 +617,6 @@ def get_combined_affinities(traits: dict) -> dict[str, float]:
     combined = {
         "interference": 0.0,
         "echo": 0.0,
-        "pressure": 0.0,
         "integrity": 0.0,
         "outside": 0.0,
         "crowding": 0.0,
