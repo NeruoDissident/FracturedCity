@@ -961,8 +961,13 @@ class Grid:
                         # Ground level: draw earth tones
                         color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, z, 8)
                         pygame.draw.rect(surface, color, rect)
-                    # Upper floors: don't draw empty tiles (layer below visible)
-                    continue
+                        
+                        # Check if this empty tile is a stockpile - if so, don't skip rendering
+                        if not zones.is_stockpile_zone(x, y, z):
+                            continue
+                    else:
+                        # Upper floors: don't draw empty tiles (layer below visible)
+                        continue
                 elif tile == "dirt":
                     color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, z, 10)
                     pygame.draw.rect(surface, color, rect)
@@ -997,13 +1002,7 @@ class Grid:
                     color = self._get_tile_color_variation(COLOR_TILE_PROP_SCRAP, x, y, z, 15)
                     pygame.draw.rect(surface, color, rect)
 
-                # Draw stockpile zone background (on current Z level)
-                # Resource stacks are drawn later, after floor tiles
-                if zones.is_stockpile_zone(x, y, z):
-                    # Semi-transparent green overlay
-                    zone_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
-                    zone_surface.fill(COLOR_ZONE_STOCKPILE)
-                    surface.blit(zone_surface, rect.topleft)
+                # Stockpile zone background moved to after floor rendering (see line ~1821)
                 
                 # Momentary hover highlight (no sticky selection)
                 if hovered_tile is not None and hovered_tile == (x, y):
@@ -1818,8 +1817,14 @@ class Grid:
                     if is_finished:
                         pygame.draw.line(surface, (180, 140, 100), rect.topleft, (rect.right - 1, rect.top), 1)
                 
-                # Draw stockpile resource stacks ON TOP of floor tiles (on current Z level)
+                # Draw stockpile zone background AFTER floor tiles (on current Z level)
                 if zones.is_stockpile_zone(x, y, z):
+                    # Semi-transparent green overlay
+                    zone_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    zone_surface.fill(COLOR_ZONE_STOCKPILE)
+                    surface.blit(zone_surface, rect.topleft)
+                    
+                    # Draw resource stacks and equipment on top
                     tile_storage = zones.get_tile_storage(x, y, z)
                     equipment_storage = zones.get_equipment_at_tile(x, y, z)
                     

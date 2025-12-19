@@ -86,7 +86,13 @@ BUILDING_TYPES = {
         "construction_work": 100,
         "walkable": False,  # Workstation blocks movement
         "workstation": True,  # This is a workstation
-        "recipe": {"input": {"scrap": 2}, "output": {"metal": 1}, "work_time": 60},
+        "multi_recipe": True,  # Supports multiple recipes
+        "recipes": [
+            {"id": "scrap_to_metal", "name": "Refine Metal", "input": {"scrap": 2}, "output": {"metal": 1}, "work_time": 60},
+            {"id": "metal_components", "name": "Metal Components", "input": {"metal": 1}, "output": {"scrap": 3}, "work_time": 50},
+            {"id": "workshop_table", "name": "Workshop Table", "input": {"wood": 3, "metal": 2}, "output_item": "workshop_table", "work_time": 100},
+            {"id": "tool_rack", "name": "Tool Rack", "input": {"wood": 2, "metal": 1}, "output_item": "tool_rack", "work_time": 70},
+        ],
     },
     "generator": {
         "name": "Generator",
@@ -95,7 +101,11 @@ BUILDING_TYPES = {
         "construction_work": 120,
         "walkable": False,  # Workstation blocks movement
         "workstation": True,  # This is a workstation
-        "recipe": {"input": {"wood": 3}, "output": {"power": 1}, "work_time": 80},
+        "multi_recipe": True,  # Supports multiple recipes
+        "recipes": [
+            {"id": "power_from_wood", "name": "Burn Wood for Power", "input": {"wood": 3}, "output": {"power": 1}, "work_time": 80},
+            {"id": "power_from_scrap", "name": "Burn Scrap for Power", "input": {"scrap": 4}, "output": {"power": 1}, "work_time": 90},
+        ],
     },
     "stove": {
         "name": "Stove",
@@ -104,7 +114,12 @@ BUILDING_TYPES = {
         "construction_work": 100,
         "walkable": False,  # Workstation blocks movement
         "workstation": True,  # This is a workstation
-        "recipe": {"input": {"raw_food": 1, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
+        "multi_recipe": True,  # Supports multiple recipes
+        "recipes": [
+            {"id": "simple_meal", "name": "Simple Meal", "input": {"raw_food": 1, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
+            {"id": "fine_meal", "name": "Fine Meal", "input": {"raw_food": 2, "power": 1}, "output": {"cooked_meal": 2}, "work_time": 90},
+            {"id": "preserved_rations", "name": "Preserved Rations", "input": {"raw_food": 3, "metal": 1}, "output": {"cooked_meal": 4}, "work_time": 120},
+        ],
     },
     # === Item Crafting Stations ===
     "gutter_forge": {
@@ -120,6 +135,11 @@ BUILDING_TYPES = {
             {"id": "work_gloves", "name": "Work Gloves", "input": {"scrap": 2}, "output_item": "work_gloves", "work_time": 60},
             {"id": "signal_gauntlet", "name": "Signal Gauntlet", "input": {"metal": 2, "power": 1}, "output_item": "signal_gauntlet", "work_time": 100},
             {"id": "gutter_slab", "name": "Gutter Slab", "input": {"wood": 4, "mineral": 2}, "output_item": "gutter_slab", "work_time": 90},
+            {"id": "pipe_weapon", "name": "Pipe Weapon", "input": {"metal": 3, "scrap": 1}, "output_item": "pipe_weapon", "work_time": 100},
+            {"id": "scrap_blade", "name": "Scrap Blade", "input": {"metal": 2, "scrap": 2}, "output_item": "scrap_blade", "work_time": 90},
+            {"id": "reinforced_door", "name": "Reinforced Door", "input": {"metal": 4, "wood": 2}, "output_item": "reinforced_door", "work_time": 120},
+            {"id": "weapon_rack", "name": "Weapon Rack", "input": {"metal": 2, "wood": 3}, "output_item": "weapon_rack", "work_time": 80},
+            {"id": "armor_plate", "name": "Armor Plate", "input": {"metal": 3}, "output_item": "armor_plate", "work_time": 70},
         ],
     },
     "skinshop_loom": {
@@ -137,6 +157,10 @@ BUILDING_TYPES = {
             {"id": "work_boots", "name": "Work Boots", "input": {"scrap": 2}, "output_item": "work_boots", "work_time": 60},
             {"id": "scrap_armor", "name": "Scrap Armor", "input": {"metal": 3, "scrap": 2}, "output_item": "scrap_armor", "work_time": 120},
             {"id": "crash_bed", "name": "Crash Bed", "input": {"scrap": 2, "wood": 2}, "output_item": "crash_bed", "work_time": 90},
+            {"id": "comfort_chair", "name": "Comfort Chair", "input": {"wood": 2, "scrap": 1}, "output_item": "comfort_chair", "work_time": 80},
+            {"id": "storage_locker", "name": "Storage Locker", "input": {"wood": 3, "metal": 1}, "output_item": "storage_locker", "work_time": 90},
+            {"id": "dining_table", "name": "Dining Table", "input": {"wood": 4}, "output_item": "dining_table", "work_time": 100},
+            {"id": "wall_lamp", "name": "Wall Lamp", "input": {"metal": 1, "power": 1}, "output_item": "wall_lamp", "work_time": 50},
         ],
     },
     "cortex_spindle": {
@@ -153,6 +177,10 @@ BUILDING_TYPES = {
             {"id": "lucky_coin", "name": "Lucky Coin", "input": {"metal": 1}, "output_item": "lucky_coin", "work_time": 40},
             {"id": "memory_locket", "name": "Memory Locket", "input": {"metal": 1, "mineral": 1}, "output_item": "memory_locket", "work_time": 60},
             {"id": "signal_stone", "name": "Signal Stone", "input": {"mineral": 2, "power": 1}, "output_item": "signal_stone", "work_time": 80},
+            {"id": "medical_scanner", "name": "Medical Scanner", "input": {"metal": 2, "mineral": 2, "power": 1}, "output_item": "medical_scanner", "work_time": 120},
+            {"id": "stim_injector", "name": "Stim Injector", "input": {"metal": 1, "mineral": 2}, "output_item": "stim_injector", "work_time": 90},
+            {"id": "neural_interface", "name": "Neural Interface", "input": {"metal": 3, "mineral": 3, "power": 2}, "output_item": "neural_interface", "work_time": 150},
+            {"id": "data_slate", "name": "Data Slate", "input": {"metal": 1, "mineral": 1}, "output_item": "data_slate", "work_time": 60},
         ],
     },
     # === Military/Training ===
@@ -642,9 +670,7 @@ def register_workstation(x: int, y: int, z: int, workstation_type: str) -> None:
         "working": False,
         "progress": 0,
         "input_items": {},
-        "auto_mode": "infinite",
-        "craft_queue": 0,
-        "target_count": 0,
+        "orders": [],  # New order system
     }
     
     # For multi-recipe stations, default to first recipe
@@ -1396,49 +1422,46 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
         if recipe is None:
             continue
         
-        # Determine order settings for this workstation
-        auto_mode = ws.get("auto_mode", "infinite")
-        craft_queue = ws.get("craft_queue", 0)
-        target_count = ws.get("target_count", 0)
-
-        # Decide if a new crafting job should be created based on order mode
+        # Check orders list for this workstation
+        orders = ws.get("orders", [])
+        if not orders:
+            continue
+        
+        # Get first order (FIFO)
+        current_order = orders[0]
+        order_recipe_id = current_order.get("recipe_id")
+        
+        # Skip if this order's recipe doesn't match the workstation's current recipe
+        if recipe["id"] != order_recipe_id:
+            # Try to set the correct recipe for this order
+            if not set_workstation_recipe(x, y, z, order_recipe_id):
+                continue
+            recipe = get_workstation_recipe(x, y, z)
+            if recipe is None or recipe["id"] != order_recipe_id:
+                continue
+        
+        # Check if order is complete
+        quantity_type = current_order.get("quantity_type", "single")
+        completed = current_order.get("completed", 0)
+        target = current_order.get("target", 1)
+        
         allow_craft = False
-
-        # Explicit queued crafts always take priority
-        if craft_queue > 0:
+        
+        if quantity_type == "infinite":
+            # Always craft for infinite orders
             allow_craft = True
-        elif auto_mode == "infinite":
-            # Legacy behavior - always craft when inputs are available
-            allow_craft = True
-        elif auto_mode == "target" and target_count > 0:
-            # For target mode, only craft while total output is below target
-            output_item_id = recipe.get("output_item")
-            outputs = recipe.get("output", {})
-            current_total = 0
-
-            if output_item_id:
-                # Count crafted items on the ground and in equipment storage
-                import items as items_module
-                all_world_items = items_module.get_all_world_items()
-                for _, items_at_tile in all_world_items.items():
-                    for item in items_at_tile:
-                        if item.get("id") == output_item_id:
-                            current_total += 1
-
-                all_equipment = zones_module.get_all_stored_equipment()
-                for _, stored_items in all_equipment.items():
-                    for stored in stored_items:
-                        if stored.get("id") == output_item_id:
-                            current_total += 1
-            elif outputs:
-                # For resource outputs, track the first resource type
-                res_type = next(iter(outputs.keys()))
-                current_total = zones_module.get_total_stored(res_type)
-
-            if current_total < target_count:
+        elif quantity_type == "single":
+            # Single order: craft once
+            if completed < 1:
                 allow_craft = True
-
+        elif quantity_type == "target":
+            # Target order: craft until target reached
+            if completed < target:
+                allow_craft = True
+        
         if not allow_craft:
+            # This order is complete, remove it and continue to next
+            orders.pop(0)
             continue
         
         # Check if stockpile has required inputs

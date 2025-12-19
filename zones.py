@@ -402,6 +402,9 @@ def add_to_zone_storage(x: int, y: int, z: int, resource_type: str, amount: int)
     if zone_id is not None:
         zone = _ZONES.get(zone_id)
         if zone is not None:
+            # Initialize stored dict if missing (for zones loaded from old saves)
+            if "stored" not in zone:
+                zone["stored"] = {}
             if resource_type not in zone["stored"]:
                 zone["stored"][resource_type] = 0
             zone["stored"][resource_type] += stored

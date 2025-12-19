@@ -52,23 +52,35 @@ def spawn_recreation_jobs(colonists: List, grid, game_tick: int) -> None:
     if existing_recreation >= target_jobs:
         return  # Already have enough
     
-    # Spawn new recreation jobs at random locations
-    # For now, spawn near colonists (future: spawn at designated recreation areas)
+    # Spawn recreation jobs in recreation rooms if available
     import random
+    from room_system import get_all_rooms
     
     jobs_to_spawn = target_jobs - existing_recreation
+    
+    # Find all recreation rooms
+    rec_room_tiles = []
+    all_rooms = get_all_rooms()
+    for room_id, room_data in all_rooms.items():
+        if room_data.get("type") == "Rec Room":
+            rec_room_tiles.extend(room_data.get("tiles", []))
     
     for _ in range(jobs_to_spawn):
         if not colonists:
             break
         
-        # Pick a random colonist as anchor point
-        anchor = random.choice(colonists)
-        
-        # Spawn near the colonist (within 5 tiles)
-        x = anchor.x + random.randint(-5, 5)
-        y = anchor.y + random.randint(-5, 5)
-        z = anchor.z
+        # Try to spawn in recreation room first
+        if rec_room_tiles:
+            # Pick random tile from recreation rooms
+            tile = random.choice(rec_room_tiles)
+            x, y = tile
+            z = 0  # Assume ground level for now
+        else:
+            # Fallback: spawn near colonists if no rec rooms
+            anchor = random.choice(colonists)
+            x = anchor.x + random.randint(-5, 5)
+            y = anchor.y + random.randint(-5, 5)
+            z = anchor.z
         
         # Clamp to grid bounds
         x = max(0, min(grid.width - 1, x))

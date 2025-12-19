@@ -1144,21 +1144,26 @@ class Colonist:
         
         # Get trait bonus for this job type
         trait_bonus = 0.0
+        
+        # Get room bonus for this job type
+        from room_effects import get_room_work_bonus
+        room_bonus = get_room_work_bonus(int(self.x), int(self.y), self.z, job_type)
+        
         if job_type == "gathering":
             trait_bonus = self.trait_job_mods.get("scavenge", 0.0)
-            return 1.0 + stats["harvest_speed"] + focus_bonus + trait_bonus
+            return 1.0 + stats["harvest_speed"] + focus_bonus + trait_bonus + room_bonus
         elif job_type == "crafting":
             trait_bonus = self.trait_job_mods.get("craft", 0.0)
-            return 1.0 + stats["craft_speed"] + focus_bonus + trait_bonus
+            return 1.0 + stats["craft_speed"] + focus_bonus + trait_bonus + room_bonus
         elif job_type == "haul":
             trait_bonus = self.trait_job_mods.get("haul", 0.0)
-            return 1.0 + focus_bonus + trait_bonus
+            return 1.0 + focus_bonus + trait_bonus + room_bonus
         elif job_type == "cook":
             trait_bonus = self.trait_job_mods.get("cook", 0.0)
-            return 1.0 + focus_bonus + trait_bonus
+            return 1.0 + focus_bonus + trait_bonus + room_bonus
         else:  # construction (default)
             trait_bonus = self.trait_job_mods.get("build", 0.0)
-            return 1.0 + stats["build_speed"] + focus_bonus + trait_bonus
+            return 1.0 + stats["build_speed"] + focus_bonus + trait_bonus + room_bonus
     
     def get_equipment_comfort_bonus(self) -> float:
         """Get comfort bonus from equipment (added to mood calculations)."""
@@ -2013,23 +2018,15 @@ class Colonist:
         except Exception as e:
             pass  # Silently skip if beds module not available
         
-        # Room quality (using existing rooms.py functions)
+        # Room quality (using room_system.py functions)
         try:
-            from rooms import get_room_at, get_room_data
+            from room_effects import get_room_mood_bonus
             
-            room_id = get_room_at(self.x, self.y, self.z)
-            if room_id:
-                room_data = get_room_data(room_id)
-                if room_data:
-                    room_type = room_data.get("room_type")
-                    
-                    # Room type bonuses (will expand in Phase 1.2)
-                    if room_type == "CoffinNook":
-                        breakdown["Private Room"] = 3.0
-                    elif room_type == "CrashPad":
-                        breakdown["Shared Room"] = 0.0  # Neutral for now
-                    elif room_type == "Kitchen":
-                        breakdown["In Kitchen"] = 1.0
+            room_mood = get_room_mood_bonus(int(self.x), int(self.y), self.z)
+            if room_mood > 0:
+                breakdown["Room Quality"] = room_mood
+            elif room_mood < 0:
+                breakdown["Poor Room"] = room_mood
         except Exception as e:
             pass  # Silently skip if rooms module not available
         
@@ -2548,6 +2545,12 @@ class Colonist:
         elif job.type == "crafting":
             # Reserve workstation and start fetching materials
             buildings.reserve_workstation(job.x, job.y, job.z)
+            # Mark first order as in_progress
+            ws = buildings.get_workstation(job.x, job.y, job.z)
+            if ws is not None:
+                orders = ws.get("orders", [])
+                if orders:
+                    orders[0]["in_progress"] = True
             self.state = "crafting_fetch"
             self._crafting_inputs_needed = None  # Will be set when we start fetching
         else:
@@ -2790,7 +2793,7 @@ class Colonist:
         # Log work progress on first tick of job (to verify equipment effects)
         if job.progress <= work_modifier + 0.01:  # First tick
             if work_modifier != 1.0:
-                print(f"[Work] {self.name} working on {job.type} at {work_modifier:.0%} speed")
+                pass  # print(f"[Work] {self.name} working on {job.type} at {work_modifier:.0%} speed")
         
         # Sample environment on every job tick
         self.sample_environment(grid, self._all_colonists, self._game_tick)
@@ -2805,7 +2808,7 @@ class Colonist:
                 expected_ticks = job.required
                 actual_ticks = int(job.required / work_modifier)
                 saved = expected_ticks - actual_ticks
-                print(f"[Work] {self.name} finished {job.type} in ~{actual_ticks} ticks (saved ~{saved} ticks from {work_modifier:.0%} speed)")
+                # print(f"[Work] {self.name} finished {job.type} in ~{actual_ticks} ticks (saved ~{saved} ticks from {work_modifier:.0%} speed)")
             
             # Sample environment on job completion
             self.sample_environment(grid, self._all_colonists, self._game_tick)
@@ -3223,17 +3226,17 @@ class Colonist:
                     item_name = item_data.get("name", "equipment")
                     if zones.is_stockpile_zone(dest_x, dest_y, dest_z):
                         zones.store_equipment_at_tile(dest_x, dest_y, dest_z, item_data)
-                        print(f"[Haul] Stored {item_name} in stockpile at ({dest_x},{dest_y})")
+                        # print(f"[Haul] Stored {item_name} in stockpile at ({dest_x},{dest_y})")
                     else:
                         print(f"[Haul] Dropped {item_name} (stockpile zone removed)")
                 elif zones.is_stockpile_zone(dest_x, dest_y, dest_z):
                     add_to_stockpile(resource_type, amount)
                     zones.add_to_zone_storage(dest_x, dest_y, dest_z, resource_type, amount)
-                    print(f"[Haul] Delivered {amount} {resource_type} to stockpile at ({dest_x},{dest_y})")
+                    # print(f"[Haul] Delivered {amount} {resource_type} to stockpile at ({dest_x},{dest_y})")
                 else:
                     # Destination is no longer a stockpile - just add to global stockpile
                     add_to_stockpile(resource_type, amount)
-                    print(f"[Haul] Delivered {amount} {resource_type} (stockpile zone removed)")
+                    # print(f"[Haul] Delivered {amount} {resource_type} (stockpile zone removed)")
             elif job.type == "trade_deliver":
                 # Deliver to fixer
                 from wanderers import get_fixer_for_trade_job, complete_trade_delivery
@@ -3567,6 +3570,10 @@ class Colonist:
         ws = buildings.get_workstation(job.x, job.y, job.z)
         inputs_have = ws.get("input_items", {}) if ws else {}
         
+        # Track how long we've been waiting for materials
+        if not hasattr(self, '_crafting_wait_time'):
+            self._crafting_wait_time = 0
+        
         # Find what we still need
         for res_type, amount_needed in inputs_needed.items():
             have = inputs_have.get(res_type, 0)
@@ -3574,8 +3581,21 @@ class Colonist:
                 # Find stockpile with this resource
                 source = zones.find_stockpile_with_resource(res_type, z=job.z)
                 if source is None:
-                    # No resource available - wait
+                    # No resource available - wait, but timeout after 300 ticks (~5 seconds)
+                    self._crafting_wait_time += 1
+                    if self._crafting_wait_time > 300:
+                        # Timeout - cancel job and release workstation
+                        print(f"[Crafting] {self.name} cancelled crafting job - missing {res_type}")
+                        buildings.release_workstation(job.x, job.y, job.z)
+                        buildings.mark_crafting_job_completed(job.x, job.y, job.z)
+                        remove_job(job)
+                        self.current_job = None
+                        self.state = "idle"
+                        self._crafting_wait_time = 0
                     return
+                
+                # Reset wait timer when materials are found
+                self._crafting_wait_time = 0
                 
                 source_x, source_y, source_z = source
                 
@@ -3586,8 +3606,13 @@ class Colonist:
                 
                 # Check if at stockpile
                 if self.x == source_x and self.y == source_y and self.z == source_z:
-                    # Pick up resource
-                    item = zones.remove_from_tile_storage(source_x, source_y, source_z, 1)
+                    # Pick up resource - use haul capacity like construction supply jobs
+                    need_amount = amount_needed - have
+                    haul_capacity = self.get_equipment_haul_capacity()
+                    pickup_amount = int(need_amount * haul_capacity)
+                    pickup_amount = max(1, min(pickup_amount, need_amount))  # At least 1, at most what's needed
+                    
+                    item = zones.remove_from_tile_storage(source_x, source_y, source_z, pickup_amount)
                     if item:
                         self.carrying = {"type": item["type"], "amount": item["amount"]}
                         self.pick_up_item(self.carrying)
@@ -3697,7 +3722,7 @@ class Colonist:
                     drop_x, drop_y = job.x + dx, job.y + dy
                     if grid.is_walkable(drop_x, drop_y, job.z):
                         spawn_world_item(drop_x, drop_y, job.z, output_item_id)
-                        print(f"[Crafting] Produced {item_name} at ({drop_x},{drop_y})")
+                        # print(f"[Crafting] Produced {item_name} at ({drop_x},{drop_y})")
                         break
             else:
                 # Produce resource output (legacy behavior)
@@ -3709,13 +3734,17 @@ class Colonist:
                         drop_x, drop_y = job.x + dx, job.y + dy
                         if grid.is_walkable(drop_x, drop_y, job.z):
                             create_resource_item(drop_x, drop_y, job.z, res_type, amount)
-                            print(f"[Crafting] Produced {amount} {res_type} at ({drop_x},{drop_y})")
+                            # print(f"[Crafting] Produced {amount} {res_type} at ({drop_x},{drop_y})")
                             break
             
-            # Decrement any finite craft queue for this workstation
+            # Update order progress for new order system
             ws_final = buildings.get_workstation(job.x, job.y, job.z)
-            if ws_final is not None and ws_final.get("craft_queue", 0) > 0:
-                ws_final["craft_queue"] -= 1
+            if ws_final is not None:
+                orders = ws_final.get("orders", [])
+                if orders:
+                    # Increment completed count for first order
+                    orders[0]["completed"] = orders[0].get("completed", 0) + 1
+                    orders[0]["in_progress"] = False
 
             # Complete job
             buildings.release_workstation(job.x, job.y, job.z)
@@ -3897,7 +3926,7 @@ class Colonist:
                 for thought_text, mood_effect in get_sleep_thoughts(self, all_colonists):
                     self.add_thought("need", thought_text, mood_effect, game_tick=game_tick)
                 
-                print(f"[Sleep] {self.name} woke up feeling {'rested' if quality > 1 else 'okay' if quality > 0.5 else 'tired'}")
+                # print(f"[Sleep] {self.name} woke up feeling {'rested' if quality > 1 else 'okay' if quality > 0.5 else 'tired'}")
             return
         
         # Very tired and idle - try to sleep
@@ -3912,6 +3941,7 @@ class Colonist:
         """Try to find a bed and go to sleep."""
         from beds import get_colonist_bed, get_all_beds, assign_colonist_to_bed, get_bed_occupants
         from relationships import get_relationship, get_romantic_partner
+        from room_system import get_room_at, get_room_data
         
         # Check if we have an assigned bed
         bed_pos = get_colonist_bed(id(self))
@@ -3925,7 +3955,7 @@ class Colonist:
                 self.is_sleeping = True
                 self.state = "sleeping"
                 self.add_thought("need", "Time to rest.", 0.05, game_tick=game_tick)
-                print(f"[Sleep] {self.name} went to sleep in their bed")
+                # print(f"[Sleep] {self.name} went to sleep in their bed")
                 return
             else:
                 # Walk to bed
@@ -3941,6 +3971,16 @@ class Colonist:
             best_bed = None
             best_score = -999
             
+            # Check if colonist is injured (for hospital bed priority)
+            is_injured = False
+            body = getattr(self, 'body', None)
+            if body:
+                avg_health = sum(p.health for p in body.parts.values()) / len(body.parts)
+                is_injured = avg_health < 80
+            
+            # Check if colonist is a fighter (for barracks bed priority)
+            is_fighter = "fighter" in self.job_tags and self.job_tags["fighter"]
+            
             for pos, data in all_beds:
                 occupants = data.get("assigned", [])
                 
@@ -3949,6 +3989,31 @@ class Colonist:
                     continue
                 
                 score = 0
+                
+                # Check room type at bed location
+                bx, by, bz = pos
+                room_id = get_room_at(bx, by, bz)
+                room_type = None
+                if room_id:
+                    room_data = get_room_data(room_id)
+                    if room_data:
+                        room_type = room_data.get("type")
+                
+                # Injured colonists strongly prefer hospital beds
+                if is_injured and room_type == "Hospital":
+                    score += 100
+                elif is_injured and room_type != "Hospital":
+                    score -= 20  # Penalty for non-hospital beds when injured
+                
+                # Fighters strongly prefer barracks beds
+                if is_fighter and room_type == "Barracks":
+                    score += 80
+                elif is_fighter and room_type != "Barracks":
+                    score -= 15  # Penalty for non-barracks beds for fighters
+                
+                # Non-fighters prefer NOT to sleep in barracks
+                if not is_fighter and room_type == "Barracks":
+                    score -= 30
                 
                 if len(occupants) == 0:
                     # Empty bed - base score
@@ -4003,7 +4068,7 @@ class Colonist:
             self.is_sleeping = True
             self.state = "sleeping"
             self.add_thought("need", "Sleeping on the cold ground...", -0.2, game_tick=game_tick)
-            print(f"[Sleep] {self.name} collapsed to sleep on the ground (no bed)")
+            # print(f"[Sleep] {self.name} collapsed to sleep on the ground (no bed)")
 
     def _heal_body(self, game_tick: int = 0) -> None:
         """Natural healing of body parts over time."""
@@ -4023,6 +4088,11 @@ class Colonist:
         # Heal faster when well-fed
         if self.hunger < 30:
             heal_amount *= 1.5
+        
+        # Room healing bonus (Hospital room)
+        from room_effects import get_room_healing_bonus
+        room_healing = get_room_healing_bonus(int(self.x), int(self.y), self.z)
+        heal_amount *= (1.0 + room_healing)
         
         for part_id, part in body.parts.items():
             if part.status in (PartStatus.MISSING, PartStatus.CYBERNETIC, PartStatus.MANGLED):

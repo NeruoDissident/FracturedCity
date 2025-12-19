@@ -74,32 +74,14 @@ def mark_tile_dirty(x: int, y: int, z: int) -> None:
 
 
 def process_dirty_rooms(grid) -> None:
-    """Process all dirty tiles and update affected rooms.
+    """DISABLED: Old auto-room detection system.
     
-    Call this ONCE at the end of each tick (not per tile change).
-    Merges nearby dirty tiles into regions and runs flood-fill once per region.
+    Manual room system (room_system.py) is now used instead.
+    This function is kept as a no-op for compatibility.
     """
     global _DIRTY_TILES
-    
-    if not _DIRTY_TILES:
-        return
-    
-    # Copy and clear dirty set
-    dirty = _DIRTY_TILES.copy()
-    _DIRTY_TILES.clear()
-    
-    print(f"[Room] Processing {len(dirty)} dirty tiles: {list(dirty)[:5]}...")
-    
-    # Group dirty tiles by Z-level
-    by_z: Dict[int, Set[Coord]] = {}
-    for x, y, z in dirty:
-        if z not in by_z:
-            by_z[z] = set()
-        by_z[z].add((x, y))
-    
-    # Process each Z-level
-    for z, tiles_2d in by_z.items():
-        _process_dirty_region(grid, tiles_2d, z)
+    _DIRTY_TILES.clear()  # Clear any accumulated dirty tiles
+    return
 
 
 def _process_dirty_region(grid, dirty_tiles: Set[Coord], z: int) -> None:

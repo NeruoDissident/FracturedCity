@@ -30,14 +30,14 @@ def register_bed(x: int, y: int, z: int, quality: int = 1) -> None:
         "assigned": [],
         "quality": quality,  # 1=basic, 2=good, 3=excellent
     }
-    print(f"[Beds] Registered bed at ({x}, {y}, {z})")
+    # print(f"[Beds] Registered bed at ({x}, {y}, {z})")
 
 
 def unregister_bed(x: int, y: int, z: int) -> None:
     """Remove a bed from registry."""
     if (x, y, z) in _beds:
         del _beds[(x, y, z)]
-        print(f"[Beds] Unregistered bed at ({x}, {y}, {z})")
+        # print(f"[Beds] Unregistered bed at ({x}, {y}, {z})")
 
 
 def get_bed_at(x: int, y: int, z: int) -> Optional[dict]:
@@ -86,7 +86,7 @@ def assign_colonist_to_bed(colonist_id: int, x: int, y: int, z: int) -> bool:
     
     # Assign
     bed["assigned"].append(colonist_id)
-    print(f"[Beds] Colonist {colonist_id} assigned to bed at ({x}, {y}, {z})")
+    # print(f"[Beds] Colonist {colonist_id} assigned to bed at ({x}, {y}, {z})")
     return True
 
 
@@ -95,7 +95,7 @@ def unassign_colonist(colonist_id: int) -> None:
     for pos, data in _beds.items():
         if colonist_id in data["assigned"]:
             data["assigned"].remove(colonist_id)
-            print(f"[Beds] Colonist {colonist_id} unassigned from bed at {pos}")
+            # print(f"[Beds] Colonist {colonist_id} unassigned from bed at {pos}")
             return
 
 
@@ -136,6 +136,7 @@ def calculate_sleep_quality(colonist: "Colonist", all_colonists: list) -> float:
     - Has bed vs sleeping on ground
     - Bed quality
     - Bedmate relationship
+    - Room quality (Bedroom bonus)
     """
     from relationships import get_relationship, get_romantic_partner
     
@@ -152,6 +153,12 @@ def calculate_sleep_quality(colonist: "Colonist", all_colonists: list) -> float:
     
     # Base quality from bed
     quality = bed["quality"] * 0.5  # 0.5, 1.0, or 1.5
+    
+    # Room quality bonus (Bedroom)
+    from room_effects import get_room_sleep_bonus
+    bx, by, bz = bed_pos
+    sleep_mult, mood = get_room_sleep_bonus(bx, by, bz)
+    quality *= (1.0 + sleep_mult)  # Apply room sleep quality multiplier
     
     # Bedmate modifier
     bedmate_id = get_bedmate(colonist_id)

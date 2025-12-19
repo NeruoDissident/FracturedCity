@@ -134,8 +134,8 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
         return
     
     # Check workstation panel
-    from ui import get_workstation_panel
-    ws_panel = get_workstation_panel()
+    from ui_workstation_new import get_workstation_order_panel
+    ws_panel = get_workstation_order_panel()
     if ws_panel.handle_click((mx, my)):
         return
     
@@ -370,8 +370,8 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
                     ws = buildings_module.get_workstation(gx, gy, current_z)
                     if ws is not None:
                         # Open workstation panel
-                        from ui import get_workstation_panel
-                        ws_panel = get_workstation_panel()
+                        from ui_workstation_new import get_workstation_order_panel
+                        ws_panel = get_workstation_order_panel()
                         ws_panel.open(gx, gy, current_z, mx, my)
                     else:
                         # Check if clicking on stockpile zone for filter UI
@@ -732,11 +732,15 @@ def draw_stockpile_ui(surface: pygame.Surface) -> None:
 def main() -> None:
     """Run the main game loop."""
     from save_system import quicksave, quickload
+    from audio import init_audio, get_audio_manager
 
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
     pygame.display.set_caption("Colony Prototype")
     clock = pygame.time.Clock()
+    
+    # Initialize audio system
+    init_audio()
 
     grid = Grid()
     # Generate world (streets, lots, ruins) and get colonist spawn location
@@ -1055,13 +1059,17 @@ def main() -> None:
             
             # Spawn training jobs during morning drill hours
             from training import spawn_training_jobs
-            spawn_training_jobs(colonists, tick_count)
+            spawn_training_jobs(colonists, grid, tick_count)
             
             # Process stockpile relocation (items from zones being removed)
             zones_module.process_stockpile_relocation(jobs_module)
             
             # Process filter mismatch relocation (resources on stockpiles that no longer allow them)
             zones_module.process_filter_mismatch_relocation(jobs_module)
+            
+            # Update audio system (check if track finished, play next)
+            audio_manager = get_audio_manager()
+            audio_manager.update()
             
             # Update wanderers (potential recruits) and fixers (traders)
             from wanderers import spawn_wanderer_check, update_wanderers, spawn_fixer_check, update_fixers
@@ -1187,8 +1195,8 @@ def main() -> None:
         filter_panel.draw(screen)
         
         # Draw workstation panel (if open)
-        from ui import get_workstation_panel
-        ws_panel = get_workstation_panel()
+        from ui_workstation_new import get_workstation_order_panel
+        ws_panel = get_workstation_order_panel()
         ws_panel.draw(screen)
         
         # Draw bed assignment panel (if open)

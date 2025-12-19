@@ -14,13 +14,14 @@ _last_spawn_tick: int = 0
 _spawn_interval: int = 300  # Check every 5 seconds
 
 
-def spawn_training_jobs(colonists: List, game_tick: int) -> None:
+def spawn_training_jobs(colonists: List, grid, game_tick: int) -> None:
     """Spawn training jobs at barracks during morning drill hours.
     
     Creates training jobs for fighters to improve combat skills.
     
     Args:
         colonists: List of all colonists
+        grid: Game grid for walkability checks
         game_tick: Current game tick
     """
     global _last_spawn_tick
@@ -69,9 +70,30 @@ def spawn_training_jobs(colonists: List, game_tick: int) -> None:
             break
         
         coord, barracks = barracks_list[i]
-        x, y, z = coord
+        bx, by, bz = coord
         
-        # Create training job at barracks location
+        # Find a walkable tile adjacent to barracks (not ON the barracks)
+        # Barracks are non-walkable, so colonists need to train next to them
+        adjacent_tiles = [
+            (bx + 1, by, bz),
+            (bx - 1, by, bz),
+            (bx, by + 1, bz),
+            (bx, by - 1, bz),
+        ]
+        
+        training_location = None
+        for tx, ty, tz in adjacent_tiles:
+            if grid.is_walkable(tx, ty, tz):
+                training_location = (tx, ty, tz)
+                break
+        
+        # Skip if no valid location found
+        if training_location is None:
+            continue
+        
+        x, y, z = training_location
+        
+        # Create training job at walkable location adjacent to barracks
         # Moderate work requirement (training session takes ~2-3 seconds)
         # Low pressure (not urgent, but higher than recreation)
         add_job(

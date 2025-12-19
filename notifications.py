@@ -101,6 +101,10 @@ def add_notification(ntype: NotificationType, title: str, detail: str = "",
     # Limit total notifications
     if len(_notifications) > 20:
         _notifications = _notifications[:20]
+    
+    # Play notification sound (disabled - too jarring with procedural sounds)
+    # TODO: Add ambient crafting/machine sounds later
+    pass
 
 
 def update_notifications():
