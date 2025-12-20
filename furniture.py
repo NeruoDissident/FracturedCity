@@ -1,0 +1,120 @@
+"""
+Furniture placement system.
+
+Handles placing furniture items (from stockpiles) as building tiles.
+"""
+
+from typing import Optional
+from grid import Grid
+import items
+import jobs as jobs_module
+
+
+# Mapping of furniture item IDs to their building tile types
+FURNITURE_TILE_MAPPING = {
+    "crash_bed": "crash_bed",
+    "comfort_chair": "comfort_chair",
+    "bar_stool": "bar_stool",
+    "storage_locker": "storage_locker",
+    "scrap_guitar": "scrap_guitar_placed",
+    "drum_kit": "drum_kit_placed",
+    "synth": "synth_placed",
+    "harmonica": "harmonica_placed",
+    "amp": "amp_placed",
+}
+
+
+def can_place_furniture(grid: Grid, x: int, y: int, z: int, item_id: str) -> bool:
+    """Check if furniture can be placed at the given location.
+    
+    Args:
+        grid: The game grid
+        x, y, z: Target coordinates
+        item_id: ID of the furniture item to place
+        
+    Returns:
+        True if furniture can be placed here
+    """
+    # Must be on a floor tile
+    tile = grid.get_tile(x, y, z)
+    if tile not in ("finished_floor", "floor"):
+        return False
+    
+    # Tile must be walkable (not blocked)
+    if not grid.is_walkable(x, y, z):
+        return False
+    
+    # Check if item is valid furniture
+    if item_id not in FURNITURE_TILE_MAPPING:
+        return False
+    
+    return True
+
+
+def place_furniture_from_stockpile(grid: Grid, x: int, y: int, z: int, item_id: str) -> bool:
+    """Create a job to place furniture from stockpile at the given location.
+    
+    Args:
+        grid: The game grid
+        x, y, z: Target coordinates
+        item_id: ID of the furniture item to place
+        
+    Returns:
+        True if placement job was created
+    """
+    if not can_place_furniture(grid, x, y, z, item_id):
+        return False
+    
+    # Check if there's already a job here
+    if jobs_module.get_job_at(x, y, z) is not None:
+        return False
+    
+    # Get the building tile type for this furniture
+    tile_type = FURNITURE_TILE_MAPPING.get(item_id)
+    if tile_type is None:
+        return False
+    
+    # Create a "place_furniture" job
+    # Colonist will fetch the item from stockpile and place it
+    jobs_module.add_job(
+        "place_furniture",
+        x, y,
+        required=20,  # Quick placement job
+        furniture_item=item_id,
+        furniture_tile=tile_type,
+        z=z,
+    )
+    
+    return True
+
+
+def place_furniture_direct(grid: Grid, x: int, y: int, z: int, item_id: str) -> bool:
+    """Directly place furniture (for world items already at location).
+    
+    Args:
+        grid: The game grid
+        x, y, z: Target coordinates
+        item_id: ID of the furniture item
+        
+    Returns:
+        True if furniture was placed
+    """
+    if not can_place_furniture(grid, x, y, z, item_id):
+        return False
+    
+    tile_type = FURNITURE_TILE_MAPPING.get(item_id)
+    if tile_type is None:
+        return False
+    
+    # Place the furniture tile
+    grid.set_tile(x, y, tile_type, z=z)
+    
+    # Mark as walkable or not based on furniture type
+    # Beds and large furniture block movement
+    if item_id in ("crash_bed", "comfort_chair", "storage_locker", "drum_kit", "synth"):
+        grid.walkable[z][y][x] = False
+    else:
+        # Small items like stools, guitars, harmonicas don't block
+        grid.walkable[z][y][x] = True
+    
+    return True

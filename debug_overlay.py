@@ -10,8 +10,9 @@ Toggle with 'I' key. Shows:
 
 import pygame
 from typing import Optional, Dict, Tuple
+import config
 
-from config import TILE_SIZE, GRID_W, GRID_H
+from config import GRID_W, GRID_H
 
 # Colors for debug overlay
 COLOR_DEBUG_BG = (20, 20, 30, 200)  # Semi-transparent dark
@@ -103,14 +104,14 @@ class DebugOverlay:
                 color = ROOM_TYPE_OVERLAY_COLORS.get(room_type, COLOR_OVERLAY_ROOM)
 
                 # Outline-only overlay per tile for this room, using neon room-type color
-                overlay_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                overlay_surf = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
                 pygame.draw.rect(overlay_surf, color, overlay_surf.get_rect(), 2)
 
                 tiles = room_data.get("tiles", [])
                 for (x, y) in tiles:
-                    screen_x = x * TILE_SIZE - camera_x
-                    screen_y = y * TILE_SIZE - camera_y
-                    rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
+                    screen_x = x * config.TILE_SIZE - camera_x
+                    screen_y = y * config.TILE_SIZE - camera_y
+                    rect = pygame.Rect(screen_x, screen_y, config.TILE_SIZE, config.TILE_SIZE)
                     screen.blit(overlay_surf, rect)
         except ImportError:
             # Fall back to old rooms module if room_system doesn't exist
@@ -125,14 +126,14 @@ class DebugOverlay:
                     color = ROOM_TYPE_OVERLAY_COLORS.get(room_type, COLOR_OVERLAY_ROOM)
 
                     # Outline-only overlay per tile for this room, using neon room-type color
-                    overlay_surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    overlay_surf = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
                     pygame.draw.rect(overlay_surf, color, overlay_surf.get_rect(), 2)
 
                     tiles = room_data.get("tiles", [])
                     for (x, y) in tiles:
-                        screen_x = x * TILE_SIZE - camera_x
-                        screen_y = y * TILE_SIZE - camera_y
-                        rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
+                        screen_x = x * config.TILE_SIZE - camera_x
+                        screen_y = y * config.TILE_SIZE - camera_y
+                        rect = pygame.Rect(screen_x, screen_y, config.TILE_SIZE, config.TILE_SIZE)
                         screen.blit(overlay_surf, rect)
         
         # Get dropped items for reference
@@ -174,15 +175,15 @@ class DebugOverlay:
             self._draw_tile_number(screen, x, y, f"[{short_type}]", color, offset_y=8, camera_x=camera_x, camera_y=camera_y)
         
         # Stockpile zone tiles - show blue overlay for ALL stockpile tiles (on current Z level)
-        stockpile_overlay = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        stockpile_overlay = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
         stockpile_overlay.fill(COLOR_OVERLAY_STOCKPILE)
         
         for (x, y, z) in zones_module.get_all_stockpile_tiles():
             if z != current_z:
                 continue
-            screen_x = x * TILE_SIZE - camera_x
-            screen_y = y * TILE_SIZE - camera_y
-            rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
+            screen_x = x * config.TILE_SIZE - camera_x
+            screen_y = y * config.TILE_SIZE - camera_y
+            rect = pygame.Rect(screen_x, screen_y, config.TILE_SIZE, config.TILE_SIZE)
             screen.blit(stockpile_overlay, rect)
             # Draw border to make it more visible
             pygame.draw.rect(screen, (80, 80, 255), rect, 1)
@@ -228,8 +229,8 @@ class DebugOverlay:
             camera_x, camera_y: Camera offset for viewport rendering
         """
         # World position in pixels
-        world_px = tile_x * TILE_SIZE + TILE_SIZE // 2
-        world_py = tile_y * TILE_SIZE + TILE_SIZE // 2 + offset_y
+        world_px = tile_x * config.TILE_SIZE + config.TILE_SIZE // 2
+        world_py = tile_y * config.TILE_SIZE + config.TILE_SIZE // 2 + offset_y
         
         # Screen position (apply camera offset)
         px = world_px - camera_x
@@ -251,12 +252,12 @@ class DebugOverlay:
         mx, my = pygame.mouse.get_pos()
         
         # Convert to world coordinates
-        world_x = mx + grid.camera_x
-        world_y = my + grid.camera_y
+        world_x = mx + int(grid.camera_x)
+        world_y = my + int(grid.camera_y)
         
         # Convert to tile coordinates
-        tile_x = world_x // TILE_SIZE
-        tile_y = world_y // TILE_SIZE
+        tile_x = int(world_x // config.TILE_SIZE)
+        tile_y = int(world_y // config.TILE_SIZE)
         tile_z = grid.current_z
         
         # Check if in bounds

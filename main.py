@@ -23,7 +23,7 @@ from config import (
 )
 from grid import Grid
 from colonist import create_colonists, update_colonists, draw_colonists
-from buildings import place_wall, place_wall_advanced, place_door, place_floor, place_window, place_fire_escape, process_supply_jobs, update_doors, update_windows
+from buildings import place_wall, place_wall_advanced, place_door, place_bar_door, place_floor, place_stage, place_stage_stairs, place_window, place_fire_escape, place_scrap_bar_counter, process_supply_jobs, update_doors, update_windows
 import buildings as buildings_module
 import jobs as jobs_module
 from resources import spawn_resource_nodes, create_gathering_job_for_node, get_stockpile, update_resource_nodes, get_resource_balance, process_auto_haul_jobs, mark_item_for_hauling, get_all_resource_items
@@ -188,7 +188,7 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
             return
         
         # Building modes - allow on both Z levels (individual tile checks happen on placement)
-        if build_mode in ("wall", "wall_advanced", "door", "window"):
+        if build_mode in ("wall", "wall_advanced", "door", "bar_door", "window", "scrap_bar_counter"):
             # Start drag for structure construction (line)
             _drag_start = (gx, gy)
             _drag_mode = build_mode
@@ -196,6 +196,14 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
             # Start drag for floor construction (rectangle)
             _drag_start = (gx, gy)
             _drag_mode = "floor"
+        elif build_mode == "stage":
+            # Start drag for stage construction (rectangle)
+            _drag_start = (gx, gy)
+            _drag_mode = "stage"
+        elif build_mode == "stage_stairs":
+            # Click-place stage stairs
+            if place_stage_stairs(grid, gx, gy, current_z):
+                print(f"Designated stage stairs for construction at ({gx},{gy},z={current_z})")
         elif build_mode == "roof":
             # Start drag for roof placement (rectangle) - requires 4 corner walls
             _drag_start = (gx, gy)
@@ -404,7 +412,7 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
             gy = max(0, min(GRID_H - 1, gy))
             current_z = grid.current_z
             
-            if _drag_mode in ("wall", "wall_advanced", "door", "window"):
+            if _drag_mode in ("wall", "wall_advanced", "door", "bar_door", "window", "scrap_bar_counter"):
                 # Get all tiles in the line (structures are 1-tile wide)
                 tiles = get_drag_line(_drag_start, (gx, gy))
                 
@@ -420,12 +428,18 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                     elif _drag_mode == "door":
                         if place_door(grid, tx, ty, current_z):
                             structures_placed += 1
+                    elif _drag_mode == "bar_door":
+                        if place_bar_door(grid, tx, ty, current_z):
+                            structures_placed += 1
                     elif _drag_mode == "window":
                         if place_window(grid, tx, ty, current_z):
                             structures_placed += 1
+                    elif _drag_mode == "scrap_bar_counter":
+                        if place_scrap_bar_counter(grid, tx, ty, current_z):
+                            structures_placed += 1
                 
                 if structures_placed > 0:
-                    name = {"wall": "wall", "wall_advanced": "reinforced wall", "door": "door", "window": "window"}[_drag_mode]
+                    name = {"wall": "wall", "wall_advanced": "reinforced wall", "door": "door", "bar_door": "bar door", "window": "window", "scrap_bar_counter": "bar counter"}[_drag_mode]
                     z_info = f" on z={current_z}" if current_z > 0 else ""
                     print(f"Designated {structures_placed} {name}(s) for construction{z_info}")
             
@@ -442,6 +456,20 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                 if floors_placed > 0:
                     z_info = f" on z={current_z}" if current_z > 0 else ""
                     print(f"Designated {floors_placed} floor(s) for construction{z_info}")
+            
+            elif _drag_mode == "stage":
+                # Get all tiles in rectangle
+                tiles = get_drag_rect(_drag_start, (gx, gy))
+                
+                # Place stage tiles on all empty tiles in rectangle
+                stages_placed = 0
+                for tx, ty in tiles:
+                    if place_stage(grid, tx, ty, current_z):
+                        stages_placed += 1
+                
+                if stages_placed > 0:
+                    z_info = f" on z={current_z}" if current_z > 0 else ""
+                    print(f"Designated {stages_placed} stage tile(s) for construction{z_info}")
             
             elif _drag_mode == "roof":
                 # Place roof over rectangular area - requires 4 corner walls
@@ -654,8 +682,8 @@ def get_drag_preview_tiles(grid: Grid) -> list[tuple[int, int]]:
     if hovered is None:
         return [_drag_start]
     
-    # Use line for walls/doors, rectangle for floors/harvest/stockpile/haul
-    if _drag_mode in ("wall", "wall_advanced", "door"):
+    # Use line for walls/doors/bar counters, rectangle for floors/harvest/stockpile/haul
+    if _drag_mode in ("wall", "wall_advanced", "door", "bar_door", "scrap_bar_counter"):
         return get_drag_line(_drag_start, hovered)
     else:
         return get_drag_rect(_drag_start, hovered)
@@ -673,19 +701,22 @@ def draw_drag_preview(surface: pygame.Surface, grid: Grid, camera_x: int = 0, ca
     if not tiles:
         return
     
+    import config
+    tile_size = config.TILE_SIZE
+    
     # Create a semi-transparent surface for the preview
     for tx, ty in tiles:
         # World position in pixels
-        world_x = tx * TILE_SIZE
-        world_y = ty * TILE_SIZE
+        world_x = tx * tile_size
+        world_y = ty * tile_size
         
         # Screen position (apply camera offset)
         screen_x = world_x - camera_x
         screen_y = world_y - camera_y
         
-        rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
+        rect = pygame.Rect(screen_x, screen_y, tile_size, tile_size)
         # Draw filled rectangle with alpha
-        preview_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+        preview_surface = pygame.Surface((tile_size, tile_size), pygame.SRCALPHA)
         preview_surface.fill(COLOR_DRAG_PREVIEW)
         surface.blit(preview_surface, rect.topleft)
 
@@ -769,6 +800,41 @@ def main() -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            
+            # Mouse wheel zoom
+            if event.type == pygame.MOUSEWHEEL:
+                import config
+                import sprites
+                
+                # Get mouse position
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                
+                # Calculate world position under cursor BEFORE zoom
+                old_tile_size = config.TILE_SIZE
+                world_x_before = mouse_x + grid.camera_x
+                world_y_before = mouse_y + grid.camera_y
+                
+                # Zoom in/out with mouse wheel
+                zoom_factor = 1.2 if event.y > 0 else 0.8
+                new_tile_size = int(config.TILE_SIZE * zoom_factor)
+                
+                # Clamp zoom between 16 and 128 pixels
+                new_tile_size = max(16, min(128, new_tile_size))
+                
+                if new_tile_size != config.TILE_SIZE:
+                    # Apply new tile size
+                    config.TILE_SIZE = new_tile_size
+                    sprites.clear_scaled_cache()
+                    
+                    # Calculate world position under cursor AFTER zoom
+                    # Adjust camera so the same world point stays under the cursor
+                    scale_ratio = new_tile_size / old_tile_size
+                    world_x_after = world_x_before * scale_ratio
+                    world_y_after = world_y_before * scale_ratio
+                    
+                    # Adjust camera to keep cursor on same world position
+                    grid.camera_x = world_x_after - mouse_x
+                    grid.camera_y = world_y_after - mouse_y
 
             if event.type == pygame.KEYDOWN:
                 # Let lists panel handle keys first
@@ -1125,10 +1191,6 @@ def main() -> None:
 
         grid.draw(screen, hovered_tile=None)
         
-        # Draw drag preview on top of grid (left-click drag in build mode)
-        if _drag_start is not None and pygame.mouse.get_pressed()[0]:
-            draw_drag_preview(screen, grid, camera_x=grid.camera_x, camera_y=grid.camera_y)
-        
         draw_colonists(screen, colonists, ether_mode=ether_mode, current_z=grid.current_z, camera_x=grid.camera_x, camera_y=grid.camera_y)
         
         # Draw wanderers (potential recruits)
@@ -1292,6 +1354,10 @@ def main() -> None:
             hint_text = font_small.render("Press ESC to quit", True, (150, 150, 150))
             hint_rect = hint_text.get_rect(center=(SCREEN_W // 2, SCREEN_H // 2 + 60))
             screen.blit(hint_text, hint_rect)
+        
+        # Draw drag preview LAST so it's always on top
+        if _drag_start is not None and pygame.mouse.get_pressed()[0]:
+            draw_drag_preview(screen, grid, camera_x=grid.camera_x, camera_y=grid.camera_y)
 
         pygame.display.flip()
         clock.tick(60)

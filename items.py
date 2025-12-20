@@ -389,6 +389,132 @@ register_item(ItemDef(
     description="Rack for storing weapons and combat gear."
 ))
 
+register_item(ItemDef(
+    id="bar_stool",
+    name="Bar Stool",
+    slot=None,
+    tags=["furniture", "bar"],
+    icon_color=(90, 70, 50),
+    description="Rusty metal stool for sitting at the bar."
+))
+
+# --- Consumables / Booze ---
+register_item(ItemDef(
+    id="swill",
+    name="Swill",
+    slot=None,
+    tags=["consumable", "booze", "low_quality"],
+    comfort=0.05,
+    icon_color=(120, 100, 60),
+    description="Cheap fermented drink. Tastes like rust and regret, but it's alcohol."
+))
+
+register_item(ItemDef(
+    id="guttershine",
+    name="Guttershine",
+    slot=None,
+    tags=["consumable", "booze", "high_quality"],
+    comfort=0.15,
+    icon_color=(180, 160, 100),
+    description="Distilled spirits with a kick. Burns going down, but worth it."
+))
+
+# --- Electronic Components ---
+register_item(ItemDef(
+    id="wire",
+    name="Wire",
+    slot=None,
+    tags=["component", "electronics"],
+    icon_color=(180, 160, 140),
+    description="Salvaged copper wire. Basic electrical component."
+))
+
+register_item(ItemDef(
+    id="resistor",
+    name="Resistor",
+    slot=None,
+    tags=["component", "electronics"],
+    icon_color=(160, 140, 120),
+    description="Scavenged resistor. Controls electrical current."
+))
+
+register_item(ItemDef(
+    id="capacitor",
+    name="Capacitor",
+    slot=None,
+    tags=["component", "electronics"],
+    icon_color=(140, 150, 160),
+    description="Salvaged capacitor. Stores electrical charge."
+))
+
+register_item(ItemDef(
+    id="chip",
+    name="Circuit Chip",
+    slot=None,
+    tags=["component", "electronics", "advanced"],
+    icon_color=(100, 180, 140),
+    description="Hand-assembled circuit chip. Complex electronics component."
+))
+
+register_item(ItemDef(
+    id="led",
+    name="LED",
+    slot=None,
+    tags=["component", "electronics", "lighting"],
+    icon_color=(200, 220, 100),
+    description="Light-emitting diode. Glows when powered."
+))
+
+# --- Instruments ---
+register_item(ItemDef(
+    id="scrap_guitar",
+    name="Scrap Guitar",
+    slot=None,
+    tags=["instrument", "recreation", "music"],
+    comfort=0.1,
+    icon_color=(140, 100, 60),
+    description="Guitar cobbled together from scrap and wire. Sounds rough but playable."
+))
+
+register_item(ItemDef(
+    id="drum_kit",
+    name="Drum Kit",
+    slot=None,
+    tags=["instrument", "recreation", "music"],
+    comfort=0.1,
+    icon_color=(120, 110, 100),
+    description="Improvised drums from barrels and scrap metal. Loud and cathartic."
+))
+
+register_item(ItemDef(
+    id="synth",
+    name="Synth Keyboard",
+    slot=None,
+    tags=["instrument", "recreation", "music", "electronic"],
+    comfort=0.15,
+    icon_color=(100, 180, 200),
+    description="Synthesizer built from salvaged chips. Makes strange electronic sounds."
+))
+
+register_item(ItemDef(
+    id="harmonica",
+    name="Harmonica",
+    slot=None,
+    tags=["instrument", "recreation", "music", "portable"],
+    comfort=0.05,
+    icon_color=(150, 140, 130),
+    description="Simple metal harmonica. Easy to carry, easy to play."
+))
+
+register_item(ItemDef(
+    id="amp",
+    name="Amplifier",
+    slot=None,
+    tags=["instrument", "recreation", "music", "electronic"],
+    icon_color=(80, 90, 100),
+    description="Amplifier for instruments. Makes everything louder."
+))
+
 # --- Weapons (Hands slot) ---
 register_item(ItemDef(
     id="pipe_weapon",
@@ -539,10 +665,11 @@ def clear_world_items() -> None:
 
 
 def process_equipment_haul_jobs(jobs_module, zones_module) -> int:
-    """Create haul jobs for equipment items on the ground.
+    """Create haul jobs for all items on the ground.
     
     Called each tick from main loop. Finds items needing haul and creates
-    jobs to move them to stockpile zones that allow equipment.
+    jobs to move them to stockpile zones. Handles equipment, components, 
+    instruments, and other crafted items.
     
     Returns number of jobs created.
     """
@@ -561,10 +688,36 @@ def process_equipment_haul_jobs(jobs_module, zones_module) -> int:
         if jobs_module.get_job_at(x, y, z) is not None:
             continue
         
-        # Find stockpile that accepts equipment
+        # Determine storage type based on item tags
+        item_id = item.get("id", "")
+        item_def = get_item_def(item_id)
+        
+        # Default to equipment stockpile
+        storage_type = "equipment"
+        
+        # Check item tags to determine proper storage
+        if item_def:
+            tags = getattr(item_def, "tags", [])
+            if "component" in tags or "electronics" in tags:
+                storage_type = "components"
+            elif "instrument" in tags or "music" in tags:
+                storage_type = "instruments"
+            elif "furniture" in tags:
+                storage_type = "furniture"
+            elif "consumable" in tags:
+                storage_type = "consumables"
+        
+        # Find appropriate stockpile
         dest = zones_module.find_stockpile_tile_for_resource(
-            "equipment", z=z, from_x=x, from_y=y
+            storage_type, z=z, from_x=x, from_y=y
         )
+        
+        # Fall back to general equipment stockpile if no specialized stockpile exists
+        if dest is None and storage_type != "equipment":
+            dest = zones_module.find_stockpile_tile_for_resource(
+                "equipment", z=z, from_x=x, from_y=y
+            )
+        
         if dest is None:
             # No valid stockpile zone exists - skip
             continue
@@ -576,7 +729,7 @@ def process_equipment_haul_jobs(jobs_module, zones_module) -> int:
             "haul",
             x, y,
             required=10,  # Quick job
-            resource_type="equipment",
+            resource_type=storage_type,
             dest_x=dest_x,
             dest_y=dest_y,
             dest_z=dest_z,

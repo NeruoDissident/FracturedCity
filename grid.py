@@ -10,9 +10,10 @@ extended later to richer objects (rooms, zones, buildings, etc.).
 """
 
 import pygame
+import sprites
+import config
 
 from config import (
-    TILE_SIZE,
     GRID_W,
     GRID_H,
     GRID_Z,
@@ -261,8 +262,8 @@ class Grid:
     def pan_camera(self, dx: int, dy: int) -> None:
         """Pan the camera by (dx, dy) pixels. Clamps to world bounds."""
         # Calculate world size in pixels
-        world_width_px = self.width * TILE_SIZE
-        world_height_px = self.height * TILE_SIZE
+        world_width_px = self.width * config.TILE_SIZE
+        world_height_px = self.height * config.TILE_SIZE
         
         # Update camera position directly
         self.camera_x += dx
@@ -278,12 +279,12 @@ class Grid:
     def center_camera_on(self, tile_x: int, tile_y: int) -> None:
         """Center the camera on a specific tile coordinate."""
         # Calculate world size in pixels
-        world_width_px = self.width * TILE_SIZE
-        world_height_px = self.height * TILE_SIZE
+        world_width_px = self.width * config.TILE_SIZE
+        world_height_px = self.height * config.TILE_SIZE
         
         # Calculate target camera position (tile center - half screen)
-        target_x = tile_x * TILE_SIZE + TILE_SIZE // 2 - SCREEN_W // 2
-        target_y = tile_y * TILE_SIZE + TILE_SIZE // 2 - SCREEN_H // 2
+        target_x = tile_x * config.TILE_SIZE + config.TILE_SIZE // 2 - SCREEN_W // 2
+        target_y = tile_y * config.TILE_SIZE + config.TILE_SIZE // 2 - SCREEN_H // 2
         
         # Clamp to world bounds
         max_camera_x = max(0, world_width_px - SCREEN_W)
@@ -299,18 +300,34 @@ class Grid:
         """
         world_x = screen_x + int(self.camera_x)
         world_y = screen_y + int(self.camera_y)
-        tile_x = world_x // TILE_SIZE
-        tile_y = world_y // TILE_SIZE
+        tile_x = world_x // config.TILE_SIZE
+        tile_y = world_y // config.TILE_SIZE
         return (tile_x, tile_y)
     
     # --- Visual Helpers ---
     
     def _get_tile_seed(self, x: int, y: int, z: int) -> int:
-        """Get a consistent seed for a tile position for visual variations.
+        """Generate a deterministic seed for tile variation based on position."""
+        return (x * 7919 + y * 6547 + z * 4973) & 0xFFFFFFFF
+    
+    def _try_draw_tile_sprite(self, surface: pygame.Surface, tile_type: str, rect: pygame.Rect, x: int, y: int, z: int) -> bool:
+        """Try to draw a tile sprite. Returns True if sprite was drawn, False if should use procedural.
         
-        This ensures tiles always have the same visual variation.
+        Args:
+            surface: Surface to draw on
+            tile_type: Type of tile
+            rect: Rectangle to draw in
+            x, y, z: Tile coordinates (for variation)
+            
+        Returns:
+            True if sprite was drawn, False if procedural drawing should be used
         """
-        return (x * 73856093) ^ (y * 19349663) ^ (z * 83492791)
+        import config
+        tile_sprite = sprites.get_tile_sprite(tile_type, x, y, z, config.TILE_SIZE)
+        if tile_sprite:
+            surface.blit(tile_sprite, rect.topleft)
+            return True
+        return False
     
     def _get_tile_color_variation(self, base_color: tuple[int, int, int], x: int, y: int, z: int, variation: int = 10) -> tuple[int, int, int]:
         """Add subtle random color variation to a base color.
@@ -742,13 +759,13 @@ class Grid:
         rng = random.Random(seed ^ 0xB41C1)
         
         # Horizontal mortar lines (3 rows of bricks)
-        brick_h = TILE_SIZE // 3
+        brick_h = config.TILE_SIZE // 3
         for row in range(1, 3):
             y_pos = rect.top + row * brick_h
             pygame.draw.line(surface, mortar, (rect.left, y_pos), (rect.right, y_pos), 1)
         
         # Vertical mortar lines (offset per row for brick pattern)
-        brick_w = TILE_SIZE // 2
+        brick_w = config.TILE_SIZE // 2
         for row in range(3):
             y_start = rect.top + row * brick_h
             y_end = y_start + brick_h
@@ -828,90 +845,97 @@ class Grid:
                           start_x: int, start_y: int, end_x: int, end_y: int) -> None:
         """Draw the Z-level below with transparency for context.
         
-        Renders a dimmed version of the floor below so players can see what's underneath.
+        Renders sprites at reduced opacity for the floor below so players can see what's underneath.
         """
-        # Create a temporary surface for the layer below
-        visible_w = (end_x - start_x) * TILE_SIZE
-        visible_h = (end_y - start_y) * TILE_SIZE
+        # Create a temporary surface for the layer below with alpha channel
+        tile_size = config.TILE_SIZE
+        visible_w = (end_x - start_x) * tile_size
+        visible_h = (end_y - start_y) * tile_size
         if visible_w <= 0 or visible_h <= 0:
             return
         
-        # Draw tiles from the level below with dimmed colors
+        # Create temporary surface for below layer
+        temp_surface = pygame.Surface((visible_w, visible_h), pygame.SRCALPHA)
+        
+        # Draw tiles from the level below
         for y in range(start_y, end_y):
             for x in range(start_x, end_x):
-                world_x = x * TILE_SIZE
-                world_y = y * TILE_SIZE
+                world_x = x * tile_size
+                world_y = y * tile_size
                 screen_x = world_x - cam_x
                 screen_y = world_y - cam_y
                 
-                rect = pygame.Rect(screen_x, screen_y, TILE_SIZE, TILE_SIZE)
+                # Position on temp surface
+                temp_x = (x - start_x) * tile_size
+                temp_y = (y - start_y) * tile_size
+                temp_rect = pygame.Rect(temp_x, temp_y, tile_size, tile_size)
+                
                 tile = self.tiles[below_z][y][x]
                 
-                # Get base color for tile and dim it significantly
-                if tile == "empty" or tile is None:
-                    base_color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, below_z, 8)
-                elif tile == "dirt":
-                    base_color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, below_z, 10)
-                elif tile == "grass":
-                    base_color = self._get_tile_color_variation(COLOR_TILE_GRASS, x, y, below_z, 12)
-                elif tile == "rock":
-                    base_color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, below_z, 8)
-                elif tile == "scorched":
-                    base_color = self._get_tile_color_variation(COLOR_TILE_SCORCHED, x, y, below_z, 6)
-                elif tile == "debris":
-                    base_color = self._get_tile_color_variation(COLOR_TILE_DEBRIS, x, y, below_z, 12)
-                elif tile == "weeds":
-                    base_color = self._get_tile_color_variation(COLOR_TILE_WEEDS, x, y, below_z, 10)
-                elif tile in ("sidewalk", "sidewalk_designated"):
-                    base_color = COLOR_TILE_SIDEWALK
-                elif tile in ("street", "street_cracked", "street_scar", "street_ripped"):
-                    base_color = COLOR_TILE_STREET
-                elif tile == "floor":
-                    base_color = (140, 120, 90)
-                elif tile == "finished_floor":
-                    base_color = (160, 130, 90)
-                elif tile in ("wall", "finished_wall", "wall_advanced", "finished_wall_advanced"):
-                    base_color = COLOR_TILE_FINISHED_WALL
-                elif tile in ("door", "window", "finished_window", "window_tile"):
-                    base_color = COLOR_TILE_FINISHED_WALL
-                elif tile in ("building", "finished_building"):
-                    base_color = COLOR_TILE_FINISHED_BUILDING
-                elif tile == "roof":
-                    base_color = (60, 40, 80)
-                elif tile in ("roof_access", "roof_floor"):
-                    base_color = (160, 130, 90)
-                elif tile.startswith("prop_"):
-                    if tile == "prop_barrel":
-                        base_color = COLOR_TILE_PROP_BARREL
-                    elif tile == "prop_sign":
-                        base_color = COLOR_TILE_PROP_SIGN
-                    elif tile == "prop_scrap":
-                        base_color = COLOR_TILE_PROP_SCRAP
-                    else:
-                        base_color = (70, 65, 60)
-                elif tile.startswith("finished_"):
-                    base_color = (90, 85, 80)
-                else:
-                    base_color = (60, 60, 70)
+                # Try to draw sprite first, fallback to dimmed procedural
+                sprite_drawn = False
+                if tile in ("finished_floor", "finished_wall", "finished_wall_advanced"):
+                    tile_sprite = sprites.get_tile_sprite(tile, x, y, below_z, tile_size)
+                    if tile_sprite:
+                        temp_surface.blit(tile_sprite, temp_rect.topleft)
+                        sprite_drawn = True
                 
-                # Dim the color to 40% brightness
-                dimmed = (base_color[0] * 4 // 10, base_color[1] * 4 // 10, base_color[2] * 4 // 10)
-                pygame.draw.rect(surface, dimmed, rect)
+                # Fallback to dimmed procedural colors if no sprite
+                if not sprite_drawn:
+                    # Get base color for tile and dim it significantly
+                    if tile == "empty" or tile is None:
+                        base_color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, below_z, 8)
+                    elif tile == "dirt":
+                        base_color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, below_z, 10)
+                    elif tile == "grass":
+                        base_color = self._get_tile_color_variation(COLOR_TILE_GRASS, x, y, below_z, 12)
+                    elif tile == "rock":
+                        base_color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, below_z, 8)
+                    elif tile == "scorched":
+                        base_color = self._get_tile_color_variation(COLOR_TILE_SCORCHED, x, y, below_z, 6)
+                    elif tile == "debris":
+                        base_color = self._get_tile_color_variation(COLOR_TILE_DEBRIS, x, y, below_z, 12)
+                    elif tile == "weeds":
+                        base_color = self._get_tile_color_variation(COLOR_TILE_WEEDS, x, y, below_z, 10)
+                    elif tile in ("sidewalk", "sidewalk_designated"):
+                        base_color = COLOR_TILE_SIDEWALK
+                    elif tile in ("street", "street_cracked", "street_scar", "street_ripped"):
+                        base_color = COLOR_TILE_STREET
+                    elif tile == "floor":
+                        base_color = (140, 120, 90)
+                    elif tile == "finished_floor":
+                        base_color = (160, 130, 90)
+                    elif tile in ("wall", "finished_wall", "wall_advanced", "finished_wall_advanced"):
+                        base_color = COLOR_TILE_FINISHED_WALL
+                    elif tile in ("door", "window", "finished_window", "window_tile"):
+                        base_color = COLOR_TILE_FINISHED_WALL
+                    elif tile in ("building", "finished_building"):
+                        base_color = COLOR_TILE_FINISHED_BUILDING
+                    elif tile == "roof":
+                        base_color = (60, 40, 80)
+                    elif tile in ("roof_access", "roof_floor"):
+                        base_color = (160, 130, 90)
+                    elif tile.startswith("prop_"):
+                        if tile == "prop_barrel":
+                            base_color = COLOR_TILE_PROP_BARREL
+                        elif tile == "prop_sign":
+                            base_color = COLOR_TILE_PROP_SIGN
+                        elif tile == "prop_scrap":
+                            base_color = COLOR_TILE_PROP_SCRAP
+                        else:
+                            base_color = (70, 65, 60)
+                    elif tile.startswith("finished_"):
+                        base_color = (90, 85, 80)
+                    else:
+                        base_color = (60, 60, 70)
+                    
+                    # Dim the color to 40% brightness
+                    dimmed = (base_color[0] * 4 // 10, base_color[1] * 4 // 10, base_color[2] * 4 // 10)
+                    pygame.draw.rect(temp_surface, dimmed, temp_rect)
         
-        # Draw a subtle grid overlay to distinguish the layer below
-        grid_color = (30, 40, 50)
-        for y in range(start_y, end_y + 1):
-            world_y = y * TILE_SIZE
-            screen_y = world_y - cam_y
-            pygame.draw.line(surface, grid_color, 
-                           (start_x * TILE_SIZE - cam_x, screen_y),
-                           (end_x * TILE_SIZE - cam_x, screen_y), 1)
-        for x in range(start_x, end_x + 1):
-            world_x = x * TILE_SIZE
-            screen_x = world_x - cam_x
-            pygame.draw.line(surface, grid_color,
-                           (screen_x, start_y * TILE_SIZE - cam_y),
-                           (screen_x, end_y * TILE_SIZE - cam_y), 1)
+        # Apply 40% opacity to entire layer and blit to main surface
+        temp_surface.set_alpha(100)  # 100/255 ≈ 40% opacity
+        surface.blit(temp_surface, (start_x * tile_size - cam_x, start_y * tile_size - cam_y))
 
     def draw(self, surface: pygame.Surface, hovered_tile: tuple[int, int] | None = None) -> None:
         """Render the grid and its tiles to the given surface.
@@ -923,13 +947,16 @@ class Grid:
         z = self.current_z
         is_ground_level = (z == 0)
         
+        # Cache TILE_SIZE for performance (avoid thousands of attribute lookups per frame)
+        tile_size = config.TILE_SIZE
+        
         # Calculate visible tile range based on camera position (convert float to int)
         cam_x = int(self.camera_x)
         cam_y = int(self.camera_y)
-        start_tile_x = max(0, cam_x // TILE_SIZE)
-        start_tile_y = max(0, cam_y // TILE_SIZE)
-        end_tile_x = min(self.width, (cam_x + SCREEN_W) // TILE_SIZE + 1)
-        end_tile_y = min(self.height, (cam_y + SCREEN_H) // TILE_SIZE + 1)
+        start_tile_x = max(0, cam_x // tile_size)
+        start_tile_y = max(0, cam_y // tile_size)
+        end_tile_x = min(self.width, (cam_x + SCREEN_W) // tile_size + 1)
+        end_tile_y = min(self.height, (cam_y + SCREEN_H) // tile_size + 1)
         
         # Draw layer below with transparency when viewing upper floors
         if z > 0:
@@ -938,8 +965,8 @@ class Grid:
         for y in range(start_tile_y, end_tile_y):
             for x in range(start_tile_x, end_tile_x):
                 # World position in pixels
-                world_x = x * TILE_SIZE
-                world_y = y * TILE_SIZE
+                world_x = x * tile_size
+                world_y = y * tile_size
                 
                 # Screen position (apply camera offset)
                 screen_x = world_x - cam_x
@@ -948,8 +975,8 @@ class Grid:
                 rect = pygame.Rect(
                     screen_x,
                     screen_y,
-                    TILE_SIZE,
-                    TILE_SIZE,
+                    tile_size,
+                    tile_size,
                 )
 
                 tile = self.tiles[z][y][x]
@@ -958,9 +985,11 @@ class Grid:
                 # On upper floors, skip empty tiles so layer below shows through
                 if tile == "empty" or tile is None:
                     if is_ground_level:
-                        # Ground level: draw earth tones
-                        color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, z, 8)
-                        pygame.draw.rect(surface, color, rect)
+                        # Try sprite first, fallback to procedural
+                        if not self._try_draw_tile_sprite(surface, "empty", rect, x, y, z):
+                            # Ground level: draw earth tones
+                            color = self._get_tile_color_variation(COLOR_TILE_EMPTY, x, y, z, 8)
+                            pygame.draw.rect(surface, color, rect)
                         
                         # Check if this empty tile is a stockpile - if so, don't skip rendering
                         if not zones.is_stockpile_zone(x, y, z):
@@ -969,14 +998,20 @@ class Grid:
                         # Upper floors: don't draw empty tiles (layer below visible)
                         continue
                 elif tile == "dirt":
-                    color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, z, 10)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "dirt", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_DIRT, x, y, z, 10)
+                        pygame.draw.rect(surface, color, rect)
                 elif tile == "grass":
-                    color = self._get_tile_color_variation(COLOR_TILE_GRASS, x, y, z, 12)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "grass", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_GRASS, x, y, z, 12)
+                        pygame.draw.rect(surface, color, rect)
                 elif tile == "rock":
-                    color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, z, 8)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "rock", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, z, 8)
+                        pygame.draw.rect(surface, color, rect)
                 elif tile == "scorched":
                     # Scorched earth from demolished pavement - dark charred look
                     color = self._get_tile_color_variation(COLOR_TILE_SCORCHED, x, y, z, 6)
@@ -1017,7 +1052,7 @@ class Grid:
                         progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                         bar_margin = 4
                         bar_height = 4
-                        bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                        bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                         bar_rect = pygame.Rect(
                             rect.left + bar_margin,
                             rect.bottom - bar_margin - bar_height,
@@ -1055,7 +1090,7 @@ class Grid:
                         progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                         bar_margin = 4
                         bar_height = 4
-                        bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                        bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                         bar_rect = pygame.Rect(
                             rect.left + bar_margin,
                             rect.bottom - bar_margin - bar_height,
@@ -1065,7 +1100,105 @@ class Grid:
                         if bar_width > 0:
                             pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_wall":
-                    pygame.draw.rect(surface, COLOR_TILE_FINISHED_WALL, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_wall", rect, x, y, z):
+                        pygame.draw.rect(surface, COLOR_TILE_FINISHED_WALL, rect)
+                elif tile == "scrap_bar_counter":
+                    pygame.draw.rect(surface, COLOR_TILE_WALL, rect)
+                    site = buildings.get_construction_site(x, y, z)
+                    if site is not None:
+                        delivered = site.get("materials_delivered", {})
+                        needed = site.get("materials_needed", {})
+                        icon_x = rect.left + 2
+                        for res_type in needed.keys():
+                            has_it = delivered.get(res_type, 0) >= needed.get(res_type, 0)
+                            if res_type == "wood":
+                                icon_color = COLOR_RESOURCE_NODE_WOOD if has_it else (60, 40, 20)
+                            elif res_type == "scrap":
+                                icon_color = (150, 100, 50) if has_it else (60, 40, 20)
+                            else:
+                                icon_color = (100, 100, 100) if has_it else (40, 40, 40)
+                            icon_rect = pygame.Rect(icon_x, rect.top + 2, 6, 6)
+                            pygame.draw.rect(surface, icon_color, icon_rect)
+                            icon_x += 8
+                    job = get_job_at(x, y)
+                    if job is not None and job.required > 0:
+                        progress_ratio = max(0.0, min(1.0, job.progress / job.required))
+                        bar_margin = 4
+                        bar_height = 4
+                        bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                        bar_rect = pygame.Rect(rect.left + bar_margin, rect.bottom - bar_margin - bar_height, bar_width, bar_height)
+                        if bar_width > 0:
+                            pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
+                elif tile == "finished_scrap_bar_counter":
+                    # Rusty, ugly bar counter - diverse organic variations
+                    import random
+                    seed = self._get_tile_seed(x, y, z)
+                    rng = random.Random(seed)
+                    
+                    # Base color with variation
+                    base_colors = [
+                        (90, 70, 50),   # Rusty brown
+                        (80, 60, 45),   # Darker rust
+                        (95, 75, 55),   # Lighter rust
+                        (85, 65, 50),   # Medium rust
+                        (75, 55, 40),   # Deep rust
+                        (100, 80, 60),  # Weathered metal
+                    ]
+                    variant = self._get_tile_variant(x, y, z, len(base_colors))
+                    base_color = base_colors[variant]
+                    color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                    pygame.draw.rect(surface, color, rect)
+                    
+                    # Grime and rust details
+                    dark_grime = (max(0, color[0] - 20), max(0, color[1] - 15), max(0, color[2] - 10))
+                    light_rust = (min(255, color[0] + 15), min(255, color[1] + 10), min(255, color[2] + 5))
+                    
+                    # Different detail patterns based on position
+                    detail_variant = self._get_tile_variant(x, y, z, 5, salt=0xBA401)
+                    
+                    if detail_variant == 0:
+                        # Horizontal scratches and grime
+                        pygame.draw.line(surface, dark_grime, (rect.left, rect.top + 2), (rect.right, rect.top + 2), 1)
+                        pygame.draw.line(surface, dark_grime, (rect.left, rect.bottom - 3), (rect.right, rect.bottom - 3), 1)
+                        pygame.draw.line(surface, light_rust, (rect.left + 2, rect.centery), (rect.right - 2, rect.centery), 1)
+                    elif detail_variant == 1:
+                        # Rust spots and stains
+                        for _ in range(3):
+                            spot_x = rect.left + rng.randint(2, rect.width - 4)
+                            spot_y = rect.top + rng.randint(2, rect.height - 4)
+                            pygame.draw.rect(surface, dark_grime, (spot_x, spot_y, 2, 2))
+                        pygame.draw.line(surface, light_rust, (rect.left, rect.top), (rect.right, rect.top), 1)
+                    elif detail_variant == 2:
+                        # Vertical streaks (liquid stains)
+                        for i in range(2):
+                            streak_x = rect.left + rng.randint(4, rect.width - 4)
+                            pygame.draw.line(surface, dark_grime, (streak_x, rect.top), (streak_x, rect.bottom), 1)
+                        pygame.draw.line(surface, light_rust, (rect.left, rect.bottom - 1), (rect.right, rect.bottom - 1), 1)
+                    elif detail_variant == 3:
+                        # Patchy corrosion
+                        patch_rect = pygame.Rect(
+                            rect.left + rng.randint(2, 6),
+                            rect.top + rng.randint(2, 6),
+                            rect.width - rng.randint(4, 10),
+                            rect.height - rng.randint(4, 10)
+                        )
+                        pygame.draw.rect(surface, dark_grime, patch_rect)
+                        pygame.draw.line(surface, light_rust, (rect.left, rect.top), (rect.right, rect.top), 1)
+                    else:
+                        # Rivets and metal seams
+                        pygame.draw.line(surface, dark_grime, (rect.left, rect.top), (rect.right, rect.top), 1)
+                        pygame.draw.line(surface, dark_grime, (rect.left, rect.bottom - 1), (rect.right, rect.bottom - 1), 1)
+                        # Rivets
+                        for i in range(3):
+                            rivet_x = rect.left + (i + 1) * (rect.width // 4)
+                            pygame.draw.circle(surface, light_rust, (rivet_x, rect.centery), 1)
+                    
+                    # Random additional weathering
+                    if rng.random() < 0.4:
+                        scratch_x = rect.left + rng.randint(0, rect.width - 2)
+                        scratch_y = rect.top + rng.randint(0, rect.height - 2)
+                        pygame.draw.line(surface, light_rust, (scratch_x, scratch_y), (scratch_x + rng.randint(-4, 4), scratch_y + rng.randint(-4, 4)), 1)
                 elif tile in ("street", "street_cracked", "street_scar", "street_ripped"):
                     # Street tiles with damage variations
                     self._draw_street_tile(surface, rect, x, y, z, tile)
@@ -1113,7 +1246,7 @@ class Grid:
                         progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                         bar_margin = 4
                         bar_height = 4
-                        bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                        bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                         bar_rect = pygame.Rect(
                             rect.left + bar_margin,
                             rect.bottom - bar_margin - bar_height,
@@ -1154,7 +1287,7 @@ class Grid:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                             bar_margin = 4
                             bar_height = 4
-                            bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                            bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                             bar_rect = pygame.Rect(
                                 rect.left + bar_margin,
                                 rect.bottom - bar_margin - bar_height,
@@ -1175,6 +1308,76 @@ class Grid:
                         # Door handle
                         handle_rect = pygame.Rect(rect.right - 8, rect.centery - 2, 4, 4)
                         pygame.draw.rect(surface, (180, 150, 100), handle_rect)
+                elif tile == "bar_door":
+                    # Bar door - saloon-style swinging door
+                    import random
+                    is_open = buildings.is_door_open(x, y)
+                    site = buildings.get_construction_site(x, y, z)
+                    
+                    if site is not None:
+                        # Under construction - rusty brown
+                        pygame.draw.rect(surface, (90, 65, 45), rect)
+                        
+                        # Show delivered materials
+                        delivered = site.get("materials_delivered", {})
+                        needed = site.get("materials_needed", {})
+                        icon_x = rect.left + 2
+                        for res_type in needed.keys():
+                            has_it = delivered.get(res_type, 0) >= needed.get(res_type, 0)
+                            if res_type == "scrap":
+                                icon_color = (150, 100, 50) if has_it else (60, 40, 20)
+                            elif res_type == "wood":
+                                icon_color = COLOR_RESOURCE_NODE_WOOD if has_it else (60, 40, 20)
+                            else:
+                                icon_color = (100, 100, 100) if has_it else (40, 40, 40)
+                            icon_rect = pygame.Rect(icon_x, rect.top + 2, 6, 6)
+                            pygame.draw.rect(surface, icon_color, icon_rect)
+                            icon_x += 8
+                        
+                        # Progress bar
+                        job = get_job_at(x, y)
+                        if job is not None and job.required > 0:
+                            progress_ratio = max(0.0, min(1.0, job.progress / job.required))
+                            bar_margin = 4
+                            bar_height = 4
+                            bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                            bar_rect = pygame.Rect(rect.left + bar_margin, rect.bottom - bar_margin - bar_height, bar_width, bar_height)
+                            if bar_width > 0:
+                                pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
+                    elif is_open:
+                        # Open saloon door - swung to sides
+                        pygame.draw.rect(surface, (70, 55, 40), rect)
+                        # Left door swung left
+                        left_door = pygame.Rect(rect.left, rect.top + 4, 6, rect.height - 8)
+                        pygame.draw.rect(surface, (85, 65, 50), left_door)
+                        # Right door swung right
+                        right_door = pygame.Rect(rect.right - 6, rect.top + 4, 6, rect.height - 8)
+                        pygame.draw.rect(surface, (85, 65, 50), right_door)
+                        # Open gap in middle
+                        gap_rect = pygame.Rect(rect.left + 8, rect.top + 2, rect.width - 16, rect.height - 4)
+                        pygame.draw.rect(surface, (40, 35, 30), gap_rect)
+                    else:
+                        # Closed saloon door - rusty double doors
+                        seed = self._get_tile_seed(x, y, z)
+                        rng = random.Random(seed)
+                        base_color = (90, 70, 50)
+                        color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                        pygame.draw.rect(surface, color, rect)
+                        
+                        # Double door split in middle
+                        pygame.draw.line(surface, (60, 50, 40), (rect.centerx, rect.top), (rect.centerx, rect.bottom), 2)
+                        
+                        # Horizontal slats (saloon style)
+                        slat_color = (max(0, color[0] - 15), max(0, color[1] - 10), max(0, color[2] - 8))
+                        for i in range(3):
+                            slat_y = rect.top + (i + 1) * (rect.height // 4)
+                            pygame.draw.line(surface, slat_color, (rect.left + 2, slat_y), (rect.right - 2, slat_y), 1)
+                        
+                        # Rust spots
+                        if rng.random() < 0.5:
+                            rust_x = rect.left + rng.randint(4, rect.width - 6)
+                            rust_y = rect.top + rng.randint(4, rect.height - 6)
+                            pygame.draw.rect(surface, (70, 50, 35), (rust_x, rust_y, 2, 2))
                 elif tile == "window":
                     # Window under construction - light blue-gray
                     pygame.draw.rect(surface, (100, 110, 130), rect)
@@ -1203,7 +1406,7 @@ class Grid:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                             bar_margin = 4
                             bar_height = 4
-                            bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                            bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                             bar_rect = pygame.Rect(
                                 rect.left + bar_margin,
                                 rect.bottom - bar_margin - bar_height,
@@ -1277,7 +1480,7 @@ class Grid:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                             bar_margin = 4
                             bar_height = 4
-                            bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                            bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                             bar_rect = pygame.Rect(
                                 rect.left + bar_margin,
                                 rect.bottom - bar_margin - bar_height,
@@ -1291,40 +1494,67 @@ class Grid:
                     if self.is_interior_tile(x, y, z):
                         # ADJUSTABLE: Same darkness level as finished floors
                         interior_darkness = 50
-                        tint_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                        tint_surface = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
                         tint_surface.fill((0, 0, 0, interior_darkness))
                         surface.blit(tint_surface, rect.topleft)
                 elif tile == "finished_floor":
-                    # Finished floor - warm wood color with subtle variation and pattern variants
-                    base_color = (160, 130, 90)
-                    floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
-                    pygame.draw.rect(surface, floor_color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        # Finished floor - warm wood color with subtle variation and pattern variants
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                        
+                        # Draw floor pattern based on variant
+                        variant = self._get_floor_variant(x, y, z)
+                        plank_color = (max(0, floor_color[0] - 20), max(0, floor_color[1] - 20), max(0, floor_color[2] - 20))
+                        
+                        if variant == 0:
+                            # Horizontal planks
+                            pygame.draw.line(surface, plank_color, (rect.left, rect.top + 8), (rect.right, rect.top + 8), 1)
+                            pygame.draw.line(surface, plank_color, (rect.left, rect.bottom - 8), (rect.right, rect.bottom - 8), 1)
+                        elif variant == 1:
+                            # Vertical planks
+                            pygame.draw.line(surface, plank_color, (rect.left + 8, rect.top), (rect.left + 8, rect.bottom), 1)
+                            pygame.draw.line(surface, plank_color, (rect.right - 8, rect.top), (rect.right - 8, rect.bottom), 1)
+                        else:
+                            # Diagonal pattern (concrete/stone)
+                            pygame.draw.line(surface, plank_color, (rect.left, rect.top), (rect.right, rect.bottom), 1)
                     
-                    # Draw floor pattern based on variant
-                    variant = self._get_floor_variant(x, y, z)
-                    plank_color = (max(0, floor_color[0] - 20), max(0, floor_color[1] - 20), max(0, floor_color[2] - 20))
-                    
-                    if variant == 0:
-                        # Horizontal planks
-                        pygame.draw.line(surface, plank_color, (rect.left, rect.top + 8), (rect.right, rect.top + 8), 1)
-                        pygame.draw.line(surface, plank_color, (rect.left, rect.bottom - 8), (rect.right, rect.bottom - 8), 1)
-                    elif variant == 1:
-                        # Vertical planks
-                        pygame.draw.line(surface, plank_color, (rect.left + 8, rect.top), (rect.left + 8, rect.bottom), 1)
-                        pygame.draw.line(surface, plank_color, (rect.right - 8, rect.top), (rect.right - 8, rect.bottom), 1)
-                    else:
-                        # Diagonal pattern (concrete/stone)
-                        pygame.draw.line(surface, plank_color, (rect.left, rect.top), (rect.right, rect.bottom), 1)
-                    
-                    # Interior lighting tint - darken enclosed floor tiles
+                    # Interior lighting tint - darken enclosed floor tiles (applies to both sprite and procedural)
                     if self.is_interior_tile(x, y, z):
                         # ADJUSTABLE: Interior darkness level (0-255, higher = darker)
                         # Current: 50 = ~20% darker, subtle but noticeable
                         # Increase to 70-80 for stronger effect, decrease to 30-40 for lighter
                         interior_darkness = 50
-                        tint_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                        tint_surface = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
                         tint_surface.fill((0, 0, 0, interior_darkness))
                         surface.blit(tint_surface, rect.topleft)
+                elif tile == "finished_stage":
+                    # Stage platform - elevated performance area
+                    base_color = (100, 80, 60)  # Darker wood for stage
+                    stage_color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                    pygame.draw.rect(surface, stage_color, rect)
+                    
+                    # Stage edge highlight (front of stage)
+                    edge_color = (min(255, stage_color[0] + 30), min(255, stage_color[1] + 20), min(255, stage_color[2] + 15))
+                    pygame.draw.line(surface, edge_color, (rect.left, rect.bottom - 2), (rect.right, rect.bottom - 2), 2)
+                    
+                    # Stage planks
+                    plank_color = (max(0, stage_color[0] - 15), max(0, stage_color[1] - 15), max(0, stage_color[2] - 10))
+                    pygame.draw.line(surface, plank_color, (rect.left, rect.centery), (rect.right, rect.centery), 1)
+                elif tile == "finished_stage_stairs":
+                    # Stage stairs - access to stage
+                    base_color = (110, 90, 65)
+                    stair_color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                    pygame.draw.rect(surface, stair_color, rect)
+                    
+                    # Draw steps
+                    step_color = (max(0, stair_color[0] - 20), max(0, stair_color[1] - 20), max(0, stair_color[2] - 15))
+                    step_height = rect.height // 3
+                    for i in range(3):
+                        step_y = rect.top + i * step_height
+                        pygame.draw.line(surface, step_color, (rect.left, step_y), (rect.right, step_y), 1)
                 elif tile == "gutter_slab":
                     # Gutter Slab - cyberpunk work surface: stained concrete with neon edge
                     base_color = (45, 40, 50)  # Dark, slightly purple concrete
@@ -1350,7 +1580,7 @@ class Grid:
                     pygame.draw.lines(surface, blood_color, False, smear_points, 2)
 
                     # Slight dirty overlay for grime
-                    grime_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    grime_surface = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
                     grime_surface.fill((10, 5, 10, 40))
                     surface.blit(grime_surface, rect.topleft)
                 elif tile == "crash_bed":
@@ -1369,6 +1599,49 @@ class Grid:
 
                     neon_color = (120, 40, 255)
                     pygame.draw.line(surface, neon_color, (frame_rect.left, frame_rect.bottom - 2), (frame_rect.right, frame_rect.bottom - 2), 2)
+                elif tile == "scrap_guitar_placed":
+                    # Guitar - wood body with strings
+                    pygame.draw.rect(surface, (140, 100, 60), rect)
+                    body_rect = pygame.Rect(rect.left + 4, rect.centery - 6, rect.width - 8, 12)
+                    pygame.draw.rect(surface, (120, 85, 50), body_rect)
+                    # Strings
+                    for i in range(3):
+                        y_pos = rect.centery - 2 + i * 2
+                        pygame.draw.line(surface, (180, 160, 140), (rect.left + 6, y_pos), (rect.right - 6, y_pos), 1)
+                elif tile == "drum_kit_placed":
+                    # Drums - circular shapes
+                    pygame.draw.rect(surface, (120, 110, 100), rect)
+                    pygame.draw.circle(surface, (100, 90, 80), (rect.centerx - 6, rect.centery), 6)
+                    pygame.draw.circle(surface, (110, 100, 90), (rect.centerx + 6, rect.centery), 5)
+                    pygame.draw.circle(surface, (90, 80, 70), (rect.centerx, rect.centery + 6), 4)
+                elif tile == "synth_placed":
+                    # Synth - electronic keyboard with lights
+                    pygame.draw.rect(surface, (60, 70, 80), rect)
+                    keyboard_rect = pygame.Rect(rect.left + 3, rect.centery - 3, rect.width - 6, 6)
+                    pygame.draw.rect(surface, (40, 45, 50), keyboard_rect)
+                    # LED indicators
+                    pygame.draw.rect(surface, (100, 200, 255), (rect.left + 5, rect.top + 5, 2, 2))
+                    pygame.draw.rect(surface, (200, 100, 255), (rect.left + 9, rect.top + 5, 2, 2))
+                    pygame.draw.rect(surface, (100, 255, 150), (rect.left + 13, rect.top + 5, 2, 2))
+                elif tile == "harmonica_placed":
+                    # Harmonica - small metal rectangle
+                    pygame.draw.rect(surface, (150, 140, 130), rect)
+                    harmonica_rect = pygame.Rect(rect.centerx - 8, rect.centery - 3, 16, 6)
+                    pygame.draw.rect(surface, (130, 120, 110), harmonica_rect)
+                    # Holes
+                    for i in range(5):
+                        x_pos = harmonica_rect.left + 2 + i * 3
+                        pygame.draw.rect(surface, (80, 70, 60), (x_pos, harmonica_rect.centery - 1, 2, 2))
+                elif tile == "amp_placed":
+                    # Amplifier - box with speaker grille
+                    pygame.draw.rect(surface, (80, 90, 100), rect)
+                    speaker_rect = pygame.Rect(rect.left + 4, rect.top + 4, rect.width - 8, rect.height - 8)
+                    pygame.draw.rect(surface, (60, 65, 70), speaker_rect)
+                    # Grille pattern
+                    for i in range(0, speaker_rect.width, 3):
+                        pygame.draw.line(surface, (40, 45, 50), 
+                                       (speaker_rect.left + i, speaker_rect.top), 
+                                       (speaker_rect.left + i, speaker_rect.bottom), 1)
                 elif tile in ("salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "barracks"):
                     # UNIFIED WORKSTATION UNDER CONSTRUCTION GRAPHIC
                     # Dark base with construction scaffolding look
@@ -1456,6 +1729,73 @@ class Grid:
                             bar_width = int((rect.width - 8) * progress_ratio)
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (100, 200, 100), bar_rect)
+                elif tile == "finished_gutter_still":
+                    # Gutter still - makeshift distillery
+                    # Base - dark rusty metal
+                    pygame.draw.rect(surface, (70, 55, 45), rect)
+                    # Tank/barrel shape
+                    barrel_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
+                    pygame.draw.rect(surface, (85, 65, 50), barrel_rect)
+                    # Pipes/tubes
+                    pygame.draw.line(surface, (60, 50, 40), (rect.left + 6, rect.top + 8), (rect.right - 6, rect.top + 8), 2)
+                    pygame.draw.line(surface, (60, 50, 40), (rect.centerx, rect.top + 8), (rect.centerx, rect.bottom - 6), 1)
+                    # Show work progress if active
+                    ws = buildings.get_workstation(x, y, z)
+                    if ws and ws.get("working", False):
+                        progress = ws.get("progress", 0)
+                        recipe = buildings.get_workstation_recipe(x, y, z)
+                        if recipe:
+                            work_time = recipe.get("work_time", 120)
+                            progress_ratio = min(1.0, progress / work_time)
+                            bar_width = int((rect.width - 8) * progress_ratio)
+                            bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
+                            pygame.draw.rect(surface, (150, 100, 50), bar_rect)
+                elif tile == "finished_spark_bench":
+                    # Spark Bench - electronics workstation
+                    # Base - dark metal with blue tint
+                    pygame.draw.rect(surface, (50, 60, 70), rect)
+                    # Work surface with circuit pattern
+                    surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
+                    pygame.draw.rect(surface, (70, 80, 90), surface_rect)
+                    # Circuit traces (lines)
+                    pygame.draw.line(surface, (100, 180, 200), (rect.left + 5, rect.centery), (rect.right - 5, rect.centery), 1)
+                    pygame.draw.line(surface, (100, 180, 200), (rect.centerx, rect.top + 5), (rect.centerx, rect.bottom - 5), 1)
+                    # Sparks/LEDs (small dots)
+                    pygame.draw.rect(surface, (200, 220, 100), (rect.left + 8, rect.top + 8, 2, 2))
+                    pygame.draw.rect(surface, (100, 200, 255), (rect.right - 10, rect.top + 8, 2, 2))
+                    # Show work progress if active
+                    ws = buildings.get_workstation(x, y, z)
+                    if ws and ws.get("working", False):
+                        progress = ws.get("progress", 0)
+                        recipe = buildings.get_workstation_recipe(x, y, z)
+                        if recipe:
+                            work_time = recipe.get("work_time", 60)
+                            progress_ratio = min(1.0, progress / work_time)
+                            bar_width = int((rect.width - 8) * progress_ratio)
+                            bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
+                            pygame.draw.rect(surface, (100, 200, 255), bar_rect)
+                elif tile == "finished_tinker_station":
+                    # Tinker Station - general crafts workbench
+                    # Base - wood with metal accents
+                    pygame.draw.rect(surface, (90, 70, 50), rect)
+                    # Work surface
+                    surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
+                    pygame.draw.rect(surface, (110, 90, 60), surface_rect)
+                    # Tools scattered on surface (small shapes)
+                    pygame.draw.rect(surface, (140, 140, 140), (rect.left + 6, rect.centery - 2, 4, 2))  # Wrench
+                    pygame.draw.rect(surface, (160, 120, 80), (rect.right - 10, rect.centery, 3, 4))  # Screwdriver
+                    pygame.draw.line(surface, (120, 100, 80), (rect.left + 8, rect.top + 6), (rect.right - 8, rect.top + 6), 1)  # Edge detail
+                    # Show work progress if active
+                    ws = buildings.get_workstation(x, y, z)
+                    if ws and ws.get("working", False):
+                        progress = ws.get("progress", 0)
+                        recipe = buildings.get_workstation_recipe(x, y, z)
+                        if recipe:
+                            work_time = recipe.get("work_time", 80)
+                            progress_ratio = min(1.0, progress / work_time)
+                            bar_width = int((rect.width - 8) * progress_ratio)
+                            bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
+                            pygame.draw.rect(surface, (200, 150, 100), bar_rect)
                 elif tile == "finished_generator":
                     # Finished generator - industrial appearance
                     # Base - dark metal
@@ -1667,7 +2007,7 @@ class Grid:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                             bar_margin = 4
                             bar_height = 4
-                            bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                            bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                             bar_rect = pygame.Rect(
                                 rect.left + bar_margin,
                                 rect.bottom - bar_margin - bar_height,
@@ -1686,13 +2026,13 @@ class Grid:
                     highlight_color = (180, 70, 40)
                     
                     # Horizontal grate lines
-                    for gy_offset in range(4, TILE_SIZE - 2, 6):
+                    for gy_offset in range(4, config.TILE_SIZE - 2, 6):
                         pygame.draw.line(surface, grate_color, 
                                        (rect.left + 2, rect.top + gy_offset),
                                        (rect.right - 2, rect.top + gy_offset), 1)
                     
                     # Vertical grate lines
-                    for gx_offset in range(4, TILE_SIZE - 2, 6):
+                    for gx_offset in range(4, config.TILE_SIZE - 2, 6):
                         pygame.draw.line(surface, grate_color,
                                        (rect.left + gx_offset, rect.top + 2),
                                        (rect.left + gx_offset, rect.bottom - 2), 1)
@@ -1766,11 +2106,11 @@ class Grid:
                     
                     # Grate pattern
                     grate_color = (50, 45, 40)
-                    for gy_offset in range(2, TILE_SIZE, 4):
+                    for gy_offset in range(2, config.TILE_SIZE, 4):
                         pygame.draw.line(surface, grate_color,
                                        (rect.left, rect.top + gy_offset),
                                        (rect.right, rect.top + gy_offset), 1)
-                    for gx_offset in range(2, TILE_SIZE, 4):
+                    for gx_offset in range(2, config.TILE_SIZE, 4):
                         pygame.draw.line(surface, grate_color,
                                        (rect.left + gx_offset, rect.top),
                                        (rect.left + gx_offset, rect.bottom), 1)
@@ -1804,7 +2144,7 @@ class Grid:
                     pygame.draw.rect(surface, base_color, rect)
                     
                     # Plank lines (horizontal)
-                    for py_offset in range(4, TILE_SIZE, 6):
+                    for py_offset in range(4, config.TILE_SIZE, 6):
                         pygame.draw.line(surface, plank_color,
                                        (rect.left + 2, rect.top + py_offset),
                                        (rect.right - 2, rect.top + py_offset), 1)
@@ -1820,7 +2160,7 @@ class Grid:
                 # Draw stockpile zone background AFTER floor tiles (on current Z level)
                 if zones.is_stockpile_zone(x, y, z):
                     # Semi-transparent green overlay
-                    zone_surface = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+                    zone_surface = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
                     zone_surface.fill(COLOR_ZONE_STOCKPILE)
                     surface.blit(zone_surface, rect.topleft)
                     
@@ -1864,7 +2204,7 @@ class Grid:
                     # Dark purple roof tile with pattern
                     pygame.draw.rect(surface, (60, 40, 80), rect)
                     # Diagonal lines pattern
-                    for i in range(0, TILE_SIZE * 2, 8):
+                    for i in range(0, config.TILE_SIZE * 2, 8):
                         pygame.draw.line(surface, (80, 60, 100),
                                        (rect.left + i, rect.top),
                                        (rect.left, rect.top + i), 1)
@@ -1929,7 +2269,7 @@ class Grid:
                                 progress_ratio = max(0.0, min(1.0, job.progress / job.required))
                                 bar_margin = 4
                                 bar_height = 4
-                                bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                                bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
                                 bar_rect = pygame.Rect(
                                     rect.left + bar_margin,
                                     rect.bottom - bar_margin - bar_height,

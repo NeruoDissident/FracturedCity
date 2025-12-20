@@ -13,6 +13,7 @@ All game logic remains in existing modules.
 import pygame
 from typing import Optional, List, Dict, Tuple, Callable
 from config import SCREEN_W, SCREEN_H
+from ui_config import TOOLTIPS, SUBMENUS, get_tooltip, add_tooltip, get_submenu
 
 # ============================================================================
 # CYBERPUNK COLOR PALETTE
@@ -335,27 +336,7 @@ class LeftSidebar:
     
     TABS = ["COLONISTS", "JOBS", "ITEMS", "ROOMS"]  # BUILD moved to bottom bar
     
-    # Submenu definitions - items that have submenus
-    SUBMENUS = {
-        "build": [
-            {"id": "wall", "name": "Wall", "cost": "2 wood"},
-            {"id": "wall_advanced", "name": "Reinforced Wall", "cost": "2 mineral"},
-        ],
-        "floors": [
-            {"id": "floor", "name": "Wood Floor", "cost": "1 wood"},
-        ],
-        "access": [
-            {"id": "door", "name": "Door", "cost": "1 wood, 1 metal"},
-            {"id": "window", "name": "Window", "cost": "1 wood, 1 mineral"},
-            {"id": "fire_escape", "name": "Fire Escape", "cost": "1 wood, 1 metal"},
-            {"id": "bridge", "name": "Bridge", "cost": "2 wood, 1 metal"},
-        ],
-        "zone": [
-            {"id": "stockpile", "name": "Stockpile", "cost": ""},
-            {"id": "allow", "name": "Allow Area", "cost": ""},
-            {"id": "roof", "name": "Roof Zone", "cost": ""},
-        ],
-    }
+    # NOTE: Submenu definitions moved to ui_config.py - use get_submenu() to access
     
     def __init__(self):
         self.rect = pygame.Rect(0, TOP_BAR_HEIGHT, LEFT_SIDEBAR_WIDTH, 
@@ -419,8 +400,17 @@ class LeftSidebar:
         try:
             import items as items_module
             self.furniture_menu = []
+            # Get furniture items
             furniture_defs = items_module.get_items_with_tag("furniture")
             for item_def in furniture_defs:
+                self.furniture_menu.append({
+                    "id": f"furn_{item_def.id}",
+                    "name": item_def.name,
+                    "cost": "From stockpile",
+                })
+            # Get instrument items
+            instrument_defs = items_module.get_items_with_tag("instrument")
+            for item_def in instrument_defs:
                 self.furniture_menu.append({
                     "id": f"furn_{item_def.id}",
                     "name": item_def.name,
@@ -439,7 +429,7 @@ class LeftSidebar:
             if not self.furniture_menu:
                 self.load_dynamic_menus()
             return self.furniture_menu
-        return self.SUBMENUS.get(category, [])
+        return get_submenu(category)
     
     def close_submenu(self) -> None:
         """Close any open submenu."""
@@ -892,12 +882,8 @@ class LeftSidebar:
                     break
     
     def get_tooltips(self) -> dict:
-        """Get tooltip data from ActionBar."""
-        try:
-            from ui import ActionBar
-            return ActionBar.TOOLTIPS
-        except:
-            return {}
+        """Get tooltip data from ui_config."""
+        return TOOLTIPS
     
     def draw_submenu(self, surface: pygame.Surface) -> None:
         """Draw the cascading submenu if active."""
@@ -1058,37 +1044,7 @@ class BottomBuildBar:
         ("Harvest", "H", "harvest"),
     ]
     
-    # Submenu definitions - copied from LeftSidebar
-    SUBMENUS = {
-        "build": [
-            {"id": "wall", "name": "Wall", "cost": "2 wood"},
-            {"id": "wall_advanced", "name": "Reinforced Wall", "cost": "2 mineral"},
-        ],
-        "floors": [
-            {"id": "floor", "name": "Wood Floor", "cost": "1 wood"},
-        ],
-        "access": [
-            {"id": "door", "name": "Door", "cost": "1 wood, 1 metal"},
-            {"id": "window", "name": "Window", "cost": "1 wood, 1 mineral"},
-            {"id": "fire_escape", "name": "Fire Escape", "cost": "1 wood, 1 metal"},
-            {"id": "bridge", "name": "Bridge", "cost": "2 wood, 1 metal"},
-        ],
-        "rooms": [
-            {"id": "room_bedroom", "name": "Bedroom", "cost": ""},
-            {"id": "room_kitchen", "name": "Kitchen", "cost": ""},
-            {"id": "room_workshop", "name": "Workshop", "cost": ""},
-            {"id": "room_barracks", "name": "Barracks", "cost": ""},
-            {"id": "room_prison", "name": "Prison", "cost": ""},
-            {"id": "room_hospital", "name": "Hospital", "cost": ""},
-            {"id": "room_rec_room", "name": "Rec Room", "cost": ""},
-            {"id": "room_dining_hall", "name": "Dining Hall", "cost": ""},
-        ],
-        "zone": [
-            {"id": "stockpile", "name": "Stockpile", "cost": ""},
-            {"id": "allow", "name": "Allow Area", "cost": ""},
-            {"id": "roof", "name": "Roof Zone", "cost": ""},
-        ],
-    }
+    # NOTE: Submenu definitions moved to ui_config.py - use get_submenu() to access
     
     def __init__(self):
         self.rect = pygame.Rect(LEFT_SIDEBAR_WIDTH, SCREEN_H - BOTTOM_BAR_HEIGHT, 
@@ -1140,8 +1096,17 @@ class BottomBuildBar:
         try:
             import items as items_module
             self.furniture_menu = []
+            # Get furniture items
             furniture_defs = items_module.get_items_with_tag("furniture")
             for item_def in furniture_defs:
+                self.furniture_menu.append({
+                    "id": f"furn_{item_def.id}",
+                    "name": item_def.name,
+                    "cost": "From stockpile",
+                })
+            # Get instrument items
+            instrument_defs = items_module.get_items_with_tag("instrument")
+            for item_def in instrument_defs:
                 self.furniture_menu.append({
                     "id": f"furn_{item_def.id}",
                     "name": item_def.name,
@@ -1160,7 +1125,7 @@ class BottomBuildBar:
             if not self.furniture_menu:
                 self.load_dynamic_menus()
             return self.furniture_menu
-        return self.SUBMENUS.get(category, [])
+        return get_submenu(category)
     
     def close_submenu(self) -> None:
         """Close any open submenu."""
@@ -1332,12 +1297,20 @@ class BottomBuildBar:
         pygame.draw.rect(surface, COLOR_BG_PANEL, self.submenu_rect, border_radius=6)
         draw_panel_border(surface, self.submenu_rect, COLOR_ACCENT_CYAN_DIM, corner_size=6)
         
-        # Draw items
+        # Draw items and track hovered item for tooltip
+        hovered_tooltip = None
+        hovered_rect = None
+        
         for i, (item, rect) in enumerate(zip(self.submenu_items, self.submenu_rects)):
             if i == self.hovered_submenu_item:
                 pygame.draw.rect(surface, COLOR_BG_PANEL_LIGHT, rect, border_radius=4)
                 pygame.draw.rect(surface, COLOR_ACCENT_CYAN, rect, 1, border_radius=4)
                 text_color = COLOR_TEXT_BRIGHT
+                # Get tooltip for hovered item
+                item_id = item.get("id", "")
+                if item_id in TOOLTIPS:
+                    hovered_tooltip = TOOLTIPS[item_id]
+                    hovered_rect = rect
             else:
                 text_color = COLOR_TEXT_DIM
             
@@ -1350,6 +1323,94 @@ class BottomBuildBar:
                 cost_surf = self.font_small.render(cost, True, COLOR_TEXT_DIM)
                 cost_x = rect.right - cost_surf.get_width() - 8
                 surface.blit(cost_surf, (cost_x, rect.centery - cost_surf.get_height() // 2))
+        
+        # Draw tooltip for hovered item
+        if hovered_tooltip and hovered_rect:
+            self._draw_tooltip(surface, hovered_tooltip, hovered_rect)
+    
+    def _draw_tooltip(self, surface: pygame.Surface, tooltip_data: tuple, anchor_rect: pygame.Rect) -> None:
+        """Draw a tooltip box next to the anchor rect."""
+        if not tooltip_data:
+            return
+        
+        # Parse tooltip data
+        if isinstance(tooltip_data, tuple) and len(tooltip_data) >= 2:
+            title = tooltip_data[0]
+            desc = tooltip_data[1]
+            extra = tooltip_data[2] if len(tooltip_data) > 2 else ""
+        else:
+            title = str(tooltip_data)
+            desc = ""
+            extra = ""
+        
+        # Calculate tooltip size
+        padding = 8
+        max_width = 280
+        
+        title_font = get_cyber_font(16, bold=True)
+        desc_font = get_cyber_font(13)
+        
+        title_surf = title_font.render(title, True, COLOR_ACCENT_CYAN)
+        
+        # Wrap description text
+        desc_lines = []
+        if desc:
+            words = desc.split()
+            current_line = ""
+            for word in words:
+                test_line = current_line + " " + word if current_line else word
+                if desc_font.size(test_line)[0] <= max_width - padding * 2:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        desc_lines.append(current_line)
+                    current_line = word
+            if current_line:
+                desc_lines.append(current_line)
+        
+        # Calculate box size
+        box_width = max(title_surf.get_width() + padding * 2, max_width)
+        box_height = padding + title_surf.get_height() + 4
+        box_height += len(desc_lines) * 18
+        if extra:
+            box_height += 20
+        
+        # Position tooltip above submenu
+        tooltip_x = anchor_rect.left
+        tooltip_y = self.submenu_rect.top - box_height - 8
+        
+        # Keep on screen
+        if tooltip_y < TOP_BAR_HEIGHT:
+            tooltip_y = self.submenu_rect.bottom + 8
+        if tooltip_x + box_width > SCREEN_W:
+            tooltip_x = SCREEN_W - box_width - 10
+        
+        tooltip_rect = pygame.Rect(tooltip_x, tooltip_y, box_width, box_height)
+        
+        # Draw shadow
+        shadow_rect = tooltip_rect.copy()
+        shadow_rect.x += 3
+        shadow_rect.y += 3
+        pygame.draw.rect(surface, (10, 12, 16), shadow_rect, border_radius=6)
+        
+        # Draw background
+        pygame.draw.rect(surface, COLOR_BG_PANEL, tooltip_rect, border_radius=6)
+        pygame.draw.rect(surface, COLOR_ACCENT_CYAN, tooltip_rect, 1, border_radius=6)
+        
+        # Draw content
+        y = tooltip_rect.top + padding
+        surface.blit(title_surf, (tooltip_rect.left + padding, y))
+        y += title_surf.get_height() + 4
+        
+        for line in desc_lines:
+            line_surf = desc_font.render(line, True, COLOR_TEXT_DIM)
+            surface.blit(line_surf, (tooltip_rect.left + padding, y))
+            y += 18
+        
+        if extra:
+            y += 4
+            extra_surf = desc_font.render(extra, True, COLOR_TEXT_ACCENT)
+            surface.blit(extra_surf, (tooltip_rect.left + padding, y))
 
 
 # ============================================================================

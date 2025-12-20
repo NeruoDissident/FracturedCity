@@ -17,9 +17,10 @@ from typing import Iterable
 from enum import Enum
 
 import pygame
+import sprites
+import config
 
 from config import (
-    TILE_SIZE,
     GRID_W,
     GRID_H,
     COLOR_COLONIST_DEFAULT,
@@ -572,6 +573,12 @@ class Colonist:
         if not hasattr(self, "uid") or getattr(self, "uid") is None:
             self.uid = Colonist._uid_counter
             Colonist._uid_counter += 1
+
+        # Sprite style - randomly assigned from available styles
+        if not hasattr(self, "sprite_style"):
+            import random
+            available_styles = ["default", "echo1", "echo2"]
+            self.sprite_style = random.choice(available_styles)
 
         self.state: str = "idle"
         self.current_job: Job | None = None
@@ -4484,8 +4491,8 @@ class Colonist:
             camera_x, camera_y: Camera offset for viewport rendering
         """
         # World position in pixels
-        world_cx = self.x * TILE_SIZE + TILE_SIZE // 2
-        world_cy = self.y * TILE_SIZE + TILE_SIZE // 2 + self.fidget_offset
+        world_cx = self.x * config.TILE_SIZE + config.TILE_SIZE // 2
+        world_cy = self.y * config.TILE_SIZE + config.TILE_SIZE // 2 + self.fidget_offset
         
         # Combat shake - jitter toward target when fighting
         combat_offset_x = 0
@@ -4506,54 +4513,66 @@ class Colonist:
         screen_cx = world_cx - camera_x + combat_offset_x
         screen_cy = world_cy - camera_y + combat_offset_y
         
-        # Use ether mode colors if enabled
-        if ether_mode:
-            clothing = COLOR_COLONIST_ETHER
-            skin = COLOR_COLONIST_ETHER
+        # Try to load colonist sprite based on facing direction
+        sprite_size = config.TILE_SIZE  # Match current tile size for zoom support
+        is_moving = self.state in ("moving_to_job", "moving_to_haul", "moving_to_build", "hauling")
+        colonist_sprite = sprites.get_colonist_sprite(self.facing_direction, is_moving, sprite_size, self.sprite_style)
+        
+        # Always use sprite if available (ignore ether mode for now)
+        if colonist_sprite:
+            # Draw sprite centered on colonist position
+            sprite_rect = colonist_sprite.get_rect(center=(screen_cx, screen_cy))
+            surface.blit(colonist_sprite, sprite_rect.topleft)
         else:
-            clothing = self.clothing_color
-            skin = self.skin_tone
-        
-        # Draw sprite-person (simple geometric shapes)
-        # Legs (2 small rectangles)
-        leg_width = 3
-        leg_height = 5
-        leg_spacing = 2
-        legs_y = screen_cy + 3
-        
-        # Left leg
-        pygame.draw.rect(surface, clothing, 
-                        (screen_cx - leg_spacing - leg_width, legs_y, leg_width, leg_height))
-        # Right leg
-        pygame.draw.rect(surface, clothing,
-                        (screen_cx + leg_spacing, legs_y, leg_width, leg_height))
-        
-        # Torso (rectangle)
-        torso_width = 10
-        torso_height = 8
-        torso_rect = pygame.Rect(screen_cx - torso_width // 2, screen_cy - 2, torso_width, torso_height)
-        pygame.draw.rect(surface, clothing, torso_rect)
-        
-        # Head (circle)
-        head_radius = 4
-        head_y = screen_cy - 6
-        pygame.draw.circle(surface, skin, (screen_cx, head_y), head_radius)
-        
-        # Simple facing indicator (small dot for eyes/face direction)
-        face_offset_x = 0
-        face_offset_y = 0
-        if self.facing_direction == "north":
-            face_offset_y = -2
-        elif self.facing_direction == "south":
-            face_offset_y = 1
-        elif self.facing_direction == "east":
-            face_offset_x = 2
-        elif self.facing_direction == "west":
-            face_offset_x = -2
-        
-        # Draw tiny face dot
-        pygame.draw.circle(surface, (50, 50, 50), 
-                          (screen_cx + face_offset_x, head_y + face_offset_y), 1)
+            # Fallback to procedural drawing
+            # Use ether mode colors if enabled
+            if ether_mode:
+                clothing = COLOR_COLONIST_ETHER
+                skin = COLOR_COLONIST_ETHER
+            else:
+                clothing = self.clothing_color
+                skin = self.skin_tone
+            
+            # Draw sprite-person (simple geometric shapes)
+            # Legs (2 small rectangles)
+            leg_width = 3
+            leg_height = 5
+            leg_spacing = 2
+            legs_y = screen_cy + 3
+            
+            # Left leg
+            pygame.draw.rect(surface, clothing, 
+                            (screen_cx - leg_spacing - leg_width, legs_y, leg_width, leg_height))
+            # Right leg
+            pygame.draw.rect(surface, clothing,
+                            (screen_cx + leg_spacing, legs_y, leg_width, leg_height))
+            
+            # Torso (rectangle)
+            torso_width = 10
+            torso_height = 8
+            torso_rect = pygame.Rect(screen_cx - torso_width // 2, screen_cy - 2, torso_width, torso_height)
+            pygame.draw.rect(surface, clothing, torso_rect)
+            
+            # Head (circle)
+            head_radius = 4
+            head_y = screen_cy - 6
+            pygame.draw.circle(surface, skin, (screen_cx, head_y), head_radius)
+            
+            # Simple facing indicator (small dot for eyes/face direction)
+            face_offset_x = 0
+            face_offset_y = 0
+            if self.facing_direction == "north":
+                face_offset_y = -2
+            elif self.facing_direction == "south":
+                face_offset_y = 1
+            elif self.facing_direction == "east":
+                face_offset_x = 2
+            elif self.facing_direction == "west":
+                face_offset_x = -2
+            
+            # Draw tiny face dot
+            pygame.draw.circle(surface, (50, 50, 50), 
+                              (screen_cx + face_offset_x, head_y + face_offset_y), 1)
         
         # Job state ring around colonist
         # Priority: combat > stuck > job state

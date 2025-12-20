@@ -484,10 +484,11 @@ class ActionBar:
     }
     
     # Menu structure - flattened, less nesting
-    # Build = walls only
+    # Build = walls and bar counters (dragable)
     BUILD_MENU = [
         {"id": "wall", "name": "Wall", "cost": "2 wood", "keybind": "1"},
         {"id": "wall_advanced", "name": "Reinforced Wall", "cost": "2 mineral", "keybind": "2"},
+        {"id": "scrap_bar_counter", "name": "Scrap Bar Counter", "cost": "2 scrap, 1 wood", "keybind": "3"},
     ]
     
     # Floors - just floor for now, more types later

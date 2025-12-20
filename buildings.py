@@ -51,12 +51,33 @@ BUILDING_TYPES = {
         "construction_work": 80,
         "walkable": True,  # Doors are walkable when open
     },
+    "bar_door": {
+        "name": "Bar Door",
+        "tile_type": "bar_door",
+        "materials": {"scrap": 2, "wood": 1},
+        "construction_work": 70,
+        "walkable": True,  # Swinging saloon-style door
+    },
     "floor": {
         "name": "Floor",
         "tile_type": "floor",
         "materials": {"wood": 1},
         "construction_work": 40,
         "walkable": True,
+    },
+    "stage": {
+        "name": "Stage",
+        "tile_type": "stage",
+        "materials": {"wood": 2, "scrap": 1},
+        "construction_work": 50,
+        "walkable": True,  # Walkable but needs stairs to access
+    },
+    "stage_stairs": {
+        "name": "Stage Stairs",
+        "tile_type": "stage_stairs",
+        "materials": {"wood": 1, "scrap": 1},
+        "construction_work": 30,
+        "walkable": True,  # Stairs allow access to stage
     },
     "fire_escape": {
         "name": "Fire Escape",
@@ -78,6 +99,58 @@ BUILDING_TYPES = {
         "materials": {"wood": 2, "metal": 1},
         "construction_work": 60,
         "walkable": True,  # Colonists can walk on bridges
+    },
+    "scrap_bar_counter": {
+        "name": "Scrap Bar Counter",
+        "tile_type": "scrap_bar_counter",
+        "materials": {"scrap": 2, "wood": 1},
+        "construction_work": 60,
+        "walkable": False,  # Counter blocks movement like a wall
+    },
+    "gutter_still": {
+        "name": "Gutter Still",
+        "tile_type": "gutter_still",
+        "materials": {"scrap": 3, "metal": 2},
+        "construction_work": 100,
+        "walkable": False,
+        "workstation": True,  # Bartender crafts drinks here
+        "multi_recipe": True,
+        "recipes": [
+            {"id": "brew_swill", "name": "Brew Swill", "input": {"raw_food": 2, "scrap": 1}, "output_item": "swill", "work_time": 120},
+            {"id": "distill_guttershine", "name": "Distill Guttershine", "input": {"raw_food": 3, "scrap": 2}, "output_item": "guttershine", "work_time": 180},
+        ],
+    },
+    "spark_bench": {
+        "name": "Spark Bench",
+        "tile_type": "spark_bench",
+        "materials": {"metal": 3, "mineral": 2, "scrap": 2},
+        "construction_work": 120,
+        "walkable": False,
+        "workstation": True,
+        "multi_recipe": True,
+        "recipes": [
+            {"id": "craft_wire", "name": "Salvage Wire", "input": {"scrap": 1}, "output_item": "wire", "work_time": 40},
+            {"id": "craft_resistor", "name": "Craft Resistor", "input": {"scrap": 1, "mineral": 1}, "output_item": "resistor", "work_time": 50},
+            {"id": "craft_capacitor", "name": "Craft Capacitor", "input": {"scrap": 1, "metal": 1}, "output_item": "capacitor", "work_time": 50},
+            {"id": "craft_chip", "name": "Craft Circuit Chip", "input": {"metal": 2, "mineral": 1, "wire": 2}, "output_item": "chip", "work_time": 90},
+            {"id": "craft_led", "name": "Craft LED", "input": {"mineral": 1, "wire": 1}, "output_item": "led", "work_time": 45},
+        ],
+    },
+    "tinker_station": {
+        "name": "Tinker Station",
+        "tile_type": "tinker_station",
+        "materials": {"wood": 3, "metal": 2, "scrap": 2},
+        "construction_work": 100,
+        "walkable": False,
+        "workstation": True,
+        "multi_recipe": True,
+        "recipes": [
+            {"id": "craft_scrap_guitar", "name": "Scrap Guitar", "input": {"wood": 2, "metal": 1, "wire": 2}, "output_item": "scrap_guitar", "work_time": 100},
+            {"id": "craft_drum_kit", "name": "Drum Kit", "input": {"scrap": 3, "wood": 2}, "output_item": "drum_kit", "work_time": 90},
+            {"id": "craft_synth", "name": "Synth Keyboard", "input": {"chip": 2, "wire": 3, "scrap": 2}, "output_item": "synth", "work_time": 120},
+            {"id": "craft_harmonica", "name": "Harmonica", "input": {"metal": 1, "scrap": 1}, "output_item": "harmonica", "work_time": 50},
+            {"id": "craft_amp", "name": "Amplifier", "input": {"chip": 1, "wire": 2, "metal": 2}, "output_item": "amp", "work_time": 80},
+        ],
     },
     "salvagers_bench": {
         "name": "Salvager's Bench",
@@ -158,6 +231,7 @@ BUILDING_TYPES = {
             {"id": "scrap_armor", "name": "Scrap Armor", "input": {"metal": 3, "scrap": 2}, "output_item": "scrap_armor", "work_time": 120},
             {"id": "crash_bed", "name": "Crash Bed", "input": {"scrap": 2, "wood": 2}, "output_item": "crash_bed", "work_time": 90},
             {"id": "comfort_chair", "name": "Comfort Chair", "input": {"wood": 2, "scrap": 1}, "output_item": "comfort_chair", "work_time": 80},
+            {"id": "bar_stool", "name": "Bar Stool", "input": {"scrap": 1, "wood": 1}, "output_item": "bar_stool", "work_time": 60},
             {"id": "storage_locker", "name": "Storage Locker", "input": {"wood": 3, "metal": 1}, "output_item": "storage_locker", "work_time": 90},
             {"id": "dining_table", "name": "Dining Table", "input": {"wood": 4}, "output_item": "dining_table", "work_time": 100},
             {"id": "wall_lamp", "name": "Wall Lamp", "input": {"metal": 1, "power": 1}, "output_item": "wall_lamp", "work_time": 50},
@@ -463,14 +537,48 @@ def place_door(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     return False
 
 
+def place_bar_door(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a bar door construction site at (x, y, z)."""
+    if place_building(grid, x, y, "bar_door", z):
+        # Initialize door state as closed
+        _DOOR_STATES[(x, y, z)] = {"open": False, "close_timer": 0}
+        return True
+    return False
+
+
 def place_floor(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     """Place a floor construction site at (x, y, z)."""
     return place_building(grid, x, y, "floor", z)
 
 
+def place_stage(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a stage construction site at (x, y, z)."""
+    return place_building(grid, x, y, "stage", z)
+
+
+def place_stage_stairs(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place stage stairs construction site at (x, y, z)."""
+    return place_building(grid, x, y, "stage_stairs", z)
+
+
 def place_window(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     """Place a window construction site at (x, y, z)."""
     return place_building(grid, x, y, "window", z)
+
+
+def place_scrap_bar_counter(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a scrap bar counter construction site at (x, y, z)."""
+    return place_building(grid, x, y, "scrap_bar_counter", z)
+
+
+def place_bar_stool(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a bar stool construction site at (x, y, z)."""
+    return place_building(grid, x, y, "bar_stool", z)
+
+
+def place_gutter_still(grid: Grid, x: int, y: int, z: int = 0) -> bool:
+    """Place a gutter still construction site at (x, y, z)."""
+    return place_building(grid, x, y, "gutter_still", z)
 
 
 def can_place_salvagers_bench(grid: Grid, x: int, y: int, z: int = 0) -> bool:

@@ -1507,6 +1507,10 @@ def spawn_resource_nodes(grid, count: int = 40) -> tuple[int, int]:
     road_damage_count, road_mineral_count = _spawn_road_damage(grid, streets, street_segments)
     mineral_count += road_mineral_count  # Add minerals spawned near ripped streets
     
+    # Step 9: Generate organic terrain patches on remaining empty tiles
+    from terrain_gen import generate_terrain_patches
+    generate_terrain_patches(grid)
+    
     total_scrap = scrap_in_buildings + scrap_exterior
     
     print(f"[WorldGen] ═══════════════════════════════════════")
