@@ -310,7 +310,7 @@ class Grid:
         """Generate a deterministic seed for tile variation based on position."""
         return (x * 7919 + y * 6547 + z * 4973) & 0xFFFFFFFF
     
-    def _try_draw_tile_sprite(self, surface: pygame.Surface, tile_type: str, rect: pygame.Rect, x: int, y: int, z: int) -> bool:
+    def _try_draw_tile_sprite(self, surface: pygame.Surface, tile_type: str, rect: pygame.Rect, x: int, y: int, z: int, use_construction_tint: bool = False) -> bool:
         """Try to draw a tile sprite. Returns True if sprite was drawn, False if should use procedural.
         
         Args:
@@ -318,11 +318,31 @@ class Grid:
             tile_type: Type of tile
             rect: Rectangle to draw in
             x, y, z: Tile coordinates (for variation)
+            use_construction_tint: If True, try to load finished sprite with construction tint
             
         Returns:
             True if sprite was drawn, False if procedural drawing should be used
         """
         import config
+        
+        # If construction tint requested, try to load the finished version with tint
+        if use_construction_tint:
+            # For resource nodes, use the same sprite name with tint (don't add "finished_")
+            if "_node" in tile_type:
+                tile_sprite = sprites.get_tile_sprite(tile_type, x, y, z, config.TILE_SIZE, apply_construction_tint=True)
+            else:
+                # Map construction tile to finished version
+                finished_type = tile_type.replace("wall", "finished_wall").replace("floor", "finished_floor").replace("door", "finished_door").replace("window", "finished_window").replace("bridge", "finished_bridge").replace("fire_escape", "finished_fire_escape")
+                if not finished_type.startswith("finished_"):
+                    finished_type = "finished_" + tile_type
+                
+                tile_sprite = sprites.get_tile_sprite(finished_type, x, y, z, config.TILE_SIZE, apply_construction_tint=True)
+            
+            if tile_sprite:
+                surface.blit(tile_sprite, rect.topleft)
+                return True
+        
+        # Normal sprite loading (no tint)
         tile_sprite = sprites.get_tile_sprite(tile_type, x, y, z, config.TILE_SIZE)
         if tile_sprite:
             surface.blit(tile_sprite, rect.topleft)
@@ -365,6 +385,11 @@ class Grid:
     
     def _draw_mineral_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
         """Render a mineral resource node with one of several rock variants."""
+        # Try to load sprite first (mineral_node_0 through mineral_node_7)
+        if self._try_draw_tile_sprite(surface, "mineral_node", rect, x, y, z, use_construction_tint=depleted):
+            return
+        
+        # Fallback to procedural rendering
         import random
         
         base_palette = [
@@ -438,6 +463,11 @@ class Grid:
     
     def _draw_wood_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
         """Render a wood resource node with tree/lumber variants."""
+        # Try to load sprite first (wood_node_0 through wood_node_5)
+        if self._try_draw_tile_sprite(surface, "wood_node", rect, x, y, z, use_construction_tint=depleted):
+            return
+        
+        # Fallback to procedural rendering
         import random
         
         # Brown palette for wood
@@ -1013,29 +1043,44 @@ class Grid:
                         color = self._get_tile_color_variation(COLOR_TILE_ROCK, x, y, z, 8)
                         pygame.draw.rect(surface, color, rect)
                 elif tile == "scorched":
-                    # Scorched earth from demolished pavement - dark charred look
-                    color = self._get_tile_color_variation(COLOR_TILE_SCORCHED, x, y, z, 6)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "scorched", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_SCORCHED, x, y, z, 6)
+                        pygame.draw.rect(surface, color, rect)
                 # Decorative tiles with subtle color variation
                 elif tile == "sidewalk":
-                    self._draw_sidewalk_tile(surface, rect, x, y, z, designated=False)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "sidewalk", rect, x, y, z):
+                        self._draw_sidewalk_tile(surface, rect, x, y, z, designated=False)
                 elif tile == "sidewalk_designated":
-                    self._draw_sidewalk_tile(surface, rect, x, y, z, designated=True)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "sidewalk", rect, x, y, z):
+                        self._draw_sidewalk_tile(surface, rect, x, y, z, designated=True)
                 elif tile == "debris":
-                    color = self._get_tile_color_variation(COLOR_TILE_DEBRIS, x, y, z, 12)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "debris", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_DEBRIS, x, y, z, 12)
+                        pygame.draw.rect(surface, color, rect)
                 elif tile == "weeds":
-                    color = self._get_tile_color_variation(COLOR_TILE_WEEDS, x, y, z, 10)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "weeds", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_WEEDS, x, y, z, 10)
+                        pygame.draw.rect(surface, color, rect)
                 elif tile == "prop_barrel":
-                    color = self._get_tile_color_variation(COLOR_TILE_PROP_BARREL, x, y, z, 15)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "prop_barrel", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_PROP_BARREL, x, y, z, 15)
+                        pygame.draw.rect(surface, color, rect)
                 elif tile == "prop_sign":
-                    color = self._get_tile_color_variation(COLOR_TILE_PROP_SIGN, x, y, z, 12)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "prop_sign", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_PROP_SIGN, x, y, z, 12)
+                        pygame.draw.rect(surface, color, rect)
                 elif tile == "prop_scrap":
-                    color = self._get_tile_color_variation(COLOR_TILE_PROP_SCRAP, x, y, z, 15)
-                    pygame.draw.rect(surface, color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "prop_scrap", rect, x, y, z):
+                        color = self._get_tile_color_variation(COLOR_TILE_PROP_SCRAP, x, y, z, 15)
+                        pygame.draw.rect(surface, color, rect)
 
                 # Stockpile zone background moved to after floor rendering (see line ~1821)
                 
@@ -1043,7 +1088,9 @@ class Grid:
                 if hovered_tile is not None and hovered_tile == (x, y):
                     pygame.draw.rect(surface, COLOR_TILE_SELECTED, rect)
                 elif tile == "building":
-                    pygame.draw.rect(surface, COLOR_TILE_BUILDING, rect)
+                    # Try sprite first (uses finished_building with construction tint), fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "building", rect, x, y, z, use_construction_tint=True):
+                        pygame.draw.rect(surface, COLOR_TILE_BUILDING, rect)
 
                     # Optional: small progress bar for the construction job on
                     # this tile, if one exists.
@@ -1062,11 +1109,15 @@ class Grid:
                         if bar_width > 0:
                             pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_building":
-                    pygame.draw.rect(surface, COLOR_TILE_FINISHED_BUILDING, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_building", rect, x, y, z):
+                        pygame.draw.rect(surface, COLOR_TILE_FINISHED_BUILDING, rect)
                 elif tile == "wall":
-                    pygame.draw.rect(surface, COLOR_TILE_WALL, rect)
+                    # Try sprite first (uses finished_wall with construction tint), fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "wall", rect, x, y, z, use_construction_tint=True):
+                        pygame.draw.rect(surface, COLOR_TILE_WALL, rect)
                     
-                    # Show delivered materials as small icons
+                    # Show delivered materials as small icons (overlay on sprite or procedural)
                     site = buildings.get_construction_site(x, y, z)
                     if site is not None:
                         delivered = site.get("materials_delivered", {})
@@ -1084,7 +1135,7 @@ class Grid:
                             pygame.draw.rect(surface, icon_color, icon_rect)
                             icon_x += 8
                     
-                    # Progress bar for wall construction
+                    # Progress bar for wall construction (overlay on sprite or procedural)
                     job = get_job_at(x, y)
                     if job is not None and job.required > 0:
                         progress_ratio = max(0.0, min(1.0, job.progress / job.required))
@@ -1131,10 +1182,12 @@ class Grid:
                         if bar_width > 0:
                             pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_scrap_bar_counter":
-                    # Rusty, ugly bar counter - diverse organic variations
-                    import random
-                    seed = self._get_tile_seed(x, y, z)
-                    rng = random.Random(seed)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_scrap_bar_counter", rect, x, y, z):
+                        # Rusty, ugly bar counter - diverse organic variations
+                        import random
+                        seed = self._get_tile_seed(x, y, z)
+                        rng = random.Random(seed)
                     
                     # Base color with variation
                     base_colors = [
@@ -1200,8 +1253,9 @@ class Grid:
                         scratch_y = rect.top + rng.randint(0, rect.height - 2)
                         pygame.draw.line(surface, light_rust, (scratch_x, scratch_y), (scratch_x + rng.randint(-4, 4), scratch_y + rng.randint(-4, 4)), 1)
                 elif tile in ("street", "street_cracked", "street_scar", "street_ripped"):
-                    # Street tiles with damage variations
-                    self._draw_street_tile(surface, rect, x, y, z, tile)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, tile, rect, x, y, z):
+                        self._draw_street_tile(surface, rect, x, y, z, tile)
                 elif tile == "street_designated":
                     # Street designated for harvesting - warmer tone with harvest indicator
                     color = self._get_tile_color_variation(COLOR_TILE_STREET_DESIGNATED, x, y, z, 8)
@@ -1217,8 +1271,9 @@ class Grid:
                     pygame.draw.circle(surface, (180, 160, 120), (rect.centerx, rect.centery), 4)
                     pygame.draw.circle(surface, (100, 90, 70), (rect.centerx, rect.centery), 4, 1)
                 elif tile == "wall_advanced":
-                    # Reinforced wall under construction - darker gray
-                    pygame.draw.rect(surface, (60, 60, 70), rect)
+                    # Try sprite first (uses finished_wall_advanced with construction tint), fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "wall_advanced", rect, x, y, z, use_construction_tint=True):
+                        pygame.draw.rect(surface, (60, 60, 70), rect)
                     
                     # Show delivered materials as small icons
                     site = buildings.get_construction_site(x, y, z)
@@ -1256,18 +1311,20 @@ class Grid:
                         if bar_width > 0:
                             pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_wall_advanced":
-                    # Finished reinforced wall - steel blue
-                    pygame.draw.rect(surface, (80, 90, 110), rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_wall_advanced", rect, x, y, z):
+                        pygame.draw.rect(surface, (80, 90, 110), rect)
                 elif tile == "door":
                     # Door tile - check if open or closed
                     is_open = buildings.is_door_open(x, y)
                     site = buildings.get_construction_site(x, y, z)
                     
                     if site is not None:
-                        # Under construction - brown/orange tint
-                        pygame.draw.rect(surface, (100, 70, 40), rect)
+                        # Try sprite first (uses finished_door with construction tint), fallback to procedural
+                        if not self._try_draw_tile_sprite(surface, "door", rect, x, y, z, use_construction_tint=True):
+                            pygame.draw.rect(surface, (100, 70, 40), rect)
                         
-                        # Show delivered materials
+                        # Show delivered materials (overlay on sprite or procedural)
                         delivered = site.get("materials_delivered", {})
                         needed = site.get("materials_needed", {})
                         icon_x = rect.left + 2
@@ -1281,7 +1338,7 @@ class Grid:
                             pygame.draw.rect(surface, icon_color, icon_rect)
                             icon_x += 8
                         
-                        # Progress bar
+                        # Progress bar (overlay on sprite or procedural)
                         job = get_job_at(x, y)
                         if job is not None and job.required > 0:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
@@ -1297,17 +1354,19 @@ class Grid:
                             if bar_width > 0:
                                 pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                     elif is_open:
-                        # Open door - lighter, with gap in middle
-                        pygame.draw.rect(surface, (60, 50, 40), rect)
-                        # Draw open gap
-                        gap_rect = pygame.Rect(rect.left + 6, rect.top + 2, rect.width - 12, rect.height - 4)
-                        pygame.draw.rect(surface, (30, 25, 20), gap_rect)
+                        # Try sprite first for open door, fallback to procedural
+                        if not self._try_draw_tile_sprite(surface, "finished_door", rect, x, y, z):
+                            pygame.draw.rect(surface, (60, 50, 40), rect)
+                            # Draw open gap
+                            gap_rect = pygame.Rect(rect.left + 6, rect.top + 2, rect.width - 12, rect.height - 4)
+                            pygame.draw.rect(surface, (30, 25, 20), gap_rect)
                     else:
-                        # Closed door - solid brown
-                        pygame.draw.rect(surface, (120, 80, 50), rect)
-                        # Door handle
-                        handle_rect = pygame.Rect(rect.right - 8, rect.centery - 2, 4, 4)
-                        pygame.draw.rect(surface, (180, 150, 100), handle_rect)
+                        # Try sprite first for closed door, fallback to procedural
+                        if not self._try_draw_tile_sprite(surface, "finished_door", rect, x, y, z):
+                            pygame.draw.rect(surface, (120, 80, 50), rect)
+                            # Door handle
+                            handle_rect = pygame.Rect(rect.right - 8, rect.centery - 2, 4, 4)
+                            pygame.draw.rect(surface, (180, 150, 100), handle_rect)
                 elif tile == "bar_door":
                     # Bar door - saloon-style swinging door
                     import random
@@ -1345,44 +1404,47 @@ class Grid:
                             if bar_width > 0:
                                 pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                     elif is_open:
-                        # Open saloon door - swung to sides
-                        pygame.draw.rect(surface, (70, 55, 40), rect)
-                        # Left door swung left
-                        left_door = pygame.Rect(rect.left, rect.top + 4, 6, rect.height - 8)
-                        pygame.draw.rect(surface, (85, 65, 50), left_door)
-                        # Right door swung right
-                        right_door = pygame.Rect(rect.right - 6, rect.top + 4, 6, rect.height - 8)
-                        pygame.draw.rect(surface, (85, 65, 50), right_door)
-                        # Open gap in middle
-                        gap_rect = pygame.Rect(rect.left + 8, rect.top + 2, rect.width - 16, rect.height - 4)
-                        pygame.draw.rect(surface, (40, 35, 30), gap_rect)
+                        # Try sprite first for open bar door, fallback to procedural
+                        if not self._try_draw_tile_sprite(surface, "bar_door", rect, x, y, z):
+                            pygame.draw.rect(surface, (70, 55, 40), rect)
+                            # Left door swung left
+                            left_door = pygame.Rect(rect.left, rect.top + 4, 6, rect.height - 8)
+                            pygame.draw.rect(surface, (85, 65, 50), left_door)
+                            # Right door swung right
+                            right_door = pygame.Rect(rect.right - 6, rect.top + 4, 6, rect.height - 8)
+                            pygame.draw.rect(surface, (85, 65, 50), right_door)
+                            # Open gap in middle
+                            gap_rect = pygame.Rect(rect.left + 8, rect.top + 2, rect.width - 16, rect.height - 4)
+                            pygame.draw.rect(surface, (40, 35, 30), gap_rect)
                     else:
-                        # Closed saloon door - rusty double doors
-                        seed = self._get_tile_seed(x, y, z)
-                        rng = random.Random(seed)
-                        base_color = (90, 70, 50)
-                        color = self._get_tile_color_variation(base_color, x, y, z, 6)
-                        pygame.draw.rect(surface, color, rect)
-                        
-                        # Double door split in middle
-                        pygame.draw.line(surface, (60, 50, 40), (rect.centerx, rect.top), (rect.centerx, rect.bottom), 2)
-                        
-                        # Horizontal slats (saloon style)
-                        slat_color = (max(0, color[0] - 15), max(0, color[1] - 10), max(0, color[2] - 8))
-                        for i in range(3):
-                            slat_y = rect.top + (i + 1) * (rect.height // 4)
-                            pygame.draw.line(surface, slat_color, (rect.left + 2, slat_y), (rect.right - 2, slat_y), 1)
-                        
-                        # Rust spots
-                        if rng.random() < 0.5:
-                            rust_x = rect.left + rng.randint(4, rect.width - 6)
-                            rust_y = rect.top + rng.randint(4, rect.height - 6)
-                            pygame.draw.rect(surface, (70, 50, 35), (rust_x, rust_y, 2, 2))
+                        # Try sprite first for closed bar door, fallback to procedural
+                        if not self._try_draw_tile_sprite(surface, "bar_door", rect, x, y, z):
+                            seed = self._get_tile_seed(x, y, z)
+                            rng = random.Random(seed)
+                            base_color = (90, 70, 50)
+                            color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                            pygame.draw.rect(surface, color, rect)
+                            
+                            # Double door split in middle
+                            pygame.draw.line(surface, (60, 50, 40), (rect.centerx, rect.top), (rect.centerx, rect.bottom), 2)
+                            
+                            # Horizontal slats (saloon style)
+                            slat_color = (max(0, color[0] - 15), max(0, color[1] - 10), max(0, color[2] - 8))
+                            for i in range(3):
+                                slat_y = rect.top + (i + 1) * (rect.height // 4)
+                                pygame.draw.line(surface, slat_color, (rect.left + 2, slat_y), (rect.right - 2, slat_y), 1)
+                            
+                            # Rust spots
+                            if rng.random() < 0.5:
+                                rust_x = rect.left + rng.randint(4, rect.width - 6)
+                                rust_y = rect.top + rng.randint(4, rect.height - 6)
+                                pygame.draw.rect(surface, (70, 50, 35), (rust_x, rust_y, 2, 2))
                 elif tile == "window":
-                    # Window under construction - light blue-gray
-                    pygame.draw.rect(surface, (100, 110, 130), rect)
+                    # Try sprite first (uses finished_window with construction tint), fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "window", rect, x, y, z, use_construction_tint=True):
+                        pygame.draw.rect(surface, (100, 110, 130), rect)
                     
-                    # Show delivered materials
+                    # Show delivered materials (overlay on sprite or procedural)
                     site = buildings.get_construction_site(x, y, z)
                     if site is not None:
                         delivered = site.get("materials_delivered", {})
@@ -1400,7 +1462,7 @@ class Grid:
                             pygame.draw.rect(surface, icon_color, icon_rect)
                             icon_x += 8
                         
-                        # Progress bar
+                        # Progress bar (overlay on sprite or procedural)
                         job = get_job_at(x, y)
                         if job is not None and job.required > 0:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
@@ -1416,49 +1478,52 @@ class Grid:
                             if bar_width > 0:
                                 pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_window":
-                    # Finished window - wall with glass pane (can be open or closed)
-                    is_open = buildings.is_window_open(x, y, z)
-                    
-                    # Wall frame
-                    pygame.draw.rect(surface, COLOR_TILE_FINISHED_WALL, rect)
-                    
-                    # Glass pane in center
-                    glass_margin = 6
-                    glass_rect = pygame.Rect(
-                        rect.left + glass_margin,
-                        rect.top + glass_margin,
-                        rect.width - glass_margin * 2,
-                        rect.height - glass_margin * 2
-                    )
-                    
-                    if is_open:
-                        # Open window - dark opening with frame
-                        pygame.draw.rect(surface, (40, 35, 30), glass_rect)  # Dark opening
-                        # Window frame on sides (pushed open)
-                        frame_color = (100, 130, 150)
-                        pygame.draw.rect(surface, frame_color, 
-                                       (glass_rect.left, glass_rect.top, 3, glass_rect.height))
-                        pygame.draw.rect(surface, frame_color, 
-                                       (glass_rect.right - 3, glass_rect.top, 3, glass_rect.height))
-                    else:
-                        # Closed window - glass pane
-                        pygame.draw.rect(surface, (140, 180, 200), glass_rect)  # Light blue glass
-                        # Glass highlight
-                        pygame.draw.line(surface, (180, 210, 230), 
-                                       (glass_rect.left + 2, glass_rect.top + 2),
-                                       (glass_rect.left + 2, glass_rect.bottom - 2), 1)
-                        # Cross pattern for window panes
-                        pygame.draw.line(surface, COLOR_TILE_FINISHED_WALL,
-                                       (glass_rect.centerx, glass_rect.top),
-                                       (glass_rect.centerx, glass_rect.bottom), 1)
-                        pygame.draw.line(surface, COLOR_TILE_FINISHED_WALL,
-                                       (glass_rect.left, glass_rect.centery),
-                                       (glass_rect.right, glass_rect.centery), 1)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_window", rect, x, y, z):
+                        # Finished window - wall with glass pane (can be open or closed)
+                        is_open = buildings.is_window_open(x, y, z)
+                        
+                        # Wall frame
+                        pygame.draw.rect(surface, COLOR_TILE_FINISHED_WALL, rect)
+                        
+                        # Glass pane in center
+                        glass_margin = 6
+                        glass_rect = pygame.Rect(
+                            rect.left + glass_margin,
+                            rect.top + glass_margin,
+                            rect.width - glass_margin * 2,
+                            rect.height - glass_margin * 2
+                        )
+                        
+                        if is_open:
+                            # Open window - dark opening with frame
+                            pygame.draw.rect(surface, (40, 35, 30), glass_rect)  # Dark opening
+                            # Window frame on sides (pushed open)
+                            frame_color = (100, 130, 150)
+                            pygame.draw.rect(surface, frame_color, 
+                                           (glass_rect.left, glass_rect.top, 3, glass_rect.height))
+                            pygame.draw.rect(surface, frame_color, 
+                                           (glass_rect.right - 3, glass_rect.top, 3, glass_rect.height))
+                        else:
+                            # Closed window - glass pane
+                            pygame.draw.rect(surface, (140, 180, 200), glass_rect)  # Light blue glass
+                            # Glass highlight
+                            pygame.draw.line(surface, (180, 210, 230), 
+                                           (glass_rect.left + 2, glass_rect.top + 2),
+                                           (glass_rect.left + 2, glass_rect.bottom - 2), 1)
+                            # Cross pattern for window panes
+                            pygame.draw.line(surface, COLOR_TILE_FINISHED_WALL,
+                                           (glass_rect.centerx, glass_rect.top),
+                                           (glass_rect.centerx, glass_rect.bottom), 1)
+                            pygame.draw.line(surface, COLOR_TILE_FINISHED_WALL,
+                                           (glass_rect.left, glass_rect.centery),
+                                           (glass_rect.right, glass_rect.centery), 1)
                 elif tile == "floor":
-                    # Floor under construction - light tan with wood icon
-                    pygame.draw.rect(surface, (140, 120, 90), rect)
+                    # Try sprite first (uses finished_floor with construction tint), fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "floor", rect, x, y, z, use_construction_tint=True):
+                        pygame.draw.rect(surface, (140, 120, 90), rect)
                     
-                    # Show delivered materials
+                    # Show delivered materials (overlay on sprite or procedural)
                     site = buildings.get_construction_site(x, y, z)
                     if site is not None:
                         delivered = site.get("materials_delivered", {})
@@ -1474,7 +1539,7 @@ class Grid:
                             pygame.draw.rect(surface, icon_color, icon_rect)
                             icon_x += 8
                         
-                        # Progress bar
+                        # Progress bar (overlay on sprite or procedural)
                         job = get_job_at(x, y)
                         if job is not None and job.required > 0:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
@@ -1531,10 +1596,12 @@ class Grid:
                         tint_surface.fill((0, 0, 0, interior_darkness))
                         surface.blit(tint_surface, rect.topleft)
                 elif tile == "finished_stage":
-                    # Stage platform - elevated performance area
-                    base_color = (100, 80, 60)  # Darker wood for stage
-                    stage_color = self._get_tile_color_variation(base_color, x, y, z, 6)
-                    pygame.draw.rect(surface, stage_color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_stage", rect, x, y, z):
+                        # Stage platform - elevated performance area
+                        base_color = (100, 80, 60)  # Darker wood for stage
+                        stage_color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                        pygame.draw.rect(surface, stage_color, rect)
                     
                     # Stage edge highlight (front of stage)
                     edge_color = (min(255, stage_color[0] + 30), min(255, stage_color[1] + 20), min(255, stage_color[2] + 15))
@@ -1544,10 +1611,12 @@ class Grid:
                     plank_color = (max(0, stage_color[0] - 15), max(0, stage_color[1] - 15), max(0, stage_color[2] - 10))
                     pygame.draw.line(surface, plank_color, (rect.left, rect.centery), (rect.right, rect.centery), 1)
                 elif tile == "finished_stage_stairs":
-                    # Stage stairs - access to stage
-                    base_color = (110, 90, 65)
-                    stair_color = self._get_tile_color_variation(base_color, x, y, z, 6)
-                    pygame.draw.rect(surface, stair_color, rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_stage_stairs", rect, x, y, z):
+                        # Stage stairs - access to stage
+                        base_color = (110, 90, 65)
+                        stair_color = self._get_tile_color_variation(base_color, x, y, z, 6)
+                        pygame.draw.rect(surface, stair_color, rect)
                     
                     # Draw steps
                     step_color = (max(0, stair_color[0] - 20), max(0, stair_color[1] - 20), max(0, stair_color[2] - 15))
@@ -1642,28 +1711,31 @@ class Grid:
                         pygame.draw.line(surface, (40, 45, 50), 
                                        (speaker_rect.left + i, speaker_rect.top), 
                                        (speaker_rect.left + i, speaker_rect.bottom), 1)
-                elif tile in ("salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "barracks"):
+                elif tile in ("salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "barracks", "spark_bench", "tinker_station", "gutter_still"):
                     # UNIFIED WORKSTATION UNDER CONSTRUCTION GRAPHIC
-                    # Dark base with construction scaffolding look
-                    pygame.draw.rect(surface, (40, 45, 50), rect)
-                    
-                    # Diagonal construction stripes (cyberpunk scaffolding)
-                    stripe_color = (60, 70, 80)
-                    for i in range(0, rect.width + rect.height, 8):
-                        start_x = rect.left + i
-                        start_y = rect.top
-                        end_x = rect.left
-                        end_y = rect.top + i
-                        if start_x > rect.right:
-                            start_x = rect.right
-                            start_y = rect.top + (i - rect.width)
-                        if end_y > rect.bottom:
-                            end_y = rect.bottom
-                            end_x = rect.left + (i - rect.height)
-                        pygame.draw.line(surface, stripe_color, (start_x, start_y), (end_x, end_y), 1)
-                    
-                    # Frame border (construction site outline)
-                    pygame.draw.rect(surface, (80, 90, 100), rect, 1)
+                    # Try to load finished sprite with construction tint first
+                    finished_tile_name = f"finished_{tile}"
+                    if not self._try_draw_tile_sprite(surface, finished_tile_name, rect, x, y, z, use_construction_tint=True):
+                        # Fallback: Dark base with construction scaffolding look
+                        pygame.draw.rect(surface, (40, 45, 50), rect)
+                        
+                        # Diagonal construction stripes (cyberpunk scaffolding)
+                        stripe_color = (60, 70, 80)
+                        for i in range(0, rect.width + rect.height, 8):
+                            start_x = rect.left + i
+                            start_y = rect.top
+                            end_x = rect.left
+                            end_y = rect.top + i
+                            if start_x > rect.right:
+                                start_x = rect.right
+                                start_y = rect.top + (i - rect.width)
+                            if end_y > rect.bottom:
+                                end_y = rect.bottom
+                                end_x = rect.left + (i - rect.height)
+                            pygame.draw.line(surface, stripe_color, (start_x, start_y), (end_x, end_y), 1)
+                        
+                        # Frame border (construction site outline)
+                        pygame.draw.rect(surface, (80, 90, 100), rect, 1)
                     
                     # Show delivered materials as colored dots
                     site = buildings.get_construction_site(x, y, z)
@@ -1706,17 +1778,19 @@ class Grid:
                                 # Main bar
                                 pygame.draw.rect(surface, (0, 220, 255), bar_rect)
                 elif tile == "finished_salvagers_bench":
-                    # Finished salvager's bench - workstation appearance
-                    # Base - dark wood
-                    pygame.draw.rect(surface, (80, 60, 40), rect)
-                    
-                    # Work surface - metal top
-                    surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
-                    pygame.draw.rect(surface, (100, 100, 110), surface_rect)
-                    
-                    # Anvil/tool shape in center
-                    anvil_rect = pygame.Rect(rect.centerx - 4, rect.centery - 3, 8, 6)
-                    pygame.draw.rect(surface, (60, 60, 70), anvil_rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_salvagers_bench", rect, x, y, z):
+                        # Finished salvager's bench - workstation appearance
+                        # Base - dark wood
+                        pygame.draw.rect(surface, (80, 60, 40), rect)
+                        
+                        # Work surface - metal top
+                        surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
+                        pygame.draw.rect(surface, (100, 100, 110), surface_rect)
+                        
+                        # Anvil/tool shape in center
+                        anvil_rect = pygame.Rect(rect.centerx - 4, rect.centery - 3, 8, 6)
+                        pygame.draw.rect(surface, (60, 60, 70), anvil_rect)
                     
                     # Show work progress if active
                     ws = buildings.get_workstation(x, y, z)
@@ -1730,15 +1804,17 @@ class Grid:
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (100, 200, 100), bar_rect)
                 elif tile == "finished_gutter_still":
-                    # Gutter still - makeshift distillery
-                    # Base - dark rusty metal
-                    pygame.draw.rect(surface, (70, 55, 45), rect)
-                    # Tank/barrel shape
-                    barrel_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
-                    pygame.draw.rect(surface, (85, 65, 50), barrel_rect)
-                    # Pipes/tubes
-                    pygame.draw.line(surface, (60, 50, 40), (rect.left + 6, rect.top + 8), (rect.right - 6, rect.top + 8), 2)
-                    pygame.draw.line(surface, (60, 50, 40), (rect.centerx, rect.top + 8), (rect.centerx, rect.bottom - 6), 1)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_gutter_still", rect, x, y, z):
+                        # Gutter still - makeshift distillery
+                        # Base - dark rusty metal
+                        pygame.draw.rect(surface, (70, 55, 45), rect)
+                        # Tank/barrel shape
+                        barrel_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
+                        pygame.draw.rect(surface, (85, 65, 50), barrel_rect)
+                        # Pipes/tubes
+                        pygame.draw.line(surface, (60, 50, 40), (rect.left + 6, rect.top + 8), (rect.right - 6, rect.top + 8), 2)
+                        pygame.draw.line(surface, (60, 50, 40), (rect.centerx, rect.top + 8), (rect.centerx, rect.bottom - 6), 1)
                     # Show work progress if active
                     ws = buildings.get_workstation(x, y, z)
                     if ws and ws.get("working", False):
@@ -1751,18 +1827,20 @@ class Grid:
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (150, 100, 50), bar_rect)
                 elif tile == "finished_spark_bench":
-                    # Spark Bench - electronics workstation
-                    # Base - dark metal with blue tint
-                    pygame.draw.rect(surface, (50, 60, 70), rect)
-                    # Work surface with circuit pattern
-                    surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
-                    pygame.draw.rect(surface, (70, 80, 90), surface_rect)
-                    # Circuit traces (lines)
-                    pygame.draw.line(surface, (100, 180, 200), (rect.left + 5, rect.centery), (rect.right - 5, rect.centery), 1)
-                    pygame.draw.line(surface, (100, 180, 200), (rect.centerx, rect.top + 5), (rect.centerx, rect.bottom - 5), 1)
-                    # Sparks/LEDs (small dots)
-                    pygame.draw.rect(surface, (200, 220, 100), (rect.left + 8, rect.top + 8, 2, 2))
-                    pygame.draw.rect(surface, (100, 200, 255), (rect.right - 10, rect.top + 8, 2, 2))
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_spark_bench", rect, x, y, z):
+                        # Spark Bench - electronics workstation
+                        # Base - dark metal with blue tint
+                        pygame.draw.rect(surface, (50, 60, 70), rect)
+                        # Work surface with circuit pattern
+                        surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
+                        pygame.draw.rect(surface, (70, 80, 90), surface_rect)
+                        # Circuit traces (lines)
+                        pygame.draw.line(surface, (100, 180, 200), (rect.left + 5, rect.centery), (rect.right - 5, rect.centery), 1)
+                        pygame.draw.line(surface, (100, 180, 200), (rect.centerx, rect.top + 5), (rect.centerx, rect.bottom - 5), 1)
+                        # Sparks/LEDs (small dots)
+                        pygame.draw.rect(surface, (200, 220, 100), (rect.left + 8, rect.top + 8, 2, 2))
+                        pygame.draw.rect(surface, (100, 200, 255), (rect.right - 10, rect.top + 8, 2, 2))
                     # Show work progress if active
                     ws = buildings.get_workstation(x, y, z)
                     if ws and ws.get("working", False):
@@ -1775,16 +1853,18 @@ class Grid:
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (100, 200, 255), bar_rect)
                 elif tile == "finished_tinker_station":
-                    # Tinker Station - general crafts workbench
-                    # Base - wood with metal accents
-                    pygame.draw.rect(surface, (90, 70, 50), rect)
-                    # Work surface
-                    surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
-                    pygame.draw.rect(surface, (110, 90, 60), surface_rect)
-                    # Tools scattered on surface (small shapes)
-                    pygame.draw.rect(surface, (140, 140, 140), (rect.left + 6, rect.centery - 2, 4, 2))  # Wrench
-                    pygame.draw.rect(surface, (160, 120, 80), (rect.right - 10, rect.centery, 3, 4))  # Screwdriver
-                    pygame.draw.line(surface, (120, 100, 80), (rect.left + 8, rect.top + 6), (rect.right - 8, rect.top + 6), 1)  # Edge detail
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_tinker_station", rect, x, y, z):
+                        # Tinker Station - general crafts workbench
+                        # Base - wood with metal accents
+                        pygame.draw.rect(surface, (90, 70, 50), rect)
+                        # Work surface
+                        surface_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 8)
+                        pygame.draw.rect(surface, (110, 90, 60), surface_rect)
+                        # Tools scattered on surface (small shapes)
+                        pygame.draw.rect(surface, (140, 140, 140), (rect.left + 6, rect.centery - 2, 4, 2))  # Wrench
+                        pygame.draw.rect(surface, (160, 120, 80), (rect.right - 10, rect.centery, 3, 4))  # Screwdriver
+                        pygame.draw.line(surface, (120, 100, 80), (rect.left + 8, rect.top + 6), (rect.right - 8, rect.top + 6), 1)  # Edge detail
                     # Show work progress if active
                     ws = buildings.get_workstation(x, y, z)
                     if ws and ws.get("working", False):
@@ -1797,24 +1877,26 @@ class Grid:
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (200, 150, 100), bar_rect)
                 elif tile == "finished_generator":
-                    # Finished generator - industrial appearance
-                    # Base - dark metal
-                    pygame.draw.rect(surface, (50, 55, 60), rect)
-                    
-                    # Generator body - lighter metal
-                    body_rect = pygame.Rect(rect.left + 4, rect.top + 4, rect.width - 8, rect.height - 8)
-                    pygame.draw.rect(surface, (80, 85, 95), body_rect)
-                    
-                    # Yellow power indicator
-                    indicator_rect = pygame.Rect(rect.centerx - 3, rect.top + 6, 6, 6)
-                    pygame.draw.rect(surface, (255, 220, 80), indicator_rect)
-                    
-                    # Vent lines
-                    for i in range(3):
-                        y_pos = rect.centery + (i - 1) * 5
-                        pygame.draw.line(surface, (40, 45, 50),
-                                       (rect.left + 6, y_pos),
-                                       (rect.right - 6, y_pos), 2)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_generator", rect, x, y, z):
+                        # Finished generator - industrial appearance
+                        # Base - dark metal
+                        pygame.draw.rect(surface, (50, 55, 60), rect)
+                        
+                        # Generator body - lighter metal
+                        body_rect = pygame.Rect(rect.left + 4, rect.top + 4, rect.width - 8, rect.height - 8)
+                        pygame.draw.rect(surface, (80, 85, 95), body_rect)
+                        
+                        # Yellow power indicator
+                        indicator_rect = pygame.Rect(rect.centerx - 3, rect.top + 6, 6, 6)
+                        pygame.draw.rect(surface, (255, 220, 80), indicator_rect)
+                        
+                        # Vent lines
+                        for i in range(3):
+                            y_pos = rect.centery + (i - 1) * 5
+                            pygame.draw.line(surface, (40, 45, 50),
+                                           (rect.left + 6, y_pos),
+                                           (rect.right - 6, y_pos), 2)
                     
                     # Show work progress if active
                     ws = buildings.get_workstation(x, y, z)
@@ -1828,22 +1910,24 @@ class Grid:
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (255, 220, 80), bar_rect)
                 elif tile == "finished_stove":
-                    # Finished stove - kitchen appliance appearance
-                    # Base - dark metal
-                    pygame.draw.rect(surface, (60, 55, 50), rect)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_stove", rect, x, y, z):
+                        # Finished stove - kitchen appliance appearance
+                        # Base - dark metal
+                        pygame.draw.rect(surface, (60, 55, 50), rect)
+                        
+                        # Stove body - warm metal
+                        body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                        pygame.draw.rect(surface, (90, 80, 70), body_rect)
+                        
+                        # Burner circles (2x2 grid)
+                        burner_color = (40, 35, 30)
+                        for bx, by in [(0, 0), (1, 0), (0, 1), (1, 1)]:
+                            cx = rect.left + 8 + bx * 10
+                            cy = rect.top + 8 + by * 10
+                            pygame.draw.circle(surface, burner_color, (cx, cy), 4)
                     
-                    # Stove body - warm metal
-                    body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
-                    pygame.draw.rect(surface, (90, 80, 70), body_rect)
-                    
-                    # Burner circles (2x2 grid)
-                    burner_color = (40, 35, 30)
-                    for bx, by in [(0, 0), (1, 0), (0, 1), (1, 1)]:
-                        cx = rect.left + 8 + bx * 10
-                        cy = rect.top + 8 + by * 10
-                        pygame.draw.circle(surface, burner_color, (cx, cy), 4)
-                    
-                    # Orange heat indicator when working
+                    # Orange heat indicator when working (overlay on sprite or procedural)
                     ws = buildings.get_workstation(x, y, z)
                     if ws and ws.get("working", False):
                         # Glowing burner
@@ -1859,13 +1943,15 @@ class Grid:
                             bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                             pygame.draw.rect(surface, (255, 160, 80), bar_rect)
                 elif tile == "finished_gutter_forge":
-                    # Finished Gutter Forge - industrial forge appearance
-                    pygame.draw.rect(surface, (60, 50, 45), rect)
-                    # Forge body
-                    body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
-                    pygame.draw.rect(surface, (90, 75, 60), body_rect)
-                    # Anvil shape
-                    pygame.draw.rect(surface, (70, 70, 80), (rect.centerx - 5, rect.centery - 2, 10, 6))
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_gutter_forge", rect, x, y, z):
+                        # Finished Gutter Forge - industrial forge appearance
+                        pygame.draw.rect(surface, (60, 50, 45), rect)
+                        # Forge body
+                        body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                        pygame.draw.rect(surface, (90, 75, 60), body_rect)
+                        # Anvil shape
+                        pygame.draw.rect(surface, (70, 70, 80), (rect.centerx - 5, rect.centery - 2, 10, 6))
                     ws = buildings.get_workstation(x, y, z)
                     if ws:
                         # Show recipe indicator (first 2 chars of recipe name)
@@ -1886,14 +1972,16 @@ class Grid:
                                 bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                                 pygame.draw.rect(surface, (255, 140, 40), bar_rect)
                 elif tile == "finished_skinshop_loom":
-                    # Finished Skinshop Loom - textile/leather workstation
-                    pygame.draw.rect(surface, (80, 60, 50), rect)
-                    body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
-                    pygame.draw.rect(surface, (110, 85, 65), body_rect)
-                    # Thread/fabric lines
-                    for i in range(3):
-                        y_pos = rect.top + 8 + i * 6
-                        pygame.draw.line(surface, (140, 110, 80), (rect.left + 5, y_pos), (rect.right - 5, y_pos), 1)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_skinshop_loom", rect, x, y, z):
+                        # Finished Skinshop Loom - textile/leather workstation
+                        pygame.draw.rect(surface, (80, 60, 50), rect)
+                        body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                        pygame.draw.rect(surface, (110, 85, 65), body_rect)
+                        # Thread/fabric lines
+                        for i in range(3):
+                            y_pos = rect.top + 8 + i * 6
+                            pygame.draw.line(surface, (140, 110, 80), (rect.left + 5, y_pos), (rect.right - 5, y_pos), 1)
                     ws = buildings.get_workstation(x, y, z)
                     if ws:
                         # Show recipe indicator
@@ -1912,13 +2000,15 @@ class Grid:
                                 bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                                 pygame.draw.rect(surface, (180, 140, 100), bar_rect)
                 elif tile == "finished_cortex_spindle":
-                    # Finished Cortex Spindle - high-tech implant station
-                    pygame.draw.rect(surface, (50, 45, 70), rect)
-                    body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
-                    pygame.draw.rect(surface, (70, 65, 100), body_rect)
-                    # Central spindle/crystal
-                    pygame.draw.circle(surface, (120, 100, 180), (rect.centerx, rect.centery), 5)
-                    pygame.draw.circle(surface, (180, 160, 220), (rect.centerx, rect.centery), 3)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_cortex_spindle", rect, x, y, z):
+                        # Finished Cortex Spindle - high-tech implant station
+                        pygame.draw.rect(surface, (50, 45, 70), rect)
+                        body_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
+                        pygame.draw.rect(surface, (70, 65, 100), body_rect)
+                        # Central spindle/crystal
+                        pygame.draw.circle(surface, (120, 100, 180), (rect.centerx, rect.centery), 5)
+                        pygame.draw.circle(surface, (180, 160, 220), (rect.centerx, rect.centery), 3)
                     ws = buildings.get_workstation(x, y, z)
                     if ws:
                         # Show recipe indicator
@@ -1939,38 +2029,40 @@ class Grid:
                                 bar_rect = pygame.Rect(rect.left + 4, rect.bottom - 6, bar_width, 4)
                                 pygame.draw.rect(surface, (180, 140, 255), bar_rect)
                 elif tile == "finished_barracks":
-                    # Finished Barracks - military/tactical station
-                    # Dark reinforced base (darker than other stations)
-                    pygame.draw.rect(surface, (45, 50, 55), rect)
-                    
-                    # Armored plating body
-                    body_rect = pygame.Rect(rect.left + 2, rect.top + 2, rect.width - 4, rect.height - 4)
-                    pygame.draw.rect(surface, (65, 70, 80), body_rect)
-                    
-                    # Corner armor plates (reinforced look)
-                    plate_color = (85, 90, 100)
-                    plate_size = 6
-                    # Top-left
-                    pygame.draw.rect(surface, plate_color, (rect.left + 2, rect.top + 2, plate_size, plate_size))
-                    # Top-right
-                    pygame.draw.rect(surface, plate_color, (rect.right - plate_size - 2, rect.top + 2, plate_size, plate_size))
-                    # Bottom-left
-                    pygame.draw.rect(surface, plate_color, (rect.left + 2, rect.bottom - plate_size - 2, plate_size, plate_size))
-                    # Bottom-right
-                    pygame.draw.rect(surface, plate_color, (rect.right - plate_size - 2, rect.bottom - plate_size - 2, plate_size, plate_size))
-                    
-                    # Central tactical display (cyan hologram)
-                    display_rect = pygame.Rect(rect.centerx - 5, rect.centery - 4, 10, 8)
-                    pygame.draw.rect(surface, (30, 40, 45), display_rect)
-                    pygame.draw.rect(surface, (0, 200, 220), display_rect, 1)
-                    
-                    # Tactical grid pattern on display
-                    pygame.draw.line(surface, (0, 180, 200), 
-                                   (rect.centerx - 4, rect.centery), 
-                                   (rect.centerx + 4, rect.centery), 1)
-                    pygame.draw.line(surface, (0, 180, 200), 
-                                   (rect.centerx, rect.centery - 3), 
-                                   (rect.centerx, rect.centery + 3), 1)
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_barracks", rect, x, y, z):
+                        # Finished Barracks - military/tactical station
+                        # Dark reinforced base (darker than other stations)
+                        pygame.draw.rect(surface, (45, 50, 55), rect)
+                        
+                        # Armored plating body
+                        body_rect = pygame.Rect(rect.left + 2, rect.top + 2, rect.width - 4, rect.height - 4)
+                        pygame.draw.rect(surface, (65, 70, 80), body_rect)
+                        
+                        # Corner armor plates (reinforced look)
+                        plate_color = (85, 90, 100)
+                        plate_size = 6
+                        # Top-left
+                        pygame.draw.rect(surface, plate_color, (rect.left + 2, rect.top + 2, plate_size, plate_size))
+                        # Top-right
+                        pygame.draw.rect(surface, plate_color, (rect.right - plate_size - 2, rect.top + 2, plate_size, plate_size))
+                        # Bottom-left
+                        pygame.draw.rect(surface, plate_color, (rect.left + 2, rect.bottom - plate_size - 2, plate_size, plate_size))
+                        # Bottom-right
+                        pygame.draw.rect(surface, plate_color, (rect.right - plate_size - 2, rect.bottom - plate_size - 2, plate_size, plate_size))
+                        
+                        # Central tactical display (cyan hologram)
+                        display_rect = pygame.Rect(rect.centerx - 5, rect.centery - 4, 10, 8)
+                        pygame.draw.rect(surface, (30, 40, 45), display_rect)
+                        pygame.draw.rect(surface, (0, 200, 220), display_rect, 1)
+                        
+                        # Tactical grid pattern on display
+                        pygame.draw.line(surface, (0, 180, 200), 
+                                       (rect.centerx - 4, rect.centery), 
+                                       (rect.centerx + 4, rect.centery), 1)
+                        pygame.draw.line(surface, (0, 180, 200), 
+                                       (rect.centerx, rect.centery - 3), 
+                                       (rect.centerx, rect.centery + 3), 1)
                     
                     # Check if training is active
                     ws = buildings.get_workstation(x, y, z)
@@ -1980,10 +2072,11 @@ class Grid:
                         # Outer glow
                         pygame.draw.circle(surface, (255, 100, 40), (rect.left + 6, rect.top + 6), 4, 1)
                 elif tile == "fire_escape":
-                    # Fire escape under construction - orange/red base
-                    pygame.draw.rect(surface, (180, 80, 40), rect)
+                    # Try sprite first (uses finished_fire_escape with construction tint), fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "fire_escape", rect, x, y, z, use_construction_tint=True):
+                        pygame.draw.rect(surface, (180, 80, 40), rect)
                     
-                    # Show delivered materials
+                    # Show delivered materials (overlay on sprite or procedural)
                     site = buildings.get_construction_site(x, y, z)
                     if site is not None:
                         delivered = site.get("materials_delivered", {})
@@ -2001,7 +2094,7 @@ class Grid:
                             pygame.draw.rect(surface, icon_color, icon_rect)
                             icon_x += 8
                         
-                        # Progress bar
+                        # Progress bar (overlay on sprite or procedural)
                         job = get_job_at(x, y)
                         if job is not None and job.required > 0:
                             progress_ratio = max(0.0, min(1.0, job.progress / job.required))
@@ -2017,60 +2110,62 @@ class Grid:
                             if bar_width > 0:
                                 pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_fire_escape":
-                    # Finished fire escape - cool red/orange with grate pattern
-                    # Main body - dark red metal
-                    pygame.draw.rect(surface, (140, 50, 30), rect)
-                    
-                    # Draw grate pattern (horizontal and vertical lines)
-                    grate_color = (100, 35, 20)
-                    highlight_color = (180, 70, 40)
-                    
-                    # Horizontal grate lines
-                    for gy_offset in range(4, config.TILE_SIZE - 2, 6):
-                        pygame.draw.line(surface, grate_color, 
-                                       (rect.left + 2, rect.top + gy_offset),
-                                       (rect.right - 2, rect.top + gy_offset), 1)
-                    
-                    # Vertical grate lines
-                    for gx_offset in range(4, config.TILE_SIZE - 2, 6):
-                        pygame.draw.line(surface, grate_color,
-                                       (rect.left + gx_offset, rect.top + 2),
-                                       (rect.left + gx_offset, rect.bottom - 2), 1)
-                    
-                    # Highlight edges for 3D effect
-                    pygame.draw.line(surface, highlight_color, rect.topleft, (rect.right - 1, rect.top), 2)
-                    pygame.draw.line(surface, highlight_color, rect.topleft, (rect.left, rect.bottom - 1), 2)
-                    
-                    # Draw ladder rungs in center
-                    ladder_color = (200, 100, 50)
-                    center_x = rect.centerx
-                    for rung_y in range(rect.top + 6, rect.bottom - 4, 8):
+                    # Try sprite first, fallback to procedural
+                    if not self._try_draw_tile_sprite(surface, "finished_fire_escape", rect, x, y, z):
+                        # Finished fire escape - cool red/orange with grate pattern
+                        # Main body - dark red metal
+                        pygame.draw.rect(surface, (140, 50, 30), rect)
+                        
+                        # Draw grate pattern (horizontal and vertical lines)
+                        grate_color = (100, 35, 20)
+                        highlight_color = (180, 70, 40)
+                        
+                        # Horizontal grate lines
+                        for gy_offset in range(4, config.TILE_SIZE - 2, 6):
+                            pygame.draw.line(surface, grate_color, 
+                                           (rect.left + 2, rect.top + gy_offset),
+                                           (rect.right - 2, rect.top + gy_offset), 1)
+                        
+                        # Vertical grate lines
+                        for gx_offset in range(4, config.TILE_SIZE - 2, 6):
+                            pygame.draw.line(surface, grate_color,
+                                           (rect.left + gx_offset, rect.top + 2),
+                                           (rect.left + gx_offset, rect.bottom - 2), 1)
+                        
+                        # Highlight edges for 3D effect
+                        pygame.draw.line(surface, highlight_color, rect.topleft, (rect.right - 1, rect.top), 2)
+                        pygame.draw.line(surface, highlight_color, rect.topleft, (rect.left, rect.bottom - 1), 2)
+                        
+                        # Draw ladder rungs in center
+                        ladder_color = (200, 100, 50)
+                        center_x = rect.centerx
+                        for rung_y in range(rect.top + 6, rect.bottom - 4, 8):
+                            pygame.draw.line(surface, ladder_color,
+                                           (center_x - 6, rung_y),
+                                           (center_x + 6, rung_y), 2)
+                        
+                        # Ladder rails
                         pygame.draw.line(surface, ladder_color,
-                                       (center_x - 6, rung_y),
-                                       (center_x + 6, rung_y), 2)
-                    
-                    # Ladder rails
-                    pygame.draw.line(surface, ladder_color,
                                    (center_x - 8, rect.top + 2),
                                    (center_x - 8, rect.bottom - 2), 2)
-                    pygame.draw.line(surface, ladder_color,
+                        pygame.draw.line(surface, ladder_color,
                                    (center_x + 8, rect.top + 2),
                                    (center_x + 8, rect.bottom - 2), 2)
-                    
-                    # Small up/down arrow indicator
-                    arrow_color = (255, 200, 100)
-                    # Up arrow
-                    pygame.draw.polygon(surface, arrow_color, [
-                        (rect.right - 8, rect.top + 8),
-                        (rect.right - 4, rect.top + 12),
-                        (rect.right - 12, rect.top + 12),
-                    ])
-                    # Down arrow
-                    pygame.draw.polygon(surface, arrow_color, [
-                        (rect.right - 8, rect.bottom - 8),
-                        (rect.right - 4, rect.bottom - 12),
-                        (rect.right - 12, rect.bottom - 12),
-                    ])
+                        
+                        # Small up/down arrow indicator
+                        arrow_color = (255, 200, 100)
+                        # Up arrow
+                        pygame.draw.polygon(surface, arrow_color, [
+                            (rect.right - 8, rect.top + 8),
+                            (rect.right - 4, rect.top + 12),
+                            (rect.right - 12, rect.top + 12),
+                        ])
+                        # Down arrow
+                        pygame.draw.polygon(surface, arrow_color, [
+                            (rect.right - 8, rect.bottom - 8),
+                            (rect.right - 4, rect.bottom - 12),
+                            (rect.right - 12, rect.bottom - 12),
+                        ])
                 
                 elif tile == "window_tile":
                     # Window tile - wall with passable window opening
@@ -2126,36 +2221,40 @@ class Grid:
                     pygame.draw.rect(surface, rail_color, (rect.left, rect.bottom - 3, rect.width, 3))
                 
                 elif tile in ("bridge", "finished_bridge"):
-                    # Bridge - wooden planks with metal supports
-                    is_finished = tile == "finished_bridge"
-                    
-                    if is_finished:
-                        # Finished bridge - warm wood color
-                        base_color = (140, 100, 60)
-                        plank_color = (120, 80, 45)
-                        edge_color = (80, 60, 40)
-                    else:
-                        # Under construction - blueprint style
-                        base_color = (80, 80, 100)
-                        plank_color = (60, 60, 80)
-                        edge_color = (50, 50, 70)
-                    
-                    # Base
-                    pygame.draw.rect(surface, base_color, rect)
-                    
-                    # Plank lines (horizontal)
-                    for py_offset in range(4, config.TILE_SIZE, 6):
-                        pygame.draw.line(surface, plank_color,
-                                       (rect.left + 2, rect.top + py_offset),
-                                       (rect.right - 2, rect.top + py_offset), 1)
-                    
-                    # Metal edge supports
-                    pygame.draw.rect(surface, edge_color, (rect.left, rect.top, 3, rect.height))
-                    pygame.draw.rect(surface, edge_color, (rect.right - 3, rect.top, 3, rect.height))
-                    
-                    # Highlight for 3D effect
-                    if is_finished:
-                        pygame.draw.line(surface, (180, 140, 100), rect.topleft, (rect.right - 1, rect.top), 1)
+                    # Try sprite first, fallback to procedural
+                    sprite_name = "finished_bridge" if tile == "finished_bridge" else "bridge"
+                    use_tint = (tile == "bridge")  # Apply construction tint for under-construction bridge
+                    if not self._try_draw_tile_sprite(surface, sprite_name, rect, x, y, z, use_construction_tint=use_tint):
+                        # Bridge - wooden planks with metal supports
+                        is_finished = tile == "finished_bridge"
+                        
+                        if is_finished:
+                            # Finished bridge - warm wood color
+                            base_color = (140, 100, 60)
+                            plank_color = (120, 80, 45)
+                            edge_color = (80, 60, 40)
+                        else:
+                            # Under construction - blueprint style
+                            base_color = (80, 80, 100)
+                            plank_color = (60, 60, 80)
+                            edge_color = (50, 50, 70)
+                        
+                        # Base
+                        pygame.draw.rect(surface, base_color, rect)
+                        
+                        # Plank lines (horizontal)
+                        for py_offset in range(4, config.TILE_SIZE, 6):
+                            pygame.draw.line(surface, plank_color,
+                                           (rect.left + 2, rect.top + py_offset),
+                                           (rect.right - 2, rect.top + py_offset), 1)
+                        
+                        # Metal edge supports
+                        pygame.draw.rect(surface, edge_color, (rect.left, rect.top, 3, rect.height))
+                        pygame.draw.rect(surface, edge_color, (rect.right - 3, rect.top, 3, rect.height))
+                        
+                        # Highlight for 3D effect
+                        if is_finished:
+                            pygame.draw.line(surface, (180, 140, 100), rect.topleft, (rect.right - 1, rect.top), 1)
                 
                 # Draw stockpile zone background AFTER floor tiles (on current Z level)
                 if zones.is_stockpile_zone(x, y, z):
@@ -2210,9 +2309,12 @@ class Grid:
                                        (rect.left, rect.top + i), 1)
                 
                 elif tile == "roof_floor" or tile == "roof_access":
-                    # Allowed rooftop floor - looks exactly like finished_floor
-                    # Same warm wood color with subtle plank pattern
-                    pygame.draw.rect(surface, (160, 130, 90), rect)
+                    # Try sprite first, fallback to procedural
+                    sprite_name = "roof_access" if tile == "roof_access" else "roof_floor"
+                    if not self._try_draw_tile_sprite(surface, sprite_name, rect, x, y, z):
+                        # Allowed rooftop floor - looks exactly like finished_floor
+                        # Same warm wood color with subtle plank pattern
+                        pygame.draw.rect(surface, (160, 130, 90), rect)
                     # Draw subtle plank lines (same as finished_floor)
                     plank_color = (140, 110, 70)
                     pygame.draw.line(surface, plank_color, (rect.left, rect.top + 8), (rect.right, rect.top + 8), 1)
@@ -2240,7 +2342,11 @@ class Grid:
                             self._draw_mineral_node(surface, rect, x, y, z, depleted)
                             rendered = True
                         elif resource_type == "raw_food":
-                            color = COLOR_RESOURCE_NODE_RAW_FOOD
+                            # Try to load sprite first (raw_food_node_0 through raw_food_node_X)
+                            if self._try_draw_tile_sprite(surface, "raw_food_node", rect, x, y, z, use_construction_tint=depleted):
+                                rendered = True
+                            else:
+                                color = COLOR_RESOURCE_NODE_RAW_FOOD
                         else:
                             color = COLOR_RESOURCE_NODE_DEFAULT
                         
@@ -2289,42 +2395,45 @@ class Grid:
                         is_designated = salvage.get("designated", False)
                         salvage_type = salvage.get("type", "ruined_tech")
                         
-                        # Base color varies by type
-                        if salvage_type == "ruined_tech":
-                            base_color = (140, 80, 50)  # Rusty orange
-                            detail_color = (80, 70, 60)
-                        elif salvage_type == "ruined_wall":
-                            base_color = (85, 75, 70)  # Dark gray-brown (ruined wall)
-                            detail_color = (60, 55, 50)
-                        else:  # salvage_pile
-                            base_color = (100, 90, 80)  # Grayish brown
-                            detail_color = (70, 65, 55)
-                        
-                        pygame.draw.rect(surface, base_color, rect)
-                        
-                        # Draw type-specific details
-                        if salvage_type == "ruined_wall":
-                            # Cracked wall pattern
-                            pygame.draw.line(surface, detail_color,
-                                           (rect.left + 3, rect.top + 3),
-                                           (rect.centerx, rect.centery), 2)
-                            pygame.draw.line(surface, detail_color,
-                                           (rect.right - 3, rect.top + 5),
-                                           (rect.centerx, rect.centery), 2)
-                            pygame.draw.line(surface, detail_color,
-                                           (rect.centerx, rect.centery),
-                                           (rect.left + 5, rect.bottom - 3), 2)
-                        else:
-                            # Metal scraps pattern
-                            pygame.draw.line(surface, detail_color, 
-                                           (rect.left + 4, rect.top + 6),
-                                           (rect.right - 4, rect.top + 6), 2)
-                            pygame.draw.line(surface, detail_color,
-                                           (rect.left + 6, rect.centery),
-                                           (rect.right - 6, rect.centery), 2)
-                            pygame.draw.line(surface, detail_color,
-                                           (rect.left + 4, rect.bottom - 6),
-                                           (rect.right - 4, rect.bottom - 6), 2)
+                        # Try to load sprite first (scrap_node_0 through scrap_node_5)
+                        if not self._try_draw_tile_sprite(surface, "scrap_node", rect, x, y, z, use_construction_tint=is_designated):
+                            # Fallback to procedural rendering
+                            # Base color varies by type
+                            if salvage_type == "ruined_tech":
+                                base_color = (140, 80, 50)  # Rusty orange
+                                detail_color = (80, 70, 60)
+                            elif salvage_type == "ruined_wall":
+                                base_color = (85, 75, 70)  # Dark gray-brown (ruined wall)
+                                detail_color = (60, 55, 50)
+                            else:  # salvage_pile
+                                base_color = (100, 90, 80)  # Grayish brown
+                                detail_color = (70, 65, 55)
+                            
+                            pygame.draw.rect(surface, base_color, rect)
+                            
+                            # Draw type-specific details
+                            if salvage_type == "ruined_wall":
+                                # Cracked wall pattern
+                                pygame.draw.line(surface, detail_color,
+                                               (rect.left + 3, rect.top + 3),
+                                               (rect.centerx, rect.centery), 2)
+                                pygame.draw.line(surface, detail_color,
+                                               (rect.right - 3, rect.top + 5),
+                                               (rect.centerx, rect.centery), 2)
+                                pygame.draw.line(surface, detail_color,
+                                               (rect.centerx, rect.centery),
+                                               (rect.left + 5, rect.bottom - 3), 2)
+                            else:
+                                # Metal scraps pattern
+                                pygame.draw.line(surface, detail_color, 
+                                               (rect.left + 4, rect.top + 6),
+                                               (rect.right - 4, rect.top + 6), 2)
+                                pygame.draw.line(surface, detail_color,
+                                               (rect.left + 6, rect.centery),
+                                               (rect.right - 6, rect.centery), 2)
+                                pygame.draw.line(surface, detail_color,
+                                               (rect.left + 4, rect.bottom - 6),
+                                               (rect.right - 4, rect.bottom - 6), 2)
                         
                         # Yellow border if designated
                         if is_designated:

@@ -62,17 +62,18 @@ def load_sprite(sprite_path: str) -> Optional[pygame.Surface]:
         return None
 
 
-def get_scaled_sprite(sprite_path: str, target_size: int) -> Optional[pygame.Surface]:
+def get_scaled_sprite(sprite_path: str, target_size: int, apply_construction_tint: bool = False) -> Optional[pygame.Surface]:
     """Get a sprite scaled to target size (with caching).
     
     Args:
         sprite_path: Path to sprite file
         target_size: Target width/height in pixels
+        apply_construction_tint: If True, apply desaturated/darker tint for under-construction appearance
         
     Returns:
         Scaled sprite or None
     """
-    cache_key = (sprite_path, target_size)
+    cache_key = (sprite_path, target_size, apply_construction_tint)
     
     if cache_key in _SCALED_CACHE:
         return _SCALED_CACHE[cache_key]
@@ -95,8 +96,36 @@ def get_scaled_sprite(sprite_path: str, target_size: int) -> Optional[pygame.Sur
         scaled = pygame.transform.scale(sprite, (new_width, new_height))
     else:
         scaled = pygame.transform.scale(sprite, (target_size, target_size))
+    
+    # Apply construction tint if requested
+    if apply_construction_tint:
+        scaled = apply_construction_tint_to_surface(scaled)
+    
     _SCALED_CACHE[cache_key] = scaled
     return scaled
+
+
+def apply_construction_tint_to_surface(surface: pygame.Surface) -> pygame.Surface:
+    """Apply a desaturated, darker tint to a surface for under-construction appearance.
+    
+    Args:
+        surface: Original surface
+        
+    Returns:
+        New surface with construction tint applied
+    """
+    # Create a copy to avoid modifying the original
+    tinted = surface.copy()
+    
+    # Create a semi-transparent dark overlay with slight blue tint (blueprint-like)
+    overlay = pygame.Surface(tinted.get_size(), pygame.SRCALPHA)
+    # Dark blue-gray overlay at ~40% opacity
+    overlay.fill((60, 70, 85, 100))
+    
+    # Blend the overlay onto the sprite
+    tinted.blit(overlay, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    
+    return tinted
 
 
 def clear_scaled_cache():
@@ -121,29 +150,41 @@ def get_zoom() -> float:
 # TILE SPRITES
 # ============================================================================
 
-def get_tile_sprite(tile_type: str, x: int, y: int, z: int, tile_size: int) -> Optional[pygame.Surface]:
+def get_tile_sprite(tile_type: str, x: int, y: int, z: int, tile_size: int, apply_construction_tint: bool = False) -> Optional[pygame.Surface]:
     """Get a sprite for a tile type with variation support.
     
     Args:
         tile_type: Type of tile (e.g., "finished_floor", "finished_wall")
         x, y, z: Tile coordinates (for variation selection)
         tile_size: Target size in pixels
+        apply_construction_tint: If True, apply construction tint to sprite
         
     Returns:
         Scaled sprite or None if not found
     """
-    # Try variations 0-7, wrapping around if fewer exist
-    for max_variations in [8, 6, 4, 3, 2, 1]:
+    # For workstations and single-sprite items, try base sprite first
+    # (workstations don't need variations)
+    # Exclude resource nodes which DO use variations
+    if tile_type.startswith("finished_") and not tile_type in ("finished_floor", "finished_wall", "finished_wall_advanced", "finished_stage", "finished_stage_stairs", "finished_bridge"):
+        if not tile_type.endswith("_node") and not tile_type.endswith("_node_depleted"):
+            sprite_path = f"tiles/{tile_type}.png"
+            sprite = get_scaled_sprite(sprite_path, tile_size, apply_construction_tint)
+            if sprite is not None:
+                return sprite
+    
+    # Try variations 0-8 for bridges, 0-7 for others
+    max_variation_counts = [9, 8, 6, 4, 3, 2, 1] if tile_type == "finished_bridge" else [8, 6, 4, 3, 2, 1]
+    for max_variations in max_variation_counts:
         variation_index = (x * 7 + y * 13 + z * 3) % max_variations
         sprite_path = f"tiles/{tile_type}_{variation_index}.png"
-        sprite = get_scaled_sprite(sprite_path, tile_size)
+        sprite = get_scaled_sprite(sprite_path, tile_size, apply_construction_tint)
         
         if sprite is not None:
             return sprite
     
     # Fall back to base sprite (no variation)
     sprite_path = f"tiles/{tile_type}.png"
-    return get_scaled_sprite(sprite_path, tile_size)
+    return get_scaled_sprite(sprite_path, tile_size, apply_construction_tint)
 
 
 # ============================================================================
