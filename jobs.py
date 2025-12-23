@@ -11,7 +11,7 @@ sophisticated scheduler without changing callers.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 
 
 @dataclass
@@ -61,6 +61,10 @@ class Job:
 # Global job queue for the prototype. In a larger system this could be owned
 # by a world or simulation controller object.
 JOB_QUEUE: List[Job] = []
+
+# Spatial cache for fast job lookups by position
+# Key: (x, y, z), Value: Job
+_JOB_POSITION_CACHE: Dict[Tuple[int, int, int], Job] = {}
 
 # Designation tracking - tiles that are designated for work but may not have active jobs yet
 # Key: (x, y, z), Value: {"type": "harvest"|"salvage"|"haul", "category": str}
@@ -187,6 +191,8 @@ def add_job(
         dest_z=dest_z,
     )
     JOB_QUEUE.append(job)
+    # Update spatial cache
+    _JOB_POSITION_CACHE[(x, y, z)] = job
     return job
 
 
@@ -344,6 +350,8 @@ def remove_job(job: Job) -> None:
 
     if job in JOB_QUEUE:
         JOB_QUEUE.remove(job)
+        # Update spatial cache
+        _JOB_POSITION_CACHE.pop((job.x, job.y, job.z), None)
 
 
 def is_job_in_queue(job: Job) -> bool:
@@ -360,10 +368,14 @@ def get_job_at(x: int, y: int, z: int = None) -> Optional[Job]:
         x, y: Tile coordinates
         z: Z-level. If None, matches any Z-level (legacy behavior).
     """
+    # Fast path: Use spatial cache for exact coordinate lookup
+    if z is not None:
+        return _JOB_POSITION_CACHE.get((x, y, z))
+    
+    # Legacy path: Check all Z-levels (slower, but maintains compatibility)
     for job in JOB_QUEUE:
         if job.x == x and job.y == y:
-            if z is None or job.z == z:
-                return job
+            return job
     return None
 
 
@@ -389,6 +401,8 @@ def remove_job_at(x: int, y: int, z: int = None) -> bool:
         # Unassign colonist if assigned
         job.assigned = False
         JOB_QUEUE.remove(job)
+        # Update spatial cache
+        _JOB_POSITION_CACHE.pop((job.x, job.y, job.z), None)
         return True
     return False
 

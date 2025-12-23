@@ -1155,7 +1155,10 @@ class Grid:
                     if not self._try_draw_tile_sprite(surface, "finished_wall", rect, x, y, z):
                         pygame.draw.rect(surface, COLOR_TILE_FINISHED_WALL, rect)
                 elif tile == "scrap_bar_counter":
-                    pygame.draw.rect(surface, COLOR_TILE_WALL, rect)
+                    # Try sprite with construction tint
+                    self._try_draw_tile_sprite(surface, "finished_scrap_bar_counter", rect, x, y, z, use_construction_tint=True)
+                    
+                    # Material icons
                     site = buildings.get_construction_site(x, y, z)
                     if site is not None:
                         delivered = site.get("materials_delivered", {})
@@ -1172,6 +1175,8 @@ class Grid:
                             icon_rect = pygame.Rect(icon_x, rect.top + 2, 6, 6)
                             pygame.draw.rect(surface, icon_color, icon_rect)
                             icon_x += 8
+                    
+                    # Progress bar
                     job = get_job_at(x, y)
                     if job is not None and job.required > 0:
                         progress_ratio = max(0.0, min(1.0, job.progress / job.required))
@@ -1182,76 +1187,8 @@ class Grid:
                         if bar_width > 0:
                             pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_scrap_bar_counter":
-                    # Try sprite first, fallback to procedural
-                    if not self._try_draw_tile_sprite(surface, "finished_scrap_bar_counter", rect, x, y, z):
-                        # Rusty, ugly bar counter - diverse organic variations
-                        import random
-                        seed = self._get_tile_seed(x, y, z)
-                        rng = random.Random(seed)
-                    
-                    # Base color with variation
-                    base_colors = [
-                        (90, 70, 50),   # Rusty brown
-                        (80, 60, 45),   # Darker rust
-                        (95, 75, 55),   # Lighter rust
-                        (85, 65, 50),   # Medium rust
-                        (75, 55, 40),   # Deep rust
-                        (100, 80, 60),  # Weathered metal
-                    ]
-                    variant = self._get_tile_variant(x, y, z, len(base_colors))
-                    base_color = base_colors[variant]
-                    color = self._get_tile_color_variation(base_color, x, y, z, 8)
-                    pygame.draw.rect(surface, color, rect)
-                    
-                    # Grime and rust details
-                    dark_grime = (max(0, color[0] - 20), max(0, color[1] - 15), max(0, color[2] - 10))
-                    light_rust = (min(255, color[0] + 15), min(255, color[1] + 10), min(255, color[2] + 5))
-                    
-                    # Different detail patterns based on position
-                    detail_variant = self._get_tile_variant(x, y, z, 5, salt=0xBA401)
-                    
-                    if detail_variant == 0:
-                        # Horizontal scratches and grime
-                        pygame.draw.line(surface, dark_grime, (rect.left, rect.top + 2), (rect.right, rect.top + 2), 1)
-                        pygame.draw.line(surface, dark_grime, (rect.left, rect.bottom - 3), (rect.right, rect.bottom - 3), 1)
-                        pygame.draw.line(surface, light_rust, (rect.left + 2, rect.centery), (rect.right - 2, rect.centery), 1)
-                    elif detail_variant == 1:
-                        # Rust spots and stains
-                        for _ in range(3):
-                            spot_x = rect.left + rng.randint(2, rect.width - 4)
-                            spot_y = rect.top + rng.randint(2, rect.height - 4)
-                            pygame.draw.rect(surface, dark_grime, (spot_x, spot_y, 2, 2))
-                        pygame.draw.line(surface, light_rust, (rect.left, rect.top), (rect.right, rect.top), 1)
-                    elif detail_variant == 2:
-                        # Vertical streaks (liquid stains)
-                        for i in range(2):
-                            streak_x = rect.left + rng.randint(4, rect.width - 4)
-                            pygame.draw.line(surface, dark_grime, (streak_x, rect.top), (streak_x, rect.bottom), 1)
-                        pygame.draw.line(surface, light_rust, (rect.left, rect.bottom - 1), (rect.right, rect.bottom - 1), 1)
-                    elif detail_variant == 3:
-                        # Patchy corrosion
-                        patch_rect = pygame.Rect(
-                            rect.left + rng.randint(2, 6),
-                            rect.top + rng.randint(2, 6),
-                            rect.width - rng.randint(4, 10),
-                            rect.height - rng.randint(4, 10)
-                        )
-                        pygame.draw.rect(surface, dark_grime, patch_rect)
-                        pygame.draw.line(surface, light_rust, (rect.left, rect.top), (rect.right, rect.top), 1)
-                    else:
-                        # Rivets and metal seams
-                        pygame.draw.line(surface, dark_grime, (rect.left, rect.top), (rect.right, rect.top), 1)
-                        pygame.draw.line(surface, dark_grime, (rect.left, rect.bottom - 1), (rect.right, rect.bottom - 1), 1)
-                        # Rivets
-                        for i in range(3):
-                            rivet_x = rect.left + (i + 1) * (rect.width // 4)
-                            pygame.draw.circle(surface, light_rust, (rivet_x, rect.centery), 1)
-                    
-                    # Random additional weathering
-                    if rng.random() < 0.4:
-                        scratch_x = rect.left + rng.randint(0, rect.width - 2)
-                        scratch_y = rect.top + rng.randint(0, rect.height - 2)
-                        pygame.draw.line(surface, light_rust, (scratch_x, scratch_y), (scratch_x + rng.randint(-4, 4), scratch_y + rng.randint(-4, 4)), 1)
+                    # Try sprite only - no procedural fallback
+                    self._try_draw_tile_sprite(surface, "finished_scrap_bar_counter", rect, x, y, z)
                 elif tile in ("street", "street_cracked", "street_scar", "street_ripped"):
                     # Try sprite first, fallback to procedural
                     if not self._try_draw_tile_sprite(surface, tile, rect, x, y, z):
@@ -1595,35 +1532,44 @@ class Grid:
                         tint_surface = pygame.Surface((config.TILE_SIZE, config.TILE_SIZE), pygame.SRCALPHA)
                         tint_surface.fill((0, 0, 0, interior_darkness))
                         surface.blit(tint_surface, rect.topleft)
+                elif tile == "stage":
+                    # Try sprite with construction tint
+                    self._try_draw_tile_sprite(surface, "finished_stage", rect, x, y, z, use_construction_tint=True)
+                    
+                    # Material icons
+                    site = buildings.get_construction_site(x, y, z)
+                    if site is not None:
+                        delivered = site.get("materials_delivered", {})
+                        needed = site.get("materials_needed", {})
+                        icon_x = rect.left + 2
+                        for res_type in needed.keys():
+                            has_it = delivered.get(res_type, 0) >= needed.get(res_type, 0)
+                            if res_type == "wood":
+                                icon_color = COLOR_RESOURCE_NODE_WOOD if has_it else (60, 40, 20)
+                            elif res_type == "scrap":
+                                icon_color = (150, 100, 50) if has_it else (60, 40, 20)
+                            else:
+                                icon_color = (100, 100, 100) if has_it else (40, 40, 40)
+                            icon_rect = pygame.Rect(icon_x, rect.top + 2, 6, 6)
+                            pygame.draw.rect(surface, icon_color, icon_rect)
+                            icon_x += 8
+                    
+                    # Progress bar
+                    job = get_job_at(x, y)
+                    if job is not None and job.required > 0:
+                        progress_ratio = max(0.0, min(1.0, job.progress / job.required))
+                        bar_margin = 4
+                        bar_height = 4
+                        bar_width = int((config.TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                        bar_rect = pygame.Rect(rect.left + bar_margin, rect.bottom - bar_margin - bar_height, bar_width, bar_height)
+                        if bar_width > 0:
+                            pygame.draw.rect(surface, COLOR_CONSTRUCTION_PROGRESS, bar_rect)
                 elif tile == "finished_stage":
                     # Try sprite first, fallback to procedural
-                    if not self._try_draw_tile_sprite(surface, "finished_stage", rect, x, y, z):
-                        # Stage platform - elevated performance area
-                        base_color = (100, 80, 60)  # Darker wood for stage
-                        stage_color = self._get_tile_color_variation(base_color, x, y, z, 6)
-                        pygame.draw.rect(surface, stage_color, rect)
-                    
-                    # Stage edge highlight (front of stage)
-                    edge_color = (min(255, stage_color[0] + 30), min(255, stage_color[1] + 20), min(255, stage_color[2] + 15))
-                    pygame.draw.line(surface, edge_color, (rect.left, rect.bottom - 2), (rect.right, rect.bottom - 2), 2)
-                    
-                    # Stage planks
-                    plank_color = (max(0, stage_color[0] - 15), max(0, stage_color[1] - 15), max(0, stage_color[2] - 10))
-                    pygame.draw.line(surface, plank_color, (rect.left, rect.centery), (rect.right, rect.centery), 1)
+                    self._try_draw_tile_sprite(surface, "finished_stage", rect, x, y, z)
                 elif tile == "finished_stage_stairs":
                     # Try sprite first, fallback to procedural
-                    if not self._try_draw_tile_sprite(surface, "finished_stage_stairs", rect, x, y, z):
-                        # Stage stairs - access to stage
-                        base_color = (110, 90, 65)
-                        stair_color = self._get_tile_color_variation(base_color, x, y, z, 6)
-                        pygame.draw.rect(surface, stair_color, rect)
-                    
-                    # Draw steps
-                    step_color = (max(0, stair_color[0] - 20), max(0, stair_color[1] - 20), max(0, stair_color[2] - 15))
-                    step_height = rect.height // 3
-                    for i in range(3):
-                        step_y = rect.top + i * step_height
-                        pygame.draw.line(surface, step_color, (rect.left, step_y), (rect.right, step_y), 1)
+                    self._try_draw_tile_sprite(surface, "finished_stage_stairs", rect, x, y, z)
                 elif tile == "gutter_slab":
                     # Gutter Slab - cyberpunk work surface: stained concrete with neon edge
                     base_color = (45, 40, 50)  # Dark, slightly purple concrete
@@ -1653,64 +1599,79 @@ class Grid:
                     grime_surface.fill((10, 5, 10, 40))
                     surface.blit(grime_surface, rect.topleft)
                 elif tile == "crash_bed":
-                    base_color = (35, 30, 45)
-                    bed_color = self._get_tile_color_variation(base_color, x, y, z, 6)
-                    pygame.draw.rect(surface, bed_color, rect)
-
-                    frame_rect = pygame.Rect(rect.left + 3, rect.top + 3, rect.width - 6, rect.height - 6)
-                    pygame.draw.rect(surface, (20, 15, 25), frame_rect, 1)
-
-                    mattress_rect = pygame.Rect(frame_rect.left + 2, frame_rect.centery - 4, frame_rect.width - 4, 8)
-                    pygame.draw.rect(surface, (130, 130, 170), mattress_rect)
-
-                    pillow_rect = pygame.Rect(frame_rect.left + 3, frame_rect.top + 4, frame_rect.width // 3, 6)
-                    pygame.draw.rect(surface, (215, 215, 235), pillow_rect)
-
-                    neon_color = (120, 40, 255)
-                    pygame.draw.line(surface, neon_color, (frame_rect.left, frame_rect.bottom - 2), (frame_rect.right, frame_rect.bottom - 2), 2)
+                    # Draw floor first, then furniture sprite on top
+                    # Draw finished floor as base
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        # Fallback floor color
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw furniture sprite on top
+                    self._try_draw_tile_sprite(surface, "crash_bed", rect, x, y, z)
+                elif tile == "comfort_chair":
+                    # Draw floor first, then chair sprite on top
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw chair sprite on top
+                    self._try_draw_tile_sprite(surface, "comfort_chair", rect, x, y, z)
+                elif tile == "bar_stool":
+                    # Draw floor first, then stool sprite on top
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw stool sprite on top
+                    self._try_draw_tile_sprite(surface, "bar_stool", rect, x, y, z)
                 elif tile == "scrap_guitar_placed":
-                    # Guitar - wood body with strings
-                    pygame.draw.rect(surface, (140, 100, 60), rect)
-                    body_rect = pygame.Rect(rect.left + 4, rect.centery - 6, rect.width - 8, 12)
-                    pygame.draw.rect(surface, (120, 85, 50), body_rect)
-                    # Strings
-                    for i in range(3):
-                        y_pos = rect.centery - 2 + i * 2
-                        pygame.draw.line(surface, (180, 160, 140), (rect.left + 6, y_pos), (rect.right - 6, y_pos), 1)
+                    # Draw floor first, then guitar sprite on top
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw guitar sprite on top
+                    self._try_draw_tile_sprite(surface, "scrap_guitar_placed", rect, x, y, z)
                 elif tile == "drum_kit_placed":
-                    # Drums - circular shapes
-                    pygame.draw.rect(surface, (120, 110, 100), rect)
-                    pygame.draw.circle(surface, (100, 90, 80), (rect.centerx - 6, rect.centery), 6)
-                    pygame.draw.circle(surface, (110, 100, 90), (rect.centerx + 6, rect.centery), 5)
-                    pygame.draw.circle(surface, (90, 80, 70), (rect.centerx, rect.centery + 6), 4)
+                    # Draw floor first, then drum kit sprite on top
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw drum kit sprite on top
+                    self._try_draw_tile_sprite(surface, "drum_kit_placed", rect, x, y, z)
                 elif tile == "synth_placed":
-                    # Synth - electronic keyboard with lights
-                    pygame.draw.rect(surface, (60, 70, 80), rect)
-                    keyboard_rect = pygame.Rect(rect.left + 3, rect.centery - 3, rect.width - 6, 6)
-                    pygame.draw.rect(surface, (40, 45, 50), keyboard_rect)
-                    # LED indicators
-                    pygame.draw.rect(surface, (100, 200, 255), (rect.left + 5, rect.top + 5, 2, 2))
-                    pygame.draw.rect(surface, (200, 100, 255), (rect.left + 9, rect.top + 5, 2, 2))
-                    pygame.draw.rect(surface, (100, 255, 150), (rect.left + 13, rect.top + 5, 2, 2))
+                    # Draw floor first, then synth sprite on top
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw synth sprite on top
+                    self._try_draw_tile_sprite(surface, "synth_placed", rect, x, y, z)
                 elif tile == "harmonica_placed":
-                    # Harmonica - small metal rectangle
-                    pygame.draw.rect(surface, (150, 140, 130), rect)
-                    harmonica_rect = pygame.Rect(rect.centerx - 8, rect.centery - 3, 16, 6)
-                    pygame.draw.rect(surface, (130, 120, 110), harmonica_rect)
-                    # Holes
-                    for i in range(5):
-                        x_pos = harmonica_rect.left + 2 + i * 3
-                        pygame.draw.rect(surface, (80, 70, 60), (x_pos, harmonica_rect.centery - 1, 2, 2))
+                    # Draw floor first, then harmonica sprite on top
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw harmonica sprite on top
+                    self._try_draw_tile_sprite(surface, "harmonica_placed", rect, x, y, z)
                 elif tile == "amp_placed":
-                    # Amplifier - box with speaker grille
-                    pygame.draw.rect(surface, (80, 90, 100), rect)
-                    speaker_rect = pygame.Rect(rect.left + 4, rect.top + 4, rect.width - 8, rect.height - 8)
-                    pygame.draw.rect(surface, (60, 65, 70), speaker_rect)
-                    # Grille pattern
-                    for i in range(0, speaker_rect.width, 3):
-                        pygame.draw.line(surface, (40, 45, 50), 
-                                       (speaker_rect.left + i, speaker_rect.top), 
-                                       (speaker_rect.left + i, speaker_rect.bottom), 1)
+                    # Draw floor first, then amp sprite on top
+                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                        base_color = (160, 130, 90)
+                        floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
+                        pygame.draw.rect(surface, floor_color, rect)
+                    
+                    # Draw amp sprite on top
+                    self._try_draw_tile_sprite(surface, "amp_placed", rect, x, y, z)
                 elif tile in ("salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "barracks", "spark_bench", "tinker_station", "gutter_still"):
                     # UNIFIED WORKSTATION UNDER CONSTRUCTION GRAPHIC
                     # Try to load finished sprite with construction tint first

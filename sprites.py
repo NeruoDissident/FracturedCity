@@ -56,6 +56,7 @@ def load_sprite(sprite_path: str) -> Optional[pygame.Surface]:
     try:
         sprite = pygame.image.load(str(full_path)).convert_alpha()
         _SPRITE_CACHE[sprite_path] = sprite
+        print(f"[DEBUG Sprite] Successfully loaded: {sprite_path} from {full_path}")
         return sprite
     except Exception as e:
         print(f"[Sprites] Failed to load {sprite_path}: {e}")
@@ -165,8 +166,29 @@ def get_tile_sprite(tile_type: str, x: int, y: int, z: int, tile_size: int, appl
     # For workstations and single-sprite items, try base sprite first
     # (workstations don't need variations)
     # Exclude resource nodes which DO use variations
+    # Check for furniture sprites first (crash_bed, instruments, etc.)
+    furniture_types = ["crash_bed", "comfort_chair", "bar_stool", "storage_locker",
+                      "drum_kit_placed", "scrap_guitar_placed", "synth_placed", 
+                      "harmonica_placed", "amp_placed"]
+    if tile_type in furniture_types:
+        sprite_path = f"furniture/{tile_type}.png"
+        sprite = get_scaled_sprite(sprite_path, tile_size, apply_construction_tint)
+        if sprite is not None:
+            return sprite
+    
     if tile_type.startswith("finished_") and not tile_type in ("finished_floor", "finished_wall", "finished_wall_advanced", "finished_stage", "finished_stage_stairs", "finished_bridge"):
         if not tile_type.endswith("_node") and not tile_type.endswith("_node_depleted"):
+            # Try workstations folder first for workstation sprites
+            workstation_types = ["finished_stove", "finished_generator", "finished_gutter_forge", 
+                                "finished_salvagers_bench", "finished_spark_bench", "finished_tinker_station",
+                                "finished_gutter_still", "finished_skinshop_loom", "finished_cortex_spindle", "finished_barracks"]
+            if tile_type in workstation_types:
+                sprite_path = f"workstations/{tile_type}.png"
+                sprite = get_scaled_sprite(sprite_path, tile_size, apply_construction_tint)
+                if sprite is not None:
+                    return sprite
+            
+            # Fall back to tiles folder
             sprite_path = f"tiles/{tile_type}.png"
             sprite = get_scaled_sprite(sprite_path, tile_size, apply_construction_tint)
             if sprite is not None:
@@ -270,18 +292,33 @@ def get_colonist_direction(dx: float, dy: float) -> str:
 def get_colonist_sprite(direction: str, is_moving: bool, tile_size: int, colonist_id: str = "default") -> Optional[pygame.Surface]:
     """Get colonist sprite for rendering.
     
+    Supports two naming patterns:
+    1. Single sprite: colonists/colonist_X.png (where X is a number)
+    2. Directional: colonists/{colonist_id}_{direction}.png (legacy)
+    
     Args:
         direction: Direction facing (north, south, east, west)
         is_moving: Whether colonist is moving
         tile_size: Target size in pixels
-        colonist_id: Colonist type/variation ID
+        colonist_id: Colonist type/variation ID (e.g., "default", "1", "2", "corpo_m_1")
         
     Returns:
         Scaled sprite or None if not found
     """
-    # For south, just use east sprite (or could use a frame counter for animation later)
+    # Try single-sprite pattern first: colonist_X.png
+    # This allows simple naming like colonist_1.png, colonist_2.png, etc.
+    if colonist_id.isdigit() or colonist_id == "default":
+        sprite_path = f"colonists/colonist_{colonist_id}.png"
+        sprite = get_scaled_sprite(sprite_path, tile_size)
+        if sprite is not None:
+            return sprite
+        # Debug: print if sprite not found
+        print(f"[DEBUG Sprite] Failed to load: {sprite_path}")
+    
+    # Fall back to directional sprites for backward compatibility
+    # For south, just use east sprite
     if direction == "south":
-        sprite_dir = "east"  # Use east sprite for south facing
+        sprite_dir = "east"
     else:
         sprite_dir = direction
     

@@ -577,7 +577,8 @@ class Colonist:
         # Sprite style - randomly assigned from available styles
         if not hasattr(self, "sprite_style"):
             import random
-            available_styles = ["default", "echo1", "echo2"]
+            # Use numbered sprites for easy prototyping: colonist_1.png, colonist_2.png, etc.
+            available_styles = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
             self.sprite_style = random.choice(available_styles)
 
         self.state: str = "idle"
@@ -2888,6 +2889,19 @@ class Colonist:
                 elif current_tile == "barracks":
                     grid.set_tile(job.x, job.y, "finished_barracks", z=job.z)
                     buildings.register_workstation(job.x, job.y, job.z, "barracks")
+                elif current_tile == "gutter_still":
+                    grid.set_tile(job.x, job.y, "finished_gutter_still", z=job.z)
+                    buildings.register_workstation(job.x, job.y, job.z, "gutter_still")
+                elif current_tile == "spark_bench":
+                    grid.set_tile(job.x, job.y, "finished_spark_bench", z=job.z)
+                    buildings.register_workstation(job.x, job.y, job.z, "spark_bench")
+                elif current_tile == "tinker_station":
+                    grid.set_tile(job.x, job.y, "finished_tinker_station", z=job.z)
+                    buildings.register_workstation(job.x, job.y, job.z, "tinker_station")
+                elif current_tile == "scrap_bar_counter":
+                    grid.set_tile(job.x, job.y, "finished_scrap_bar_counter", z=job.z)
+                elif current_tile == "stage":
+                    grid.set_tile(job.x, job.y, "finished_stage", z=job.z)
                 else:
                     grid.set_tile(job.x, job.y, "finished_building", z=job.z)
                 buildings.remove_construction_site(job.x, job.y, job.z)
@@ -2946,18 +2960,21 @@ class Colonist:
             elif job.type == "haul":
                 # Pickup phase complete - pick up the item and start hauling
                 # Check if this is an equipment haul or resource haul
-                if job.resource_type == "equipment":
-                    # Equipment haul - pick up from world items
+                if job.resource_type == "equipment" or job.resource_type == "furniture" or job.resource_type == "components" or job.resource_type == "instruments" or job.resource_type == "consumables":
+                    # Equipment/furniture/etc haul - pick up from world items
                     from items import pickup_world_item
+                    print(f"[DEBUG Haul] {self.name} picking up {job.resource_type} at ({job.x},{job.y},{job.z})")
                     item = pickup_world_item(job.x, job.y, job.z)
                     if item is not None:
                         # Convert to carrying format
-                        self.carrying = {"type": "equipment", "amount": 1, "item": item}
+                        self.carrying = {"type": job.resource_type, "amount": 1, "item": item}
                         self.pick_up_item(self.carrying)
                         self.state = "hauling"
                         self.current_path = []
                         remove_designation(job.x, job.y, job.z)
+                        print(f"[DEBUG Haul] {self.name} picked up {item.get('name', 'item')}, now hauling to ({job.dest_x},{job.dest_y},{job.dest_z})")
                     else:
+                        print(f"[DEBUG Haul] {self.name} found no item at ({job.x},{job.y},{job.z}), cancelling job")
                         remove_job(job)
                         remove_designation(job.x, job.y, job.z)
                         self.current_job = None
@@ -3227,13 +3244,13 @@ class Colonist:
                     mark_supply_job_completed(dest_x, dest_y, dest_z, job.resource_type)
             elif job.type == "haul":
                 # Deliver to stockpile
-                if resource_type == "equipment":
-                    # Equipment delivery - store the item data
+                if resource_type in ("equipment", "furniture", "components", "instruments", "consumables"):
+                    # Equipment/furniture/etc delivery - store the item data
                     item_data = self.carrying.get("item", {})
-                    item_name = item_data.get("name", "equipment")
+                    item_name = item_data.get("name", resource_type)
                     if zones.is_stockpile_zone(dest_x, dest_y, dest_z):
                         zones.store_equipment_at_tile(dest_x, dest_y, dest_z, item_data)
-                        # print(f"[Haul] Stored {item_name} in stockpile at ({dest_x},{dest_y})")
+                        print(f"[DEBUG Haul] {self.name} stored {item_name} in stockpile at ({dest_x},{dest_y},{dest_z})")
                     else:
                         print(f"[Haul] Dropped {item_name} (stockpile zone removed)")
                 elif zones.is_stockpile_zone(dest_x, dest_y, dest_z):
@@ -3273,11 +3290,15 @@ class Colonist:
             elif job.type == "install_furniture":
                 # Install furniture at destination: convert tile and consume item
                 furniture_item_id = job.resource_type or self.carrying.get("item_id")
-                tile_type = furniture_item_id or "gutter_slab"
+                # Instruments need "_placed" suffix for tile type
+                if furniture_item_id in ("drum_kit", "scrap_guitar", "synth", "harmonica", "amp"):
+                    tile_type = f"{furniture_item_id}_placed"
+                else:
+                    tile_type = furniture_item_id or "gutter_slab"
                 grid.set_tile(dest_x, dest_y, tile_type, z=dest_z)
                 item_data = self.carrying.get("item", {})
                 item_name = item_data.get("name", furniture_item_id or "furniture")
-                print(f"[Furniture] Installed {item_name} at ({dest_x},{dest_y},z={dest_z})")
+                print(f"[Furniture] Installed {item_name} at ({dest_x},{dest_y},z={dest_z}) as tile '{tile_type}'")
                 # Register bed if this is a bed (crash_bed is the craftable bed item)
                 if furniture_item_id == "crash_bed":
                     from beds import register_bed
@@ -4520,8 +4541,18 @@ class Colonist:
         
         # Always use sprite if available (ignore ether mode for now)
         if colonist_sprite:
-            # Draw sprite centered on colonist position
-            sprite_rect = colonist_sprite.get_rect(center=(screen_cx, screen_cy))
+            # Add jitter animation when moving
+            jitter_x = 0
+            jitter_y = 0
+            if is_moving:
+                # Vertical bob + horizontal sway for movement animation
+                import math
+                time_offset = self._game_tick * 0.05  # Animation speed
+                jitter_y = int(math.sin(time_offset) * 2)  # ±2 pixel vertical bob
+                jitter_x = int(math.cos(time_offset * 1.5) * 1)  # ±1 pixel horizontal sway
+            
+            # Draw sprite centered on colonist position with jitter
+            sprite_rect = colonist_sprite.get_rect(center=(screen_cx + jitter_x, screen_cy + jitter_y))
             surface.blit(colonist_sprite, sprite_rect.topleft)
         else:
             # Fallback to procedural drawing

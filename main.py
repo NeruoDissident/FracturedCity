@@ -102,7 +102,13 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
         ui.action_bar._close_all_menus()
         return
     
-    # Check colonist management panel first (only if visible)
+    # Check workstation panel FIRST (highest priority for clicks)
+    from ui_workstation_new import get_workstation_order_panel
+    ws_panel = get_workstation_order_panel()
+    if ws_panel.handle_click((mx, my)):
+        return
+    
+    # Check colonist management panel (only if visible)
     from ui import get_colonist_management_panel
     mgmt_panel = get_colonist_management_panel()
     if mgmt_panel.visible and mgmt_panel.handle_click((mx, my)):
@@ -131,12 +137,6 @@ def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) ->
     from ui import get_stockpile_filter_panel
     filter_panel = get_stockpile_filter_panel()
     if filter_panel.handle_click((mx, my)):
-        return
-    
-    # Check workstation panel
-    from ui_workstation_new import get_workstation_order_panel
-    ws_panel = get_workstation_order_panel()
-    if ws_panel.handle_click((mx, my)):
         return
     
     # Check bed assignment panel
@@ -1251,15 +1251,19 @@ def main() -> None:
         # Old bottom bar removed - now using sidebar UI
         # ui.draw(screen)
         
+        # Draw colonist management panel first (always visible in right panel)
+        from ui import get_colonist_management_panel
+        mgmt_panel = get_colonist_management_panel()
+        # Always keep colonists list updated and panel visible
+        if not mgmt_panel.visible or not mgmt_panel.colonists:
+            mgmt_panel.open(colonists, 0)
+        mgmt_panel.update(pygame.mouse.get_pos())  # Update tooltip
+        mgmt_panel.draw(screen)
+        
         # Draw stockpile filter panel (if open)
         from ui import get_stockpile_filter_panel
         filter_panel = get_stockpile_filter_panel()
         filter_panel.draw(screen)
-        
-        # Draw workstation panel (if open)
-        from ui_workstation_new import get_workstation_order_panel
-        ws_panel = get_workstation_order_panel()
-        ws_panel.draw(screen)
         
         # Draw bed assignment panel (if open)
         from ui import get_bed_assignment_panel
@@ -1281,14 +1285,10 @@ def main() -> None:
         colonist_panel = get_colonist_panel()
         colonist_panel.draw(screen)
         
-        # Draw colonist management panel (always visible in right panel)
-        from ui import get_colonist_management_panel
-        mgmt_panel = get_colonist_management_panel()
-        # Always keep colonists list updated and panel visible
-        if not mgmt_panel.visible or not mgmt_panel.colonists:
-            mgmt_panel.open(colonists, 0)
-        mgmt_panel.update(pygame.mouse.get_pos())  # Update tooltip
-        mgmt_panel.draw(screen)
+        # Draw workstation panel LAST (on top of everything else)
+        from ui_workstation_new import get_workstation_order_panel
+        ws_panel = get_workstation_order_panel()
+        ws_panel.draw(screen)
         
         # Draw lists panel (if open)
         from lists_ui import get_lists_panel

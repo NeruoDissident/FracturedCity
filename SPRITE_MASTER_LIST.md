@@ -140,7 +140,7 @@ tiletype_#.png        → Tiles with variations (empty_0.png, empty_1.png, etc.)
 finished_name.png     → Completed buildings/workstations (finished_wall.png)
 itemname_placed.png   → Placed furniture/items (scrap_guitar_placed.png)
 ```
-
+a
 ---
 
 ## 📊 PRIORITY ORDER (Recommended)

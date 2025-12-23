@@ -725,6 +725,7 @@ def process_equipment_haul_jobs(jobs_module, zones_module) -> int:
         dest_x, dest_y, dest_z = dest
         
         # Create haul job
+        print(f"[DEBUG Haul] Creating haul job: item at ({x},{y},{z}), dest ({dest_x},{dest_y},{dest_z}), storage_type={storage_type}")
         jobs_module.add_job(
             "haul",
             x, y,
