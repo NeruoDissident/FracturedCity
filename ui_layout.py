@@ -1,10 +1,16 @@
-"""UI Layout and Panel System for Fractured City.
+"""STRUCTURAL UI LAYOUT - Sidebars, top bar, bottom bar.
 
-Provides a cyberpunk-styled UI layout with:
+Provides the cyberpunk-styled UI STRUCTURE and LAYOUT:
 - Top bar: Time, Z-level, resources, alerts
-- Left sidebar: Tabbed panels (Build, Colonists, Items)
-- Bottom bar: Tile info, selected colonist, tooltips
+- Left sidebar: Tabbed panels (Colonists, Jobs, Items, Rooms)
+- Bottom bar: Build tools (horizontal layout)
+- Right panel: Colonist management (380px wide)
 - Map viewport: Main game area (center)
+
+This module handles STRUCTURAL LAYOUT ONLY.
+For POPUP PANELS (clicking on objects), see ui.py
+For workstation panels, see ui_workstation_new.py
+For debug overlay (I key), see debug_overlay.py
 
 This module only handles visual layout and rendering.
 All game logic remains in existing modules.
