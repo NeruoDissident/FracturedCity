@@ -3634,17 +3634,33 @@ class Colonist:
                 
                 # Check if at stockpile
                 if self.x == source_x and self.y == source_y and self.z == source_z:
-                    # Pick up resource - use haul capacity like construction supply jobs
+                    # Try to pick up from tile storage first (raw resources)
                     need_amount = amount_needed - have
                     haul_capacity = self.get_equipment_haul_capacity()
                     pickup_amount = int(need_amount * haul_capacity)
                     pickup_amount = max(1, min(pickup_amount, need_amount))  # At least 1, at most what's needed
                     
                     item = zones.remove_from_tile_storage(source_x, source_y, source_z, pickup_amount)
+                    
+                    # If not found in tile storage, try equipment storage (components)
+                    if item is None:
+                        # Check if this is a component item
+                        equipment_items = zones.get_equipment_at_tile(source_x, source_y, source_z)
+                        for eq_item in equipment_items:
+                            if eq_item.get("id") == res_type:
+                                # Remove this component item
+                                item = zones.remove_equipment_from_tile(source_x, source_y, source_z)
+                                if item:
+                                    # Convert to carrying format (components are single items)
+                                    item = {"type": res_type, "amount": 1, "item": item}
+                                break
+                    
                     if item:
-                        self.carrying = {"type": item["type"], "amount": item["amount"]}
+                        self.carrying = {"type": item["type"], "amount": item.get("amount", 1)}
+                        if "item" in item:
+                            self.carrying["item"] = item["item"]
                         self.pick_up_item(self.carrying)
-                        spend_from_stockpile(item["type"], item["amount"])
+                        spend_from_stockpile(item["type"], item.get("amount", 1))
                         self.current_path = []
                     return
                 

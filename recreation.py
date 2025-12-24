@@ -58,11 +58,13 @@ def spawn_recreation_jobs(colonists: List, grid, game_tick: int) -> None:
     
     jobs_to_spawn = target_jobs - existing_recreation
     
-    # Find all recreation rooms
+    # Find all recreation venues (Social Venues and Dining Halls)
     rec_room_tiles = []
     all_rooms = get_all_rooms()
     for room_id, room_data in all_rooms.items():
-        if room_data.get("type") == "Rec Room":
+        room_type = room_data.get("type")
+        # Social Venues (bars, clubs, etc.) and Dining Halls count as recreation spaces
+        if room_type in ("Social Venue", "Dining Hall"):
             rec_room_tiles.extend(room_data.get("tiles", []))
     
     for _ in range(jobs_to_spawn):

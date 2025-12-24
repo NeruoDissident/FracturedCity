@@ -515,7 +515,7 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                     "room_barracks": "Barracks",
                     "room_prison": "Prison",
                     "room_hospital": "Hospital",
-                    "room_rec_room": "Rec Room",
+                    "room_social_venue": "Social Venue",
                     "room_dining_hall": "Dining Hall",
                 }
                 room_type = room_type_map.get(_drag_mode)

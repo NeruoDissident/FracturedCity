@@ -36,6 +36,39 @@ _next_room_id = 1
 # ROOM TYPE DEFINITIONS
 # =============================================================================
 
+# Furniture category mapping for Social Venues
+VENUE_FURNITURE_CATEGORIES = {
+    "bar_furniture": [
+        "bar_stool",
+        "scrap_bar_counter",
+        "finished_bar",
+        "gutter_still",
+        "finished_gutter_still",
+    ],
+    "music_equipment": [
+        "scrap_guitar_placed",
+        "drum_kit_placed",
+        "synth_placed",
+        "harmonica_placed",
+        "amp_placed",
+        "stage",
+        "finished_stage",
+    ],
+    "seating": [
+        "comfort_chair",
+        "bar_stool",
+        "crash_bed",  # Lounge seating
+    ],
+    "tables": [
+        "dining_table",
+        "workshop_table",
+        "gutter_slab",
+    ],
+    "luxury": [
+        # Future: pool, chandelier, fountain, etc.
+    ],
+}
+
 ROOM_TYPES = {
     "Bedroom": {
         "name": "Bedroom",
@@ -181,25 +214,30 @@ ROOM_TYPES = {
         "can_assign_owner": False,
     },
     
-    "Rec Room": {
-        "name": "Recreation Room",
-        "description": "Entertainment and relaxation space",
+    "Social Venue": {
+        "name": "Social Venue",  # Dynamic - changes based on furniture
+        "description": "Entertainment and social space that evolves with furnishings",
         "requirements": {
             "min_size": 10,
             "must_be_enclosed": True,
             "must_have_roof": True,
         },
         "quality_factors": {
-            "chair": 3,
-            "table": 5,
-            "entertainment": 10,
+            # Category-based scoring (calculated dynamically)
+            "bar_furniture": 15,
+            "music_equipment": 20,
+            "seating": 5,
+            "tables": 5,
+            "luxury": 30,
             "size_bonus": 2,
         },
         "effects": {
-            "recreation_mult": 0.003,  # 1.0 to 1.3
-            "mood_bonus": 0.05,  # 0 to 5
+            "recreation_mult": 0.004,  # 1.0 to 1.4
+            "mood_bonus": 0.08,  # 0 to 8
+            "social_bonus": 0.002,  # 1.0 to 1.2
         },
         "can_assign_owner": False,
+        "dynamic_naming": True,  # Flag for dynamic tier naming
     },
     
     "Dining Hall": {
@@ -396,12 +434,24 @@ def calculate_room_quality(grid, tiles: List[Coord], z: int, room_type: str) -> 
         tile = grid.get_tile(x, y, z)
         contents[tile] = contents.get(tile, 0) + 1
     
-    # Add furniture bonuses
-    for item, bonus in quality_factors.items():
-        if item == "size_bonus":
-            continue
-        if item in contents:
-            score += bonus * contents[item]
+    # Check if this is a Social Venue (uses category-based scoring)
+    if room_type == "Social Venue":
+        # Count furniture by category
+        category_counts = _count_venue_furniture_categories(contents)
+        
+        # Add category bonuses
+        for category, bonus in quality_factors.items():
+            if category == "size_bonus":
+                continue
+            count = category_counts.get(category, 0)
+            score += bonus * count
+    else:
+        # Standard item-based scoring
+        for item, bonus in quality_factors.items():
+            if item == "size_bonus":
+                continue
+            if item in contents:
+                score += bonus * contents[item]
     
     # Add size bonus
     size_bonus = quality_factors.get("size_bonus", 0)
@@ -411,6 +461,63 @@ def calculate_room_quality(grid, tiles: List[Coord], z: int, room_type: str) -> 
     
     # Clamp to 0-100
     return max(0, min(100, score))
+
+
+def _count_venue_furniture_categories(contents: dict) -> dict:
+    """Count furniture items by category for Social Venues.
+    
+    Args:
+        contents: Dict of {tile_type: count}
+    
+    Returns:
+        Dict of {category: count}
+    """
+    category_counts = {}
+    
+    for category, furniture_list in VENUE_FURNITURE_CATEGORIES.items():
+        count = 0
+        for furniture_item in furniture_list:
+            count += contents.get(furniture_item, 0)
+        if count > 0:
+            category_counts[category] = count
+    
+    return category_counts
+
+
+def get_venue_tier_name(quality: int, contents: dict) -> str:
+    """Determine Social Venue tier name based on quality and furniture.
+    
+    Args:
+        quality: Room quality score (0-100)
+        contents: Dict of {tile_type: count}
+    
+    Returns:
+        Venue tier name (e.g., "Nightclub", "Bar", etc.)
+    """
+    # Count furniture by category
+    category_counts = _count_venue_furniture_categories(contents)
+    
+    # Check what furniture is present
+    has_bar = category_counts.get("bar_furniture", 0) > 0
+    has_music = category_counts.get("music_equipment", 0) > 0
+    has_luxury = category_counts.get("luxury", 0) > 0
+    
+    # Check for specific items
+    has_stage = any(item in contents for item in ["stage", "finished_stage"])
+    has_instruments = any(item in contents for item in 
+                         ["scrap_guitar_placed", "drum_kit_placed", "synth_placed"])
+    
+    # Tier by quality + content
+    if quality >= 81 and has_luxury:
+        return "Grand Hall"
+    elif quality >= 61 and has_music and has_stage:
+        return "Nightclub"
+    elif quality >= 41 and has_music:
+        return "Music Venue"
+    elif quality >= 21 and has_bar:
+        return "Bar"
+    else:
+        return "Dive Bar"
 
 
 # =============================================================================
@@ -459,6 +566,19 @@ def create_room(grid, tiles: List[Coord], z: int, room_type: str) -> Tuple[bool,
     # Count entrances
     entrance_count = _count_entrances(grid, tiles, z)
     
+    # Determine display name (dynamic for Social Venues)
+    display_name = ROOM_TYPES[room_type]["name"]
+    if ROOM_TYPES[room_type].get("dynamic_naming", False):
+        # Scan contents for dynamic naming
+        contents = {}
+        for x, y in tiles:
+            tile = grid.get_tile(x, y, z)
+            contents[tile] = contents.get(tile, 0) + 1
+        print(f"[Room Debug] Contents: {contents}")
+        print(f"[Room Debug] Quality: {quality}")
+        display_name = get_venue_tier_name(quality, contents)
+        print(f"[Room Debug] Venue name: {display_name}")
+    
     _ROOMS[room_id] = {
         "id": room_id,
         "type": room_type,
@@ -469,7 +589,7 @@ def create_room(grid, tiles: List[Coord], z: int, room_type: str) -> Tuple[bool,
         "quality": quality,
         "entrance_count": entrance_count,
         "owner": None,
-        "name": None,
+        "name": display_name,  # Dynamic name for Social Venues
         "restricted": False,
         "effects": _calculate_room_effects(room_type, quality),
     }
@@ -523,8 +643,56 @@ def get_room_at(x: int, y: int, z: int) -> Optional[int]:
 
 
 def get_room_data(room_id: int) -> Optional[dict]:
-    """Get room data."""
+    """Get room data by ID."""
     return _ROOMS.get(room_id)
+
+
+def refresh_venue_name(grid, room_id: int) -> bool:
+    """Refresh the name of a Social Venue based on current furniture.
+    
+    Call this when furniture is added/removed from a Social Venue.
+    
+    Args:
+        grid: Grid instance
+        room_id: Room ID to refresh
+    
+    Returns:
+        True if name was updated, False if not a Social Venue or doesn't exist
+    """
+    room = _ROOMS.get(room_id)
+    if not room:
+        return False
+    
+    room_type = room.get("type")
+    if room_type != "Social Venue":
+        return False
+    
+    # Recalculate quality and name
+    tiles = room.get("tiles", [])
+    z = room.get("z", 0)
+    
+    # Scan contents
+    contents = {}
+    for x, y in tiles:
+        tile = grid.get_tile(x, y, z)
+        contents[tile] = contents.get(tile, 0) + 1
+    
+    # Recalculate quality
+    quality = calculate_room_quality(grid, tiles, z, room_type)
+    
+    # Get new name
+    new_name = get_venue_tier_name(quality, contents)
+    
+    # Update room data
+    old_name = room.get("name", "Social Venue")
+    room["quality"] = quality
+    room["name"] = new_name
+    room["effects"] = _calculate_room_effects(room_type, quality)
+    
+    if new_name != old_name:
+        print(f"[Room] Venue upgraded: {old_name} → {new_name} (quality {quality})")
+    
+    return True
 
 
 def get_all_rooms() -> Dict[int, dict]:

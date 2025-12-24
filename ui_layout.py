@@ -359,6 +359,11 @@ class LeftSidebar:
         self.hovered_item = -1
         self.item_rects: List[pygame.Rect] = []
         
+        # Room category expansion state
+        self.expanded_room_types: set = set()  # Which room types are expanded
+        self.room_category_rects: List[pygame.Rect] = []  # Click areas for room categories
+        self.room_category_types: List[str] = []  # Room type names for each rect
+        
         # Submenu state
         self.active_submenu: Optional[str] = None  # Which category's submenu is open
         self.submenu_items: List[dict] = []
@@ -482,6 +487,18 @@ class LeftSidebar:
                         # Right half - open colonist panel
                         if self.on_colonist_click:
                             self.on_colonist_click(colonist)
+                    return None
+        
+        # Check room category clicks (ROOMS tab - tab 3)
+        if self.current_tab == 3:
+            for i, room_rect in enumerate(self.room_category_rects):
+                if room_rect.collidepoint(pos) and i < len(self.room_category_types):
+                    room_type = self.room_category_types[i]
+                    # Toggle expansion
+                    if room_type in self.expanded_room_types:
+                        self.expanded_room_types.remove(room_type)
+                    else:
+                        self.expanded_room_types.add(room_type)
                     return None
         
         return None
@@ -856,7 +873,7 @@ class LeftSidebar:
                     break
     
     def _draw_rooms_content(self, surface: pygame.Surface, start_y: int, game_data: dict) -> None:
-        """Draw rooms list - using manual room system."""
+        """Draw rooms list - hierarchical with expandable categories."""
         import room_system
         
         y = start_y
@@ -866,6 +883,10 @@ class LeftSidebar:
         
         all_rooms = room_system.get_all_rooms()
         
+        # Clear click rects
+        self.room_category_rects.clear()
+        self.room_category_types.clear()
+        
         if not all_rooms:
             empty_surf = self.font_small.render("No rooms created", True, COLOR_TEXT_DIM)
             surface.blit(empty_surf, (12, y))
@@ -873,19 +894,52 @@ class LeftSidebar:
             hint_surf = self.font_tiny.render("Press M to create rooms", True, COLOR_TEXT_DIM)
             surface.blit(hint_surf, (12, y))
         else:
-            room_counts = {}
-            for room_data in all_rooms.values():
-                rtype = room_data.get("type", "Unknown")
-                room_counts[rtype] = room_counts.get(rtype, 0) + 1
+            # Group rooms by type, then by name
+            room_hierarchy = {}  # {room_type: {room_name: count}}
             
-            for rtype, count in sorted(room_counts.items()):
-                room_text = f"{rtype}: {count}"
-                room_surf = self.font_small.render(room_text, True, COLOR_TEXT_BRIGHT)
-                surface.blit(room_surf, (16, y))
-                y += 18
+            for room_data in all_rooms.values():
+                room_type = room_data.get("type", "Unknown")
+                room_name = room_data.get("name") or room_type
                 
+                if room_type not in room_hierarchy:
+                    room_hierarchy[room_type] = {}
+                
+                room_hierarchy[room_type][room_name] = room_hierarchy[room_type].get(room_name, 0) + 1
+            
+            # Draw hierarchical list
+            for room_type in sorted(room_hierarchy.keys()):
                 if y > self.rect.bottom - 80:
                     break
+                
+                # Count total rooms of this type
+                total_count = sum(room_hierarchy[room_type].values())
+                
+                # Draw category header with expand/collapse indicator
+                is_expanded = room_type in self.expanded_room_types
+                indicator = "▼" if is_expanded else "►"
+                
+                category_text = f"{indicator} {room_type}: {total_count}"
+                category_surf = self.font_small.render(category_text, True, COLOR_TEXT_BRIGHT)
+                surface.blit(category_surf, (12, y))
+                
+                # Build click rect for this category
+                category_rect = pygame.Rect(12, y, LEFT_SIDEBAR_WIDTH - 24, 18)
+                self.room_category_rects.append(category_rect)
+                self.room_category_types.append(room_type)
+                
+                y += 18
+                
+                # If expanded, show individual room names
+                if is_expanded:
+                    for room_name, count in sorted(room_hierarchy[room_type].items()):
+                        if y > self.rect.bottom - 80:
+                            break
+                        
+                        # Indent sub-items
+                        sub_text = f"  {room_name}: {count}"
+                        sub_surf = self.font_tiny.render(sub_text, True, COLOR_TEXT_DIM)
+                        surface.blit(sub_surf, (20, y))
+                        y += 16
     
     def get_tooltips(self) -> dict:
         """Get tooltip data from ui_config."""

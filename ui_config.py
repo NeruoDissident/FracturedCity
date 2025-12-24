@@ -194,7 +194,7 @@ SUBMENUS: Dict[str, List[dict]] = {
         {"id": "room_barracks", "name": "Barracks"},
         {"id": "room_prison", "name": "Prison"},
         {"id": "room_hospital", "name": "Hospital"},
-        {"id": "room_rec_room", "name": "Rec Room"},
+        {"id": "room_social_venue", "name": "Social Venue"},
         {"id": "room_dining_hall", "name": "Dining Hall"},
     ],
     "demolish": [

@@ -529,7 +529,7 @@ class ActionBar:
         {"id": "room_barracks", "name": "Barracks", "keybind": "4"},
         {"id": "room_prison", "name": "Prison", "keybind": "5"},
         {"id": "room_hospital", "name": "Hospital", "keybind": "6"},
-        {"id": "room_rec_room", "name": "Rec Room", "keybind": "7"},
+        {"id": "room_social_venue", "name": "Social Venue", "keybind": "7"},
         {"id": "room_dining_hall", "name": "Dining Hall", "keybind": "8"},
     ]
     

@@ -521,9 +521,10 @@ def find_stockpile_with_resource(resource_type: str, z: int = None) -> Optional[
     """Find a stockpile tile that has the specified resource.
     
     Used for construction supply - colonists need to fetch materials.
+    Also checks equipment storage for component items (wire, chip, etc.)
     
     Args:
-        resource_type: Type of resource to find
+        resource_type: Type of resource to find (e.g., 'wood', 'wire', 'chip')
         z: If specified, prefer tiles on this Z-level
     
     Returns coordinates (x, y, z) of a tile with the resource, or None.
@@ -531,12 +532,27 @@ def find_stockpile_with_resource(resource_type: str, z: int = None) -> Optional[
     preferred = None
     fallback = None
     
+    # First check regular tile storage (raw resources)
     for coord, storage in _TILE_STORAGE.items():
         if storage.get("type") == resource_type and storage.get("amount", 0) > 0:
             if z is not None and coord[2] == z:
                 preferred = coord
             elif fallback is None:
                 fallback = coord
+    
+    if preferred or fallback:
+        return preferred or fallback
+    
+    # If not found in tile storage, check equipment storage for component items
+    # Components like wire, chip, resistor, etc. are stored as item objects
+    for coord, items in _EQUIPMENT_STORAGE.items():
+        for item in items:
+            if item.get("id") == resource_type:
+                if z is not None and coord[2] == z:
+                    preferred = coord
+                elif fallback is None:
+                    fallback = coord
+                break  # Found at this coord, check next coord
     
     return preferred or fallback
 
