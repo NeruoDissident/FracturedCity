@@ -1112,26 +1112,32 @@ def main() -> None:
             from buildings import process_crafting_jobs
             process_crafting_jobs(jobs_module, zones_module)
             
-            # Process equipment haul jobs (crafted items on ground)
+            # Process equipment haul jobs (crafted items on ground) - throttled to every 10 ticks
             from items import process_equipment_haul_jobs, process_auto_equip
-            process_equipment_haul_jobs(jobs_module, zones_module)
+            if tick_count % 10 == 0:
+                process_equipment_haul_jobs(jobs_module, zones_module)
             
-            # Process auto-equip (colonists claim items matching preferences)
-            process_auto_equip(colonists, zones_module, jobs_module)
+            # Process auto-equip (colonists claim items matching preferences) - throttled to once per second
+            if tick_count % 60 == 0:
+                process_auto_equip(colonists, zones_module, jobs_module)
             
-            # Spawn recreation jobs during recreation hours
+            # Spawn recreation jobs during recreation hours - throttled to once per second
             from recreation import spawn_recreation_jobs
-            spawn_recreation_jobs(colonists, grid, tick_count)
+            if tick_count % 60 == 0:
+                spawn_recreation_jobs(colonists, grid, tick_count)
             
-            # Spawn training jobs during morning drill hours
+            # Spawn training jobs during morning drill hours - throttled to once per second
             from training import spawn_training_jobs
-            spawn_training_jobs(colonists, grid, tick_count)
+            if tick_count % 60 == 0:
+                spawn_training_jobs(colonists, grid, tick_count)
             
-            # Process stockpile relocation (items from zones being removed)
-            zones_module.process_stockpile_relocation(jobs_module)
+            # Process stockpile relocation (items from zones being removed) - throttled to every 10 ticks
+            if tick_count % 10 == 0:
+                zones_module.process_stockpile_relocation(jobs_module)
             
-            # Process filter mismatch relocation (resources on stockpiles that no longer allow them)
-            zones_module.process_filter_mismatch_relocation(jobs_module)
+            # Process filter mismatch relocation (resources on stockpiles that no longer allow them) - throttled to every 10 ticks
+            if tick_count % 10 == 0:
+                zones_module.process_filter_mismatch_relocation(jobs_module)
             
             # Update audio system (check if track finished, play next)
             audio_manager = get_audio_manager()

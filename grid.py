@@ -116,6 +116,10 @@ class Grid:
             for _ in range(self.depth)
         ]
         
+        # Base tiles under furniture - stores original tile type before furniture placement
+        # Key: (x, y, z), Value: original tile type (e.g., "finished_floor", "finished_stage")
+        self.base_tiles: dict[tuple[int, int, int], str] = {}
+        
         # Current view level (for rendering)
         self.current_z = 0
         
@@ -1628,8 +1632,9 @@ class Grid:
                     # Draw stool sprite on top
                     self._try_draw_tile_sprite(surface, "bar_stool", rect, x, y, z)
                 elif tile == "scrap_guitar_placed":
-                    # Draw floor first, then guitar sprite on top
-                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                    # Draw base tile first (stage or floor), then guitar sprite on top
+                    base_tile = self.base_tiles.get((x, y, z), "finished_floor")
+                    if not self._try_draw_tile_sprite(surface, base_tile, rect, x, y, z):
                         base_color = (160, 130, 90)
                         floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
                         pygame.draw.rect(surface, floor_color, rect)
@@ -1637,8 +1642,9 @@ class Grid:
                     # Draw guitar sprite on top
                     self._try_draw_tile_sprite(surface, "scrap_guitar_placed", rect, x, y, z)
                 elif tile == "drum_kit_placed":
-                    # Draw floor first, then drum kit sprite on top
-                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                    # Draw base tile first (stage or floor), then drum kit sprite on top
+                    base_tile = self.base_tiles.get((x, y, z), "finished_floor")
+                    if not self._try_draw_tile_sprite(surface, base_tile, rect, x, y, z):
                         base_color = (160, 130, 90)
                         floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
                         pygame.draw.rect(surface, floor_color, rect)
@@ -1646,8 +1652,9 @@ class Grid:
                     # Draw drum kit sprite on top
                     self._try_draw_tile_sprite(surface, "drum_kit_placed", rect, x, y, z)
                 elif tile == "synth_placed":
-                    # Draw floor first, then synth sprite on top
-                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                    # Draw base tile first (stage or floor), then synth sprite on top
+                    base_tile = self.base_tiles.get((x, y, z), "finished_floor")
+                    if not self._try_draw_tile_sprite(surface, base_tile, rect, x, y, z):
                         base_color = (160, 130, 90)
                         floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
                         pygame.draw.rect(surface, floor_color, rect)
@@ -1655,8 +1662,9 @@ class Grid:
                     # Draw synth sprite on top
                     self._try_draw_tile_sprite(surface, "synth_placed", rect, x, y, z)
                 elif tile == "harmonica_placed":
-                    # Draw floor first, then harmonica sprite on top
-                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                    # Draw base tile first (stage or floor), then harmonica sprite on top
+                    base_tile = self.base_tiles.get((x, y, z), "finished_floor")
+                    if not self._try_draw_tile_sprite(surface, base_tile, rect, x, y, z):
                         base_color = (160, 130, 90)
                         floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
                         pygame.draw.rect(surface, floor_color, rect)
@@ -1664,8 +1672,9 @@ class Grid:
                     # Draw harmonica sprite on top
                     self._try_draw_tile_sprite(surface, "harmonica_placed", rect, x, y, z)
                 elif tile == "amp_placed":
-                    # Draw floor first, then amp sprite on top
-                    if not self._try_draw_tile_sprite(surface, "finished_floor", rect, x, y, z):
+                    # Draw base tile first (stage or floor), then amp sprite on top
+                    base_tile = self.base_tiles.get((x, y, z), "finished_floor")
+                    if not self._try_draw_tile_sprite(surface, base_tile, rect, x, y, z):
                         base_color = (160, 130, 90)
                         floor_color = self._get_tile_color_variation(base_color, x, y, z, 8)
                         pygame.draw.rect(surface, floor_color, rect)

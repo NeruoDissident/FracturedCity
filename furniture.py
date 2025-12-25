@@ -35,9 +35,9 @@ def can_place_furniture(grid: Grid, x: int, y: int, z: int, item_id: str) -> boo
     Returns:
         True if furniture can be placed here
     """
-    # Must be on a floor tile
+    # Must be on a floor or stage tile
     tile = grid.get_tile(x, y, z)
-    if tile not in ("finished_floor", "floor"):
+    if tile not in ("finished_floor", "floor", "finished_stage", "finished_stage_stairs"):
         return False
     
     # Tile must be walkable (not blocked)
@@ -105,6 +105,12 @@ def place_furniture_direct(grid: Grid, x: int, y: int, z: int, item_id: str) -> 
     tile_type = FURNITURE_TILE_MAPPING.get(item_id)
     if tile_type is None:
         return False
+    
+    # Store original tile type before placing furniture (for rendering background)
+    original_tile = grid.get_tile(x, y, z)
+    if original_tile and original_tile not in ("empty", "air"):
+        grid.base_tiles[(x, y, z)] = original_tile
+        print(f"[Furniture] Storing base tile at ({x}, {y}, {z}): {original_tile}")
     
     # Place the furniture tile
     grid.set_tile(x, y, tile_type, z=z)

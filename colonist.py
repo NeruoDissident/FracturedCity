@@ -594,6 +594,11 @@ class Colonist:
         self.stuck_timer = 0
         self.max_stuck_time = 30  # ticks before giving up on current path
         
+        # Path cache - store recently calculated paths to avoid redundant BFS
+        # Key: (target_x, target_y, target_z), Value: (path, tick_calculated)
+        self._path_cache: dict[tuple[int, int, int], tuple[list[tuple[int, int, int]], int]] = {}
+        self._path_cache_max_age = 300  # Cache paths for 5 seconds (300 ticks)
+        
         # Recovery state - brief pause after interruption before returning to idle
         self.recovery_timer = 0
         self.recovery_duration = 15  # ticks to wait in recovery state
@@ -2390,7 +2395,7 @@ class Colonist:
                 self.x = new_x
                 self.y = new_y
 
-    def _chase_combat_target(self, grid: Grid, all_colonists: list = None) -> bool:
+    def _chase_combat_target(self, grid: Grid, all_colonists: list = None, game_tick: int = 0) -> bool:
         """If hostile or in combat, hunt/chase targets.
         
         Returns True if actively chasing (caller should skip other idle behavior).
@@ -2436,7 +2441,7 @@ class Colonist:
         
         # Calculate path if needed
         if not self.current_path:
-            self.current_path = self._calculate_path(grid, target.x, target.y, target.z)
+            self.current_path = self._calculate_path(grid, target.x, target.y, target.z, game_tick)
         
         # Follow path
         if self.current_path:
@@ -2581,8 +2586,11 @@ class Colonist:
         self.current_job = None
         self.current_path = []
 
-    def _calculate_path(self, grid: Grid, target_x: int, target_y: int, target_z: int = 0) -> list[tuple[int, int, int]]:
-        """Calculate path to target using BFS with z-level support.
+    def _calculate_path(self, grid: Grid, target_x: int, target_y: int, target_z: int = 0, game_tick: int = 0) -> list[tuple[int, int, int]]:
+        """Calculate path to target using A* pathfinding with z-level support.
+        
+        Uses Manhattan distance heuristic to guide search toward goal.
+        Path caching avoids redundant searches for recently calculated paths.
         
         Returns list of (x, y, z) positions to follow.
         
@@ -2596,6 +2604,25 @@ class Colonist:
         
         if start == goal:
             return []
+        
+        # Check path cache for recently calculated paths
+        if goal in self._path_cache:
+            cached_path, cached_tick = self._path_cache[goal]
+            # Use cached path if it's recent (within 5 seconds)
+            if game_tick - cached_tick < self._path_cache_max_age:
+                # Verify cached path is still valid from current position
+                # If we're on the cached path, return the remaining portion
+                if start in cached_path:
+                    start_idx = cached_path.index(start)
+                    return cached_path[start_idx + 1:]
+                # Otherwise recalculate (we've deviated from cached path)
+        
+        # Clean old cache entries periodically (every 300 ticks)
+        if game_tick % 300 == 0:
+            expired_goals = [g for g, (_, tick) in self._path_cache.items() 
+                           if game_tick - tick >= self._path_cache_max_age]
+            for g in expired_goals:
+                del self._path_cache[g]
         
         # Get fire escape locations for z-level transitions
         from buildings import get_all_fire_escapes, is_fire_escape_complete
@@ -2614,13 +2641,25 @@ class Colonist:
                     platform_transitions[(px, py, wz)] = wz + 1  # Go up
                     platform_transitions[(px, py, wz + 1)] = wz  # Go down
         
-        # BFS to find shortest path across z-levels
-        from collections import deque
-        queue = deque([(start, [start])])
-        visited = {start}
+        # A* pathfinding to find shortest path across z-levels
+        # Uses Manhattan distance heuristic to prioritize tiles closer to goal
+        import heapq
         
-        while queue:
-            (cx, cy, cz), path = queue.popleft()
+        def manhattan_distance(pos1, pos2):
+            """Calculate Manhattan distance between two 3D positions."""
+            return abs(pos1[0] - pos2[0]) + abs(pos1[1] - pos2[1]) + abs(pos1[2] - pos2[2]) * 10
+        
+        # Priority queue: (f_score, counter, current_pos, path)
+        # f_score = g_score (cost so far) + h_score (heuristic to goal)
+        counter = 0  # Tie-breaker for equal f_scores
+        start_h = manhattan_distance(start, goal)
+        heap = [(start_h, counter, start, [start])]
+        visited = {start}
+        g_scores = {start: 0}  # Cost from start to each position
+        
+        while heap:
+            f_score, _, (cx, cy, cz), path = heapq.heappop(heap)
+            current_g = g_scores[(cx, cy, cz)]
             
             # Regular 2D movement on current z-level
             for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
@@ -2635,11 +2674,22 @@ class Colonist:
                 
                 if is_goal or is_walkable:
                     new_path = path + [(nx, ny, nz)]
+                    new_g = current_g + 1  # Cost to move one tile
+                    
                     if is_goal:
-                        # Return path without start position
-                        return new_path[1:]
-                    visited.add((nx, ny, nz))
-                    queue.append(((nx, ny, nz), new_path))
+                        # Cache the full path before returning
+                        result_path = new_path[1:]
+                        self._path_cache[goal] = (result_path, game_tick)
+                        return result_path
+                    
+                    # Only explore if this is a better path to this neighbor
+                    if (nx, ny, nz) not in g_scores or new_g < g_scores[(nx, ny, nz)]:
+                        g_scores[(nx, ny, nz)] = new_g
+                        h_score = manhattan_distance((nx, ny, nz), goal)
+                        f_score = new_g + h_score
+                        counter += 1
+                        heapq.heappush(heap, (f_score, counter, (nx, ny, nz), new_path))
+                        visited.add((nx, ny, nz))
             
             # Z-level transition via fire escape platforms
             # Fire escapes allow vertical movement between adjacent Z-levels
@@ -2651,15 +2701,27 @@ class Colonist:
                     if other_tile == "fire_escape_platform" or grid.is_walkable(cx, cy, other_z):
                         is_goal = (cx, cy, other_z) == goal
                         new_path = path + [(cx, cy, other_z)]
+                        new_g = current_g + 10  # Z-level transitions cost more (10 tiles worth)
+                        
                         if is_goal:
-                            return new_path[1:]
-                        visited.add((cx, cy, other_z))
-                        queue.append(((cx, cy, other_z), new_path))
+                            # Cache the full path before returning
+                            result_path = new_path[1:]
+                            self._path_cache[goal] = (result_path, game_tick)
+                            return result_path
+                        
+                        # Only explore if this is a better path to this neighbor
+                        if (cx, cy, other_z) not in g_scores or new_g < g_scores[(cx, cy, other_z)]:
+                            g_scores[(cx, cy, other_z)] = new_g
+                            h_score = manhattan_distance((cx, cy, other_z), goal)
+                            f_score = new_g + h_score
+                            counter += 1
+                            heapq.heappush(heap, (f_score, counter, (cx, cy, other_z), new_path))
+                            visited.add((cx, cy, other_z))
         
         # No path found
         return []
 
-    def _move_towards_job(self, grid: Grid) -> None:
+    def _move_towards_job(self, grid: Grid, game_tick: int = 0) -> None:
         """Move along committed path toward job location."""
 
         if self.current_job is None:
@@ -2688,7 +2750,7 @@ class Colonist:
         
         # Calculate path if we don't have one
         if not self.current_path:
-            self.current_path = self._calculate_path(grid, target_x, target_y, target_z)
+            self.current_path = self._calculate_path(grid, target_x, target_y, target_z, game_tick)
             self.stuck_timer = 0
             
             if not self.current_path:
@@ -3154,7 +3216,7 @@ class Colonist:
                 self.current_job = None
                 self.state = "idle"
 
-    def _haul_to_destination(self, grid: Grid) -> None:
+    def _haul_to_destination(self, grid: Grid, game_tick: int = 0) -> None:
         """Move towards haul destination and deliver item."""
         if self.current_job is None or self.carrying is None:
             # Something went wrong - clean up
@@ -3295,6 +3357,13 @@ class Colonist:
                     tile_type = f"{furniture_item_id}_placed"
                 else:
                     tile_type = furniture_item_id or "gutter_slab"
+                
+                # Store original tile before placing furniture (for rendering background)
+                original_tile = grid.get_tile(dest_x, dest_y, dest_z)
+                if original_tile and original_tile not in ("empty", "air"):
+                    grid.base_tiles[(dest_x, dest_y, dest_z)] = original_tile
+                    print(f"[Furniture] Storing base tile at ({dest_x}, {dest_y}, {dest_z}): {original_tile}")
+                
                 grid.set_tile(dest_x, dest_y, tile_type, z=dest_z)
                 item_data = self.carrying.get("item", {})
                 item_name = item_data.get("name", furniture_item_id or "furniture")
@@ -3322,7 +3391,7 @@ class Colonist:
         
         # Calculate path if needed
         if not self.current_path:
-            self.current_path = self._calculate_path(grid, dest_x, dest_y, dest_z)
+            self.current_path = self._calculate_path(grid, dest_x, dest_y, dest_z, game_tick)
             self.stuck_timer = 0
             if not self.current_path:
                 self.stuck_timer += 1
@@ -3526,7 +3595,7 @@ class Colonist:
 
     # --- Crafting behavior ---------------------------------------------------
 
-    def _crafting_fetch_materials(self, grid: Grid) -> None:
+    def _crafting_fetch_materials(self, grid: Grid, game_tick: int = 0) -> None:
         """Fetch materials from stockpile for crafting job."""
         if self.current_job is None:
             self.state = "idle"
@@ -3575,13 +3644,13 @@ class Colonist:
             
             # Move towards workstation
             if not self.current_path:
-                self.current_path = self._calculate_path(grid, job.x, job.y, job.z)
+                self.current_path = self._calculate_path(grid, job.x, job.y, job.z, game_tick)
                 if not self.current_path:
                     # Can't reach - try adjacent tile
                     for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
                         adj_x, adj_y = job.x + dx, job.y + dy
                         if grid.is_walkable(adj_x, adj_y, job.z):
-                            self.current_path = self._calculate_path(grid, adj_x, adj_y, job.z)
+                            self.current_path = self._calculate_path(grid, adj_x, adj_y, job.z, game_tick)
                             if self.current_path:
                                 break
             
@@ -3666,7 +3735,7 @@ class Colonist:
                 
                 # Move towards stockpile
                 if not self.current_path or self.current_path[-1] != (source_x, source_y, source_z):
-                    self.current_path = self._calculate_path(grid, source_x, source_y, source_z)
+                    self.current_path = self._calculate_path(grid, source_x, source_y, source_z, game_tick)
                 
                 if self.current_path:
                     next_pos = self.current_path[0]
@@ -3682,7 +3751,7 @@ class Colonist:
             ws["progress"] = 0
         self.state = "crafting_work"
 
-    def _crafting_work_at_bench(self, grid: Grid) -> None:
+    def _crafting_work_at_bench(self, grid: Grid, game_tick: int = 0) -> None:
         """Work at workstation to produce output."""
         if self.current_job is None:
             self.state = "idle"
@@ -3711,7 +3780,7 @@ class Colonist:
                 for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
                     adj_x, adj_y = job.x + dx, job.y + dy
                     if grid.is_walkable(adj_x, adj_y, job.z):
-                        self.current_path = self._calculate_path(grid, adj_x, adj_y, job.z)
+                        self.current_path = self._calculate_path(grid, adj_x, adj_y, job.z, game_tick)
                         if self.current_path:
                             break
             
@@ -3832,9 +3901,9 @@ class Colonist:
         
         # Hungry (>70) and idle - try to find food
         if self.hunger > 70 and self.state == "idle" and self.current_job is None:
-            self._try_eat_food(grid)
+            self._try_eat_food(grid, game_tick)
     
-    def _try_eat_food(self, grid: Grid) -> None:
+    def _try_eat_food(self, grid: Grid, game_tick: int = 0) -> None:
         """Try to find and eat a cooked meal."""
         import zones
         
@@ -3856,13 +3925,13 @@ class Colonist:
                 print(f"[Eat] Colonist ate a meal at ({mx},{my}), hunger now {self.hunger:.0f}")
         else:
             # Need to walk to food - enter eating state
-            self.current_path = self._calculate_path(grid, mx, my, mz)
+            self.current_path = self._calculate_path(grid, mx, my, mz, game_tick)
             if self.current_path:
                 self.state = "eating"
                 self._eating_target = (mx, my, mz)
                 print(f"[Hunger] Colonist going to eat at ({mx},{my},{mz})")
     
-    def _move_to_eat(self, grid: Grid) -> None:
+    def _move_to_eat(self, grid: Grid, game_tick: int = 0) -> None:
         """Move towards food and eat when arrived."""
         import zones
         from buildings import is_door, is_door_open, open_door, is_window, is_window_open, open_window
@@ -3894,7 +3963,7 @@ class Colonist:
         
         # Need path?
         if not self.current_path:
-            self.current_path = self._calculate_path(grid, mx, my, mz)
+            self.current_path = self._calculate_path(grid, mx, my, mz, game_tick)
             if not self.current_path:
                 # Can't reach food
                 print(f"[Eat] Can't reach food at ({mx},{my},{mz})")
@@ -4003,7 +4072,7 @@ class Colonist:
                 return
             else:
                 # Walk to bed
-                self.current_path = self._calculate_path(grid, bx, by, bz)
+                self.current_path = self._calculate_path(grid, bx, by, bz, game_tick)
                 if self.current_path:
                     self.sleep_target = bed_pos
                     self.state = "moving_to_sleep"
@@ -4101,7 +4170,7 @@ class Colonist:
             if best_bed and best_score > -10:
                 if assign_colonist_to_bed(id(self), *best_bed):
                     bx, by, bz = best_bed
-                    self.current_path = self._calculate_path(grid, bx, by, bz)
+                    self.current_path = self._calculate_path(grid, bx, by, bz, game_tick)
                     if self.current_path:
                         self.sleep_target = best_bed
                         self.state = "moving_to_sleep"
@@ -4160,7 +4229,7 @@ class Colonist:
         if game_tick > 0 and game_tick % 1800 == 0:
             self._check_injury_thoughts(game_tick)
 
-    def _move_to_sleep(self, grid: Grid) -> None:
+    def _move_to_sleep(self, grid: Grid, game_tick: int = 0) -> None:
         """Move towards sleep target (bed)."""
         if self.sleep_target is None:
             self.state = "idle"
@@ -4185,7 +4254,7 @@ class Colonist:
         
         if not self.current_path:
             # Recalculate path
-            self.current_path = self._calculate_path(grid, bx, by, bz)
+            self.current_path = self._calculate_path(grid, bx, by, bz, game_tick)
             if not self.current_path:
                 # Can't reach bed - give up and sleep on ground
                 self.sleep_target = None
@@ -4485,7 +4554,7 @@ class Colonist:
             if self.current_path and not self._check_path_still_valid(grid):
                 # Path blocked - try to recalculate
                 if self.current_job:
-                    new_path = self._calculate_path(grid, self.current_job.x, self.current_job.y, self.current_job.z)
+                    new_path = self._calculate_path(grid, self.current_job.x, self.current_job.y, self.current_job.z, game_tick)
                     if new_path:
                         self.current_path = new_path
                     else:
@@ -4495,24 +4564,24 @@ class Colonist:
 
         if self.state == "idle":
             # If chasing a combat target, don't take jobs or wander
-            if not self._chase_combat_target(grid, self._all_colonists):
+            if not self._chase_combat_target(grid, self._all_colonists, game_tick):
                 self._try_take_job(grid)
                 if self.state == "idle":
                     self._maybe_wander_when_idle(grid)
         elif self.state == "moving_to_job":
-            self._move_towards_job(grid)
+            self._move_towards_job(grid, game_tick)
         elif self.state == "working":
             self._work_on_job(grid)
         elif self.state == "hauling":
-            self._haul_to_destination(grid)
+            self._haul_to_destination(grid, game_tick)
         elif self.state == "crafting_fetch":
-            self._crafting_fetch_materials(grid)
+            self._crafting_fetch_materials(grid, game_tick)
         elif self.state == "crafting_work":
-            self._crafting_work_at_bench(grid)
+            self._crafting_work_at_bench(grid, game_tick)
         elif self.state == "eating":
-            self._move_to_eat(grid)
+            self._move_to_eat(grid, game_tick)
         elif self.state == "moving_to_sleep":
-            self._move_to_sleep(grid)
+            self._move_to_sleep(grid, game_tick)
         elif self.state == "sleeping":
             # Sleep is handled in _update_tiredness, just pass here
             pass
@@ -4697,11 +4766,30 @@ def create_colonists(count: int, spawn_x: int = None, spawn_y: int = None) -> li
 
 
 def update_colonists(colonists: Iterable[Colonist], grid: Grid, game_tick: int = 0) -> None:
-    """Advance all colonists one simulation step."""
-
+    """Advance colonists one simulation step with staggered updates.
+    
+    Performance optimization: Updates 1/3 of colonists per tick in round-robin fashion.
+    Each colonist still updates 20 times per second (every 3 ticks) which is plenty responsive.
+    This reduces CPU usage by ~66% on colonist updates.
+    """
     colonist_list = list(colonists)  # Convert to list for environment sampling
-    for c in colonist_list:
-        c.update(grid, colonist_list, game_tick)
+    
+    # Stagger updates: only update colonists whose index matches current tick modulo 3
+    # Tick 0: update colonists 0, 3, 6, 9...
+    # Tick 1: update colonists 1, 4, 7, 10...
+    # Tick 2: update colonists 2, 5, 8, 11...
+    stagger_group = game_tick % 3
+    
+    for i, c in enumerate(colonist_list):
+        # Skip sleeping colonists entirely (they don't need frequent updates)
+        if c.is_sleeping:
+            # Still update sleeping colonists occasionally (every 30 ticks for sleep mechanics)
+            if game_tick % 30 != 0:
+                continue
+        
+        # Update colonists in this tick's stagger group
+        if i % 3 == stagger_group:
+            c.update(grid, colonist_list, game_tick)
 
 
 def draw_colonists(
