@@ -606,13 +606,13 @@ def _spawn_cluster(grid, center_x: int, center_y: int, node_type: str, cluster_s
 def _generate_street_grid(grid) -> tuple[list[tuple[int, int]], list[dict]]:
     """Generate a grid of streets across the map.
     
-    Creates horizontal and vertical streets (2-3 tiles wide) at regular intervals.
+    Creates horizontal and vertical streets (1 tile wide with autotiling) at regular intervals.
     Returns (street_tiles, street_segments) where street_segments contain metadata.
     """
     streets = []
     street_segments = []  # List of {type: 'horizontal'/'vertical', x, y, length}
-    street_width = 3  # Streets are 3 tiles wide
-    block_size = 40   # Blocks are ~40 tiles apart
+    street_width = 1  # Streets are 1 tile wide (autotiled for corners/intersections)
+    block_size = 15   # Blocks are ~15 tiles apart (tighter urban density)
     
     # Horizontal streets (running east-west)
     for y in range(20, GRID_H, block_size):
@@ -661,8 +661,8 @@ def _identify_lots(grid, streets: list[tuple[int, int]]) -> list[dict]:
     lots = []
     
     # Simple approach: calculate lots based on block_size
-    street_width = 3
-    block_size = 40
+    street_width = 1
+    block_size = 15
     
     # Generate lots between streets
     for y_start in range(20, GRID_H - block_size, block_size):
@@ -735,15 +735,15 @@ def _spawn_ruins_in_lots(grid, lots: list[dict], colonist_spawn: tuple[int, int]
         if dist < 20:  # Too close to spawn
             continue
         
-        # Random building size within lot (leave margins)
-        max_width = min(lot["width"] - 4, 16)
-        max_height = min(lot["height"] - 4, 16)
+        # Random building size within lot (leave margins) - scaled down
+        max_width = min(lot["width"] - 2, 8)
+        max_height = min(lot["height"] - 2, 8)
         
-        if max_width < 6 or max_height < 6:
+        if max_width < 3 or max_height < 3:
             continue  # Lot too small
         
-        width = random.randint(6, max_width)
-        height = random.randint(6, max_height)
+        width = random.randint(3, max_width)
+        height = random.randint(3, max_height)
         
         # Center building in lot
         x = lot["x"] + (lot["width"] - width) // 2
@@ -888,10 +888,10 @@ def _place_building_row(grid, x: int, y: int, length: int, direction: str, colon
     if direction in ["north", "south"]:
         # Horizontal row of buildings
         pos = 0
-        while pos < length - 5:
-            # Random building width (6-12 tiles)
-            width = random.randint(6, 12)
-            depth = random.randint(6, 10)  # Building depth into lot
+        while pos < length - 3:
+            # Random building width (3-6 tiles) - scaled down for tighter streets
+            width = random.randint(3, 6)
+            depth = random.randint(3, 5)  # Building depth into lot
             
             # Check distance from colonist spawn
             bldg_center_x = x + pos + width // 2
@@ -916,10 +916,10 @@ def _place_building_row(grid, x: int, y: int, length: int, direction: str, colon
     else:  # "east" or "west"
         # Vertical row of buildings
         pos = 0
-        while pos < length - 5:
-            # Random building dimensions
-            height = random.randint(6, 12)
-            depth = random.randint(6, 10)
+        while pos < length - 3:
+            # Random building dimensions - scaled down for tighter streets
+            height = random.randint(3, 6)
+            depth = random.randint(3, 5)
             
             # Check distance from colonist spawn
             bldg_center_x = x if direction == "west" else x + depth // 2
@@ -1347,9 +1347,9 @@ def _spawn_ruined_buildings(grid, colonist_center_x: int, colonist_center_y: int
     num_ruins = random.randint(4, 6)  # More ruins for larger map
     
     for _ in range(num_ruins):
-        # Random building size (medium to large)
-        width = random.randint(6, 14)
-        height = random.randint(6, 14)
+        # Random building size (scaled down for tighter streets)
+        width = random.randint(3, 7)
+        height = random.randint(3, 7)
         
         # Find a valid location (needs enough empty space, away from colonists)
         for attempt in range(50):
@@ -1463,78 +1463,76 @@ def get_colonist_spawn_location() -> tuple[int, int]:
 
 
 def spawn_resource_nodes(grid, count: int = 40) -> tuple[int, int]:
-    """Generate a dense ruined city with buildings along streets and back lots.
+    """Generate a procedural ruined cyberpunk city.
     
-    Creates a believable abandoned city:
-    - Street grid with sidewalks
-    - Buildings along both sides of streets (intact/partial/ruined)
-    - Back lots behind buildings with resource clusters
-    - Food only spawns inside buildings
-    - Scrap spawns inside buildings and in exterior piles
-    - Decorative environment tiles
+    NEW SYSTEM: Uses proper city generation with:
+    - Road networks with real intersections
+    - Varied city blocks
+    - Realistic building placement
+    - Organic urban structure
     
     Returns (spawn_x, spawn_y) for colonist placement.
     """
     global _COLONIST_SPAWN_LOCATION
     
-    # Step 1: Generate street grid
-    streets, street_segments = _generate_street_grid(grid)
+    # Use new city generator
+    from city_generator import CityGenerator
     
-    # Step 2: Find colonist spawn near center street intersection
-    colonist_spawn = _find_colonist_spawn_location(streets)
-    _COLONIST_SPAWN_LOCATION = colonist_spawn
+    city_gen = CityGenerator(grid)
+    spawn_x, spawn_y = city_gen.generate_city()
     
-    # Step 3: Generate buildings along both sides of streets
-    buildings_count, food_count, scrap_in_buildings = _generate_buildings_along_streets(grid, street_segments, colonist_spawn)
+    _COLONIST_SPAWN_LOCATION = (spawn_x, spawn_y)
     
-    # Step 4: Generate sidewalks along streets
-    sidewalk_count = _generate_sidewalks(grid, streets)
+    # Add resource nodes to buildings (integrate with existing resource system)
+    _spawn_resources_in_city(grid, city_gen)
     
-    # Step 5: Identify back lots behind buildings
-    lots = _generate_back_lots(grid, street_segments)
-    
-    # Step 6: Spawn resource clusters in back lots (2x density)
-    wood_count = _spawn_wood_clusters(grid, lots, colonist_spawn)
-    mineral_count = _spawn_mineral_clusters(grid, lots, colonist_spawn)
-    scrap_exterior = _spawn_exterior_scrap(grid, lots)
-    
-    # Step 7: Add decorative environment tiles
-    debris_count = _spawn_debris(grid, lots)
-    weeds_count = _spawn_weeds(grid, lots)
-    props_count = _spawn_props(grid, streets, lots)
-    
-    # Step 8: Add road damage (cracks, scars, rips) focused near buildings
-    road_damage_count, road_mineral_count = _spawn_road_damage(grid, streets, street_segments)
-    mineral_count += road_mineral_count  # Add minerals spawned near ripped streets
-    
-    # Step 9: Generate organic terrain patches on remaining empty tiles
-    from terrain_gen import generate_terrain_patches
-    generate_terrain_patches(grid)
-    
-    total_scrap = scrap_in_buildings + scrap_exterior
-    
-    print(f"[WorldGen] ═══════════════════════════════════════")
-    print(f"[WorldGen] DENSE CITY GENERATION COMPLETE")
-    print(f"[WorldGen] ═══════════════════════════════════════")
-    print(f"[WorldGen] Streets: {len(street_segments)} segments, {len(streets)} tiles")
-    print(f"[WorldGen] Sidewalks: {sidewalk_count} tiles")
-    print(f"[WorldGen] Road Damage: {road_damage_count} damaged tiles")
-    print(f"[WorldGen] Buildings: {buildings_count} structures along streets")
-    print(f"[WorldGen] Back Lots: {len(lots)} resource zones")
-    print(f"[WorldGen] ───────────────────────────────────────")
-    print(f"[WorldGen] FOOD: {food_count} nodes (inside buildings only)")
-    print(f"[WorldGen] SCRAP: {total_scrap} piles ({scrap_in_buildings} interior, {scrap_exterior} exterior)")
-    print(f"[WorldGen] WOOD: {wood_count} nodes in back lots")
-    print(f"[WorldGen] MINERALS: {mineral_count} nodes (lots + road damage)")
-    print(f"[WorldGen] ───────────────────────────────────────")
-    print(f"[WorldGen] Decorative: {debris_count} debris, {weeds_count} weeds, {props_count} props")
-    print(f"[WorldGen] Colonist spawn: ({colonist_spawn[0]}, {colonist_spawn[1]})")
-    print(f"[WorldGen] ═══════════════════════════════════════")
+    # Generate organic terrain patches on remaining empty tiles
+    # TODO: Re-enable when terrain_gen module is created
+    # from terrain_gen import generate_terrain_patches
+    # generate_terrain_patches(grid)
     
     # Create starter stockpile near spawn
-    _create_starter_stockpile(grid, colonist_spawn)
+    _create_starter_stockpile(grid, (spawn_x, spawn_y))
     
-    return colonist_spawn
+    return spawn_x, spawn_y
+
+
+def _spawn_resources_in_city(grid, city_gen):
+    """Add resource nodes throughout the generated city."""
+    # Scan for buildings and add resources
+    wood_count = 0
+    scrap_count = 0
+    mineral_count = 0
+    food_count = 0
+    
+    # Add scattered resources in empty areas
+    for _ in range(100):
+        x = random.randint(10, GRID_W - 10)
+        y = random.randint(10, GRID_H - 10)
+        
+        tile = grid.get_tile(x, y, 0)
+        
+        # Add resources to appropriate tiles
+        if tile == "empty" and (x, y) not in _RESOURCE_NODES:
+            resource_type = random.choice(["tree", "mineral_node", "scrap_pile"])
+            if resource_type == "tree":
+                if _place_node(grid, x, y, "tree"):
+                    wood_count += 1
+            elif resource_type == "mineral_node":
+                if _place_node(grid, x, y, "mineral_node"):
+                    mineral_count += 1
+            elif resource_type == "scrap_pile":
+                if spawn_salvage_object(x, y, "salvage_pile"):
+                    grid.set_tile(x, y, "salvage_object", z=0)
+                    scrap_count += 1
+        
+        # Add food inside buildings
+        elif tile == "finished_floor" and (x, y) not in _RESOURCE_NODES:
+            if random.random() < 0.05:  # 5% chance
+                if _place_node(grid, x, y, "food_plant"):
+                    food_count += 1
+    
+    print(f"[WorldGen] Resources: {wood_count} wood, {scrap_count} scrap, {mineral_count} mineral, {food_count} food")
 
 
 def _create_starter_stockpile(grid, colonist_spawn: tuple[int, int]) -> None:

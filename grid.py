@@ -86,10 +86,15 @@ class Grid:
     - z=1: Rooftop level (roof tiles from enclosed rooms)
     """
 
-    def __init__(self) -> None:
-        self.width = GRID_W
-        self.height = GRID_H
-        self.depth = GRID_Z  # Number of Z-levels
+    def __init__(self, width: int = GRID_W, height: int = GRID_H, depth: int = GRID_Z):
+        """Initialize a Grid with the given dimensions."""
+        self.width = width
+        self.height = height
+        self.depth = depth
+        self.current_z = 0
+        
+        # Callback for tile changes (used by Arcade renderer)
+        self.on_tile_change = None  # Function(x, y, z) called when tile changes
         
         # 3D tile array: tiles[z][y][x]
         self.tiles: list[list[list[str]]] = [
@@ -119,6 +124,10 @@ class Grid:
         # Base tiles under furniture - stores original tile type before furniture placement
         # Key: (x, y, z), Value: original tile type (e.g., "finished_floor", "finished_stage")
         self.base_tiles: dict[tuple[int, int, int], str] = {}
+        
+        # Overlay tiles (dirt, grass, rubble) - separate from base ground layer
+        # Key: (x, y, z), Value: overlay tile type (e.g., "ground_dirt_overlay_autotile")
+        self.overlay_tiles: dict[tuple[int, int, int], str] = {}
         
         # Current view level (for rendering)
         self.current_z = 0
@@ -175,9 +184,22 @@ class Grid:
         """Set the logical value of a tile if coordinates are valid.
         
         Automatically updates walkability for building tiles and initializes environmental parameters.
+        Calls on_tile_change callback if set (for Arcade renderer updates).
+        
+        Overlay tiles (dirt, grass, rubble) are stored separately and don't replace base tiles.
         """
         if self.in_bounds(x, y, z):
-            self.tiles[z][y][x] = value
+            # Check if this is an overlay tile (dirt, grass, rubble)
+            if "overlay_autotile" in value:
+                # Store in overlay layer, don't replace base tile
+                self.overlay_tiles[(x, y, z)] = value
+            else:
+                # Regular tile - store in main tile array
+                self.tiles[z][y][x] = value
+            
+            # Notify renderer of tile change (Arcade only)
+            if self.on_tile_change:
+                self.on_tile_change(x, y, z)
             # Only finished buildings/walls block movement, not those under construction
             # Doors are handled specially - they can be opened
             # Fire escapes are walkable (they're transition points)
@@ -241,10 +263,18 @@ class Grid:
         self.set_env_param(x, y, z, "exit_count", exit_count)
 
     def get_tile(self, x: int, y: int, z: int = 0) -> str | None:
-        """Get the tile value or None if out of bounds."""
+        """Get the tile value or None if out of bounds.
+        
+        Returns base tile (does not include overlays).
+        Use get_overlay_tile() to check for overlay tiles.
+        """
         if self.in_bounds(x, y, z):
             return self.tiles[z][y][x]
         return None
+    
+    def get_overlay_tile(self, x: int, y: int, z: int = 0) -> str | None:
+        """Get the overlay tile at this position, or None if no overlay exists."""
+        return self.overlay_tiles.get((x, y, z))
 
     def is_walkable(self, x: int, y: int, z: int = 0) -> bool:
         """Return True if colonists can walk on this tile."""

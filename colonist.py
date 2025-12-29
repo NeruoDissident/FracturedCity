@@ -3901,7 +3901,7 @@ class Colonist:
         
         # Hungry (>70) and idle - try to find food
         if self.hunger > 70 and self.state == "idle" and self.current_job is None:
-            self._try_eat_food(grid, game_tick)
+            self._try_eat_food(grid, self._game_tick)
     
     def _try_eat_food(self, grid: Grid, game_tick: int = 0) -> None:
         """Try to find and eat a cooked meal."""

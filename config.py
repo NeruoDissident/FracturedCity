@@ -6,13 +6,13 @@ simulation systems and rendering can share a single source of truth.
 
 # --- GRID / SCREEN ------------------------------------------------------------
 
-TILE_SIZE = 32
+TILE_SIZE = 64  # Matches sprite size - no scaling needed!
 # Grid dimensions (tiles) - LARGE MAP
 GRID_W = 200
 GRID_H = 200
 GRID_Z = 10  # Number of Z-levels (0 = ground, 1+ = upper floors)
 
-# Screen dimensions - FULL HD (increase for 4K monitors)
+# Screen dimensions - 1080p (fits all screens)
 SCREEN_W = 1920
 SCREEN_H = 1080
 
