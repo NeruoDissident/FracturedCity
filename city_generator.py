@@ -455,36 +455,29 @@ class CityGenerator:
                 
                 tile = self.grid.get_tile(x, y, 0)
                 if tile == "empty" and (x, y) not in self.road_network.roads:
-                    # Fill with concrete (no dirt for now)
+                    # Fill with concrete base
                     self.grid.set_tile(x, y, "ground_concrete_0", z=0)
                     tiles_placed += 1
         
-        # TEST: Place single dirt patch at center of map
-        patch_center_x = 100
-        patch_center_y = 100
-        patch_radius = 5
+        # Generate organic dirt patches using terrain overlay generator
+        print("[CityGen] Generating organic dirt patches...")
+        from terrain_overlay_generator import TerrainOverlayGenerator
+        overlay_gen = TerrainOverlayGenerator(self.grid)
         
-        print(f"[CityGen] TEST: Placing single dirt patch at ({patch_center_x}, {patch_center_y}) with radius {patch_radius}")
+        dirt_tiles = overlay_gen.generate_overlay(
+            overlay_type="ground_dirt_overlay_autotile",
+            num_patches=(8, 15),  # More patches for city environment
+            radius_range=(8, 20),  # Varied sizes
+            strength_range=(0.5, 0.9),
+            threshold_base=0.4,
+            threshold_variance=0.3
+        )
         
-        dirt_tiles = []
-        for dx in range(-patch_radius, patch_radius + 1):
-            for dy in range(-patch_radius, patch_radius + 1):
-                # Circular shape
-                if dx*dx + dy*dy > patch_radius*patch_radius:
-                    continue
-                
-                x = patch_center_x + dx
-                y = patch_center_y + dy
-                
-                if not self.grid.in_bounds(x, y, 0):
-                    continue
-                
-                # Place dirt overlay (roads will render on top)
-                self.grid.set_tile(x, y, "ground_dirt_overlay_autotile", z=0)
-                dirt_tiles.append((x, y))
+        # Place dirt tiles in overlay layer
+        for x, y in dirt_tiles:
+            self.grid.overlay_tiles[(x, y, 0)] = "ground_dirt_overlay_autotile"
         
-        print(f"[CityGen] Placed {len(dirt_tiles)} dirt tiles in circular pattern")
-        print(f"[CityGen] Dirt tile positions: {dirt_tiles[:10]}...")  # Show first 10
+        print(f"[CityGen] Placed {len(dirt_tiles)} dirt overlay tiles in organic patterns")
         
         return tiles_placed
     
@@ -637,7 +630,7 @@ class CityGenerator:
                 if entrance_side == "west" and dx == 0 and dy == entrance_pos:
                     continue
                 
-                self.grid.set_tile(x + dx, y + dy, "finished_wall", z=0)
+                self.grid.set_tile(x + dx, y + dy, "finished_wall_autotile", z=0)
     
     def _place_partial_walls(self, x: int, y: int, width: int, height: int):
         """Place walls with gaps (damaged building)."""
@@ -651,7 +644,7 @@ class CityGenerator:
                 if random.random() < 0.4:
                     continue
                 
-                self.grid.set_tile(x + dx, y + dy, "finished_wall", z=0)
+                self.grid.set_tile(x + dx, y + dy, "finished_wall_autotile", z=0)
     
     def _place_ruined_walls(self, x: int, y: int, width: int, height: int):
         """Place heavily damaged walls (mostly salvage objects)."""
@@ -667,7 +660,7 @@ class CityGenerator:
                 
                 # Mix of walls and salvage
                 if random.random() < 0.5:
-                    self.grid.set_tile(x + dx, y + dy, "finished_wall", z=0)
+                    self.grid.set_tile(x + dx, y + dy, "finished_wall_autotile", z=0)
                 else:
                     self.grid.set_tile(x + dx, y + dy, "salvage_object", z=0)
     

@@ -113,10 +113,10 @@ class FracturedCityWindow(arcade.Window):
         # Create grid (uses global config values)
         self.grid = Grid()
         
-        # Generate ORGANIC TEST WORLD (concrete + irregular dirt patches)
-        from worldgen_organic import OrganicWorldGen
-        worldgen = OrganicWorldGen(self.grid)
-        spawn_x, spawn_y = worldgen.generate()
+        # Generate CITY WORLD (roads, buildings, dirt patches)
+        from city_generator import CityGenerator
+        worldgen = CityGenerator(self.grid)
+        spawn_x, spawn_y = worldgen.generate_city()
         
         print(f"[Arcade] World generated with colonist spawn at ({spawn_x}, {spawn_y})")
         
@@ -129,6 +129,10 @@ class FracturedCityWindow(arcade.Window):
         
         # Create colonists at spawn location (from worldgen)
         self.colonists = create_colonists(COLONIST_COUNT, spawn_x, spawn_y)
+        
+        # Create starter stockpile with resources (uses existing system)
+        from resources import _create_starter_stockpile
+        _create_starter_stockpile(self.grid, (spawn_x, spawn_y))
         
         # Create colonist renderer and add all colonists
         self.colonist_renderer = ColonistRenderer()

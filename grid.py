@@ -200,11 +200,23 @@ class Grid:
             # Notify renderer of tile change (Arcade only)
             if self.on_tile_change:
                 self.on_tile_change(x, y, z)
+                
+                # For autotiled tiles (walls, roads), also update neighbors so they recalculate variants
+                # This ensures corners/T-junctions update when adjacent tiles are placed
+                if "_autotile" in value or "wall" in value or "road" in value or "street" in value:
+                    # Update 4 cardinal neighbors
+                    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+                        nx, ny = x + dx, y + dy
+                        if self.in_bounds(nx, ny, z):
+                            neighbor_tile = self.get_tile(nx, ny, z)
+                            # Only update if neighbor is also an autotiled type
+                            if neighbor_tile and ("_autotile" in neighbor_tile or "wall" in neighbor_tile or "road" in neighbor_tile or "street" in neighbor_tile):
+                                self.on_tile_change(nx, ny, z)
             # Only finished buildings/walls block movement, not those under construction
             # Doors are handled specially - they can be opened
             # Fire escapes are walkable (they're transition points)
             # roof tiles are NOT walkable - must be converted to roof_access first
-            if value in ("finished_building", "finished_wall", "finished_wall_advanced", "roof", "finished_salvagers_bench", "finished_generator", "finished_stove", "finished_gutter_forge", "finished_skinshop_loom", "finished_cortex_spindle", "finished_barracks"):
+            if value in ("finished_building", "finished_wall", "finished_wall_autotile", "finished_wall_advanced", "roof", "finished_salvagers_bench", "finished_generator", "finished_stove", "finished_gutter_forge", "finished_skinshop_loom", "finished_cortex_spindle", "finished_barracks"):
                 self.walkable[z][y][x] = False
             elif value == "finished_window":
                 # Windows are passable (like doors) - colonists can climb through

@@ -993,7 +993,7 @@ def _place_single_building(grid, x: int, y: int, width: int, height: int) -> tup
                 if entrance_side == "west" and dx == 0 and dy == entrance_pos:
                     continue
                 
-                grid.set_tile(x + dx, y + dy, "finished_wall", z=0)
+                grid.set_tile(x + dx, y + dy, "finished_wall_autotile", z=0)
     
     elif condition == "partial":
         # Partial walls (50% coverage, salvageable)

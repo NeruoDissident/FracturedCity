@@ -2887,7 +2887,7 @@ class Colonist:
                 # Check what type of construction this was
                 current_tile = grid.get_tile(job.x, job.y, job.z)
                 if current_tile == "wall":
-                    grid.set_tile(job.x, job.y, "finished_wall", z=job.z)
+                    grid.set_tile(job.x, job.y, "finished_wall_autotile", z=job.z)
                 elif current_tile == "wall_advanced":
                     grid.set_tile(job.x, job.y, "finished_wall_advanced", z=job.z)
                 elif current_tile == "door":

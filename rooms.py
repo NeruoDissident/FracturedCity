@@ -563,7 +563,7 @@ def _is_enclosing_tile(grid, x: int, y: int, z: int = 0) -> bool:
     # Walls, doors, windows, and window_tiles form room boundaries
     # window_tile is a passable wall (fire escape window) but still counts as wall for room detection
     # finished_window is a regular window that blocks movement but encloses rooms
-    return tile in ("wall", "finished_wall", "wall_advanced", "finished_wall_advanced", "door", "window_tile", "window", "finished_window")
+    return tile in ("wall", "finished_wall", "finished_wall_autotile", "wall_advanced", "finished_wall_advanced", "door", "window_tile", "window", "finished_window")
 
 
 def _is_interior_tile(grid, x: int, y: int, z: int = 0) -> bool:
@@ -577,7 +577,7 @@ def _is_interior_tile(grid, x: int, y: int, z: int = 0) -> bool:
         return False
     tile = grid.get_tile(x, y, z)
     # Boundary tiles are NOT interior
-    if tile in ("wall", "finished_wall", "wall_advanced", "finished_wall_advanced", 
+    if tile in ("wall", "finished_wall", "finished_wall_autotile", "wall_advanced", "finished_wall_advanced", 
                 "door", "window_tile", "window", "finished_window"):
         return False
     # Everything else can be interior (grass, empty, floor, roof_access, etc.)
@@ -833,7 +833,7 @@ def _is_wall_or_corner(grid, x: int, y: int, z: int) -> bool:
     if not grid.in_bounds(x, y, z):
         return False
     tile = grid.get_tile(x, y, z)
-    return tile in ("wall", "finished_wall", "wall_advanced", "finished_wall_advanced")
+    return tile in ("wall", "finished_wall", "finished_wall_autotile", "wall_advanced", "finished_wall_advanced")
 
 
 def _find_room_bounds(grid, x: int, y: int, z: int, max_search: int = 20) -> Optional[Tuple[int, int, int, int]]:

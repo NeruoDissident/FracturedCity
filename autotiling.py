@@ -238,9 +238,10 @@ AUTOTILE_GROUPS = {
     "street": {"street", "road", "street_autotile"},
     "road": {"street", "road", "street_autotile"},
     
-    # Walls connect to walls
-    "finished_wall": {"finished_wall"},
-    "wall": {"wall", "finished_wall"},
+    # Walls connect to walls (autotiled)
+    "finished_wall": {"finished_wall", "finished_wall_autotile"},
+    "wall": {"wall", "finished_wall", "finished_wall_autotile"},
+    "finished_wall_autotile": {"finished_wall", "finished_wall_autotile"},
     
     # Bridges connect to bridges
     "finished_bridge": {"finished_bridge"},
@@ -269,5 +270,6 @@ def get_connection_set(tile_type: str) -> Set[str]:
 def should_autotile(tile_type: str) -> bool:
     """Check if this tile type should use autotiling."""
     # Autotile roads, walls, bridges, floors, and ground overlays
-    autotile_keywords = ["street", "road", "wall", "bridge", "floor", "path", "overlay_autotile"]
+    # Walls use autotiling when they have _autotile suffix
+    autotile_keywords = ["street", "road", "bridge", "path", "overlay_autotile", "_autotile"]
     return any(keyword in tile_type for keyword in autotile_keywords)

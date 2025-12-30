@@ -21,6 +21,13 @@ class GridRenderer:
         # Sprite list for all tiles (GPU batching)
         self.tile_sprite_list = arcade.SpriteList(use_spatial_hash=True)
         
+        # Cached sprite lists for each Z-level (for performance)
+        # Key: z_level, Value: SpriteList
+        self.z_level_cache = {}
+        
+        # Current Z-level being viewed
+        self.current_z = 0
+        
         # Texture cache to avoid reloading same sprites
         self.texture_cache = {}
         
@@ -34,6 +41,51 @@ class GridRenderer:
         For autotiled tiles (roads, walls), calculates variant based on neighbors.
         Tries variations in order: 0-8, 0-7, 0-6, 0-4, 0-3, 0-2, 0-1, then base sprite.
         """
+        # Map construction tiles to finished_ versions FIRST (before autotiling check)
+        # During construction: tile_type is "wall" -> maps to "finished_wall_autotile" (will be darkened)
+        # After construction: tile_type is "finished_wall_autotile" -> stays "finished_wall_autotile" (normal)
+        construction_to_finished = {
+            # Structures
+            "wall": "finished_wall_autotile",
+            "wall_advanced": "finished_wall_autotile",
+            "floor": "finished_floor",
+            "door": "finished_door",
+            "bar_door": "finished_bar_door",
+            "window": "finished_window",
+            "bridge": "finished_bridge",
+            "fire_escape": "finished_fire_escape",
+            "stage": "finished_stage",
+            "stage_stairs": "finished_stage_stairs",
+            "building": "finished_building",
+            # Workstations - ALL use finished_ sprites
+            "gutter_still": "finished_gutter_still",
+            "spark_bench": "finished_spark_bench",
+            "tinker_station": "finished_tinker_station",
+            "salvagers_bench": "finished_salvagers_bench",
+            "generator": "finished_generator",
+            "stove": "finished_stove",
+            "gutter_forge": "finished_gutter_forge",
+            "skinshop_loom": "finished_skinshop_loom",
+            "cortex_spindle": "finished_cortex_spindle",
+            "barracks": "finished_barracks",
+            # Furniture
+            "scrap_bar_counter": "finished_scrap_bar_counter",
+            "crash_bed": "finished_crash_bed",
+            "comfort_chair": "finished_comfort_chair",
+            "bar_stool": "finished_bar_stool",
+            "storage_locker": "finished_storage_locker",
+            "dining_table": "finished_dining_table",
+            "wall_lamp": "finished_wall_lamp",
+            "workshop_table": "finished_workshop_table",
+            "tool_rack": "finished_tool_rack",
+            "weapon_rack": "finished_weapon_rack",
+            "gutter_slab": "finished_gutter_slab",
+        }
+        
+        # Map construction tiles to finished versions (for darkening during construction)
+        if tile_type in construction_to_finished:
+            tile_type = construction_to_finished[tile_type]
+        
         # Debug: Log first street tile
         if tile_type == "street" and not hasattr(self, '_street_logged'):
             self._street_logged = True
@@ -46,6 +98,12 @@ class GridRenderer:
                 connect_to=get_connection_set(tile_type)
             )
             
+            # Debug: Log wall autotiling
+            if "wall" in tile_type and not hasattr(self, '_wall_autotile_logged'):
+                self._wall_autotile_logged = True
+                print(f"[GridRenderer] Wall autotiling: tile_type={tile_type}, variant={variant}")
+                print(f"[GridRenderer] should_autotile={should_autotile(tile_type)}")
+            
             # Try to get autotiled texture from tileset
             autotile_name = f"{tile_type}_autotile_{variant}"
             tileset_texture = get_tileset_texture("city_roads", autotile_name)
@@ -55,16 +113,31 @@ class GridRenderer:
             # Fallback: try numbered variation with autotile variant
             # If tile_type already ends with _autotile, don't add it again
             if tile_type.endswith("_autotile"):
-                # Check if this is a dirt overlay (uses subfolder)
+                # Check subfolder based on tile type
                 if "dirt_overlay" in tile_type:
                     sprite_path = f"assets/tiles/dirt/{tile_type}_{variant}.png"
+                elif "wall" in tile_type:
+                    sprite_path = f"assets/tiles/walls/{tile_type}_{variant}.png"
                 else:
                     sprite_path = f"assets/tiles/{tile_type}_{variant}.png"
             else:
-                sprite_path = f"assets/tiles/{tile_type}_autotile_{variant}.png"
+                # Check if this is a road/street tile (uses roads subfolder)
+                if "street" in tile_type or "road" in tile_type:
+                    sprite_path = f"assets/tiles/roads/{tile_type}_autotile_{variant}.png"
+                elif "wall" in tile_type:
+                    sprite_path = f"assets/tiles/walls/{tile_type}_autotile_{variant}.png"
+                else:
+                    sprite_path = f"assets/tiles/{tile_type}_autotile_{variant}.png"
+            
+            # Debug: Log wall sprite path
+            if "wall" in tile_type and not hasattr(self, '_wall_sprite_path_logged'):
+                self._wall_sprite_path_logged = True
+                print(f"[GridRenderer] Wall sprite path: {sprite_path}")
+            
             try:
                 texture = arcade.load_texture(sprite_path)
-                cache_key = (tile_type, x, y, z, "autotile", variant)
+                # Cache by variant only, not by position - allows recalculation
+                cache_key = (tile_type, variant)
                 self.texture_cache[cache_key] = texture
                 
                 # Debug: Log first dirt overlay autotile load
@@ -105,53 +178,6 @@ class GridRenderer:
         if tile_type == "salvage_object":
             tile_type = "scrap_node"  # Use scrap_node sprites
         
-        # Map construction tiles to finished_ versions
-        # During construction: tile_type is "wall" -> maps to "finished_wall" (darkened)
-        # After construction: tile_type is "finished_wall" -> stays "finished_wall" (normal)
-        construction_to_finished = {
-            # Structures
-            "wall": "finished_wall",
-            "wall_advanced": "finished_wall",
-            "floor": "finished_floor",
-            "door": "finished_door",
-            "bar_door": "finished_bar_door",
-            "window": "finished_window",
-            "bridge": "finished_bridge",
-            "fire_escape": "finished_fire_escape",
-            "stage": "finished_stage",
-            "stage_stairs": "finished_stage_stairs",
-            "building": "finished_building",
-            # Workstations - ALL use finished_ sprites
-            "gutter_still": "finished_gutter_still",
-            "spark_bench": "finished_spark_bench",
-            "tinker_station": "finished_tinker_station",
-            "salvagers_bench": "finished_salvagers_bench",
-            "generator": "finished_generator",
-            "stove": "finished_stove",
-            "gutter_forge": "finished_gutter_forge",
-            "skinshop_loom": "finished_skinshop_loom",
-            "cortex_spindle": "finished_cortex_spindle",
-            "barracks": "finished_barracks",
-            # Furniture
-            "scrap_bar_counter": "finished_scrap_bar_counter",
-            "crash_bed": "finished_crash_bed",
-            "comfort_chair": "finished_comfort_chair",
-            "bar_stool": "finished_bar_stool",
-            "storage_locker": "finished_storage_locker",
-            "dining_table": "finished_dining_table",
-            "wall_lamp": "finished_wall_lamp",
-            "workshop_table": "finished_workshop_table",
-            "tool_rack": "finished_tool_rack",
-            "weapon_rack": "finished_weapon_rack",
-            "gutter_slab": "finished_gutter_slab",
-        }
-        
-        # Map construction tiles to finished versions (for darkening during construction)
-        if tile_type in construction_to_finished:
-            tile_type = construction_to_finished[tile_type]
-        
-        # Finished tiles stay as-is (already have finished_ prefix from grid.set_tile)
-        
         # Calculate variation index for ground tiles (deterministic but varied)
         # Ground tiles use position-based variation to break up grid look
         variation_index = (x * 7 + y * 13 + z * 3) % 8  # 0-7 range
@@ -180,9 +206,15 @@ class GridRenderer:
         # Try variations in descending order (matches Pygame sprites.py logic)
         max_variation_counts = [9, 8, 6, 4, 3, 2, 1] if tile_type == "finished_bridge" else [8, 6, 4, 3, 2, 1]
         
+        # Determine subfolder based on tile type
+        if "wall" in tile_type:
+            subfolder = "walls/"
+        else:
+            subfolder = ""
+        
         for max_variations in max_variation_counts:
             variation = variation_index % max_variations
-            sprite_path = f"assets/tiles/{tile_type}_{variation}.png"
+            sprite_path = f"assets/tiles/{subfolder}{tile_type}_{variation}.png"
             
             try:
                 texture = arcade.load_texture(sprite_path)
@@ -192,7 +224,7 @@ class GridRenderer:
                 continue
         
         # Fall back to base sprite (no variation number)
-        sprite_path = f"assets/tiles/{tile_type}.png"
+        sprite_path = f"assets/tiles/{subfolder}{tile_type}.png"
         try:
             texture = arcade.load_texture(sprite_path)
             self.texture_cache[cache_key] = texture
@@ -217,48 +249,195 @@ class GridRenderer:
         except:
             return None
     
-    def build_tile_sprites(self, z_level: int = 0):
-        """Build sprite list for current Z-level and Z-1 (for depth effect).
+    def build_tile_sprites(self, z_level: int = 0, force_rebuild: bool = False):
+        """Build sprite list for current Z-level with cached lower level.
         
-        Only renders non-empty tiles for performance.
-        Z-1 level is rendered with reduced opacity for depth illusion.
+        Z0: Renders all tiles normally
+        Z1+: Only renders walkable/buildable tiles (roof_access, roof_floor, fire_escape, etc.)
+        Z-1 level is cached and reused for performance.
+        
+        Args:
+            z_level: Z-level to render
+            force_rebuild: If True, rebuild cache even if it exists
         """
         self.tile_sprite_list.clear()
         self.rendered_tiles.clear()
+        self.current_z = z_level
         
         print(f"[GridRenderer] Building sprites for z={z_level}...")
         
         tiles_processed = 0
         
         # First, render Z-1 level at reduced opacity (if not on ground level)
+        # Use cached sprite list if available for performance
         if z_level > 0:
-            for y in range(self.grid.height):
-                for x in range(self.grid.width):
-                    tile_type = self.grid.get_tile(x, y, z_level - 1)
-                    
-                    # Only render non-empty tiles
-                    if tile_type and tile_type != "empty":
-                        self._add_tile_sprite(x, y, z_level - 1, tile_type, opacity=128)
-                        tiles_processed += 1
+            lower_z = z_level - 1
+            
+            # Build or retrieve cached sprite list for lower Z-level
+            if lower_z not in self.z_level_cache or force_rebuild:
+                print(f"[GridRenderer] Building cache for Z={lower_z}...")
+                self._build_z_level_cache(lower_z)
+            
+            # Add cached lower level sprites with reduced opacity
+            cached_sprites = self.z_level_cache.get(lower_z)
+            if cached_sprites:
+                for sprite in cached_sprites:
+                    # Create a copy with reduced opacity for depth effect
+                    depth_sprite = arcade.Sprite()
+                    depth_sprite.texture = sprite.texture
+                    depth_sprite.center_x = sprite.center_x
+                    depth_sprite.center_y = sprite.center_y
+                    depth_sprite.alpha = 128  # 50% opacity for depth
+                    depth_sprite.color = (180, 180, 180)  # Slight gray tint
+                    self.tile_sprite_list.append(depth_sprite)
+                    tiles_processed += 1
         
         # Then render current Z-level at full opacity
-        # LAYERED SYSTEM: Render ALL tiles (concrete base everywhere)
+        # Z1+: Only render walkable/buildable rooftop tiles
+        walkable_roof_tiles = {
+            "roof_access", "roof_floor", "fire_escape", "finished_fire_escape",
+            "fire_escape_platform", "window_tile", "roof", "bridge", "finished_bridge"
+        }
+        
+        # LAYERED SYSTEM: Render in proper order for alpha blending
+        # Pass 1: Concrete base layer (only for Z0 or walkable tiles on Z1+)
         for y in range(self.grid.height):
             for x in range(self.grid.width):
                 tile_type = self.grid.get_tile(x, y, z_level)
-                
-                # Render all tiles (concrete base + overlay if not empty)
                 if tile_type:
-                    self._add_tile_sprite(x, y, z_level, tile_type, opacity=255)
+                    # Z1+: Only render walkable tiles
+                    if z_level > 0 and tile_type not in walkable_roof_tiles:
+                        continue
+                    self._add_concrete_base(x, y, z_level, opacity=255)
                     tiles_processed += 1
-                
-                # Render overlay tiles on top (dirt, grass, rubble)
-                overlay_type = self.grid.get_overlay_tile(x, y, z_level)
-                if overlay_type:
-                    self._add_overlay_sprite(x, y, z_level, overlay_type, opacity=255)
+        
+        # Pass 2: Dirt/grass/rubble overlays (render BEFORE roads) - Z0 only
+        if z_level == 0:
+            for y in range(self.grid.height):
+                for x in range(self.grid.width):
+                    overlay_type = self.grid.get_overlay_tile(x, y, z_level)
+                    if overlay_type:
+                        self._add_overlay_sprite(x, y, z_level, overlay_type, opacity=255)
+                        tiles_processed += 1
+        
+        # Pass 3: Roads/streets (render AFTER dirt, BEFORE structures) - Z0 only
+        if z_level == 0:
+            for y in range(self.grid.height):
+                for x in range(self.grid.width):
+                    tile_type = self.grid.get_tile(x, y, z_level)
+                    if tile_type and ("street" in tile_type or "road" in tile_type):
+                        self._add_road_sprite(x, y, z_level, tile_type, opacity=255)
+                        tiles_processed += 1
+        
+        # Pass 4: Floors (render BEFORE walls so walls are always on top)
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                tile_type = self.grid.get_tile(x, y, z_level)
+                if tile_type and ("floor" in tile_type):
+                    # Z1+: Only render if walkable
+                    if z_level > 0 and tile_type not in walkable_roof_tiles:
+                        continue
+                    self._add_structure_sprite(x, y, z_level, tile_type, opacity=255)
+                    tiles_processed += 1
+        
+        # Pass 5: Walls and other structures (render AFTER floors)
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                tile_type = self.grid.get_tile(x, y, z_level)
+                # Skip ground tiles, roads, and floors - they're handled in earlier passes
+                if tile_type and not ("street" in tile_type or "road" in tile_type or "ground_" in tile_type or "floor" in tile_type):
+                    # Z1+: Only render if walkable
+                    if z_level > 0 and tile_type not in walkable_roof_tiles:
+                        continue
+                    self._add_structure_sprite(x, y, z_level, tile_type, opacity=255)
                     tiles_processed += 1
         
         print(f"[GridRenderer] Built {len(self.tile_sprite_list)} tile sprites ({tiles_processed} non-empty tiles)")
+    
+    def _build_z_level_cache(self, z_level: int):
+        """Build and cache sprite list for a specific Z-level.
+        
+        This creates a static snapshot of the Z-level that can be reused
+        when viewing upper levels, avoiding expensive re-rendering.
+        """
+        cache_list = arcade.SpriteList(use_spatial_hash=True)
+        
+        # Determine if this is ground level or rooftop
+        walkable_roof_tiles = {
+            "roof_access", "roof_floor", "fire_escape", "finished_fire_escape",
+            "fire_escape_platform", "window_tile", "roof", "bridge", "finished_bridge"
+        }
+        
+        # Helper to add sprite to cache
+        def add_to_cache(x, y, z, tile_type, opacity=255):
+            texture = self.get_tile_texture(tile_type, x, y, z)
+            if texture:
+                sprite = arcade.Sprite()
+                sprite.texture = texture
+                sprite.center_x = x * TILE_SIZE + TILE_SIZE // 2
+                sprite.center_y = y * TILE_SIZE + TILE_SIZE // 2
+                sprite.alpha = opacity
+                cache_list.append(sprite)
+        
+        # Pass 1: Concrete base
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                tile_type = self.grid.get_tile(x, y, z_level)
+                if tile_type:
+                    if z_level > 0 and tile_type not in walkable_roof_tiles:
+                        continue
+                    add_to_cache(x, y, z_level, "ground_concrete")
+        
+        # Pass 2: Overlays (Z0 only)
+        if z_level == 0:
+            for y in range(self.grid.height):
+                for x in range(self.grid.width):
+                    overlay_type = self.grid.get_overlay_tile(x, y, z_level)
+                    if overlay_type:
+                        add_to_cache(x, y, z_level, overlay_type)
+        
+        # Pass 3: Roads (Z0 only)
+        if z_level == 0:
+            for y in range(self.grid.height):
+                for x in range(self.grid.width):
+                    tile_type = self.grid.get_tile(x, y, z_level)
+                    if tile_type and ("street" in tile_type or "road" in tile_type):
+                        add_to_cache(x, y, z_level, tile_type)
+        
+        # Pass 4: Floors
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                tile_type = self.grid.get_tile(x, y, z_level)
+                if tile_type and ("floor" in tile_type):
+                    if z_level > 0 and tile_type not in walkable_roof_tiles:
+                        continue
+                    add_to_cache(x, y, z_level, tile_type)
+        
+        # Pass 5: Walls and structures
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                tile_type = self.grid.get_tile(x, y, z_level)
+                if tile_type and not ("street" in tile_type or "road" in tile_type or "ground_" in tile_type or "floor" in tile_type):
+                    if z_level > 0 and tile_type not in walkable_roof_tiles:
+                        continue
+                    add_to_cache(x, y, z_level, tile_type)
+        
+        self.z_level_cache[z_level] = cache_list
+        print(f"[GridRenderer] Cached {len(cache_list)} sprites for Z={z_level}")
+    
+    def invalidate_cache(self, z_level: int = None):
+        """Invalidate cached sprite list(s) when tiles change.
+        
+        Args:
+            z_level: Specific Z-level to invalidate, or None to clear all caches
+        """
+        if z_level is not None:
+            if z_level in self.z_level_cache:
+                del self.z_level_cache[z_level]
+                print(f"[GridRenderer] Invalidated cache for Z={z_level}")
+        else:
+            self.z_level_cache.clear()
+            print(f"[GridRenderer] Cleared all Z-level caches")
     
     def _add_tile_sprite(self, x: int, y: int, z: int, tile_type: str, opacity: int = 255):
         """Add tile sprite(s) with layered rendering system.
@@ -354,6 +533,93 @@ class GridRenderer:
         }
         return tile_type in construction_types
     
+    def _add_concrete_base(self, x: int, y: int, z: int, opacity: int = 255):
+        """Add concrete base layer (always rendered first)."""
+        screen_x = x * TILE_SIZE
+        screen_y = y * TILE_SIZE
+        
+        base_texture = self.get_tile_texture("ground_concrete_0", x, y, z)
+        if base_texture:
+            base_sprite = arcade.Sprite()
+            base_sprite.texture = base_texture
+            base_sprite.center_x = screen_x + TILE_SIZE // 2
+            base_sprite.center_y = screen_y + TILE_SIZE // 2
+            base_sprite.alpha = opacity
+            self.tile_sprite_list.append(base_sprite)
+        
+        self.rendered_tiles.add((x, y, z))
+    
+    def _add_road_sprite(self, x: int, y: int, z: int, tile_type: str, opacity: int = 255):
+        """Add road/street sprite with autotiling (rendered after dirt, before structures)."""
+        screen_x = x * TILE_SIZE
+        screen_y = y * TILE_SIZE
+        
+        # Get autotiled road texture
+        texture = self.get_tile_texture(tile_type, x, y, z)
+        if texture:
+            sprite = arcade.Sprite()
+            sprite.texture = texture
+            sprite.center_x = screen_x + TILE_SIZE // 2
+            sprite.center_y = screen_y + TILE_SIZE // 2
+            sprite.alpha = opacity
+            self.tile_sprite_list.append(sprite)
+    
+    def _add_structure_sprite(self, x: int, y: int, z: int, tile_type: str, opacity: int = 255):
+        """Add structure sprite (walls, floors, buildings) - rendered last.
+        
+        Handles construction darkening: tiles under construction use same sprite but darkened.
+        """
+        screen_x = x * TILE_SIZE
+        screen_y = y * TILE_SIZE
+        
+        # Check if this is under construction (not finished yet)
+        is_construction = self._is_construction_tile(tile_type)
+        
+        # Special handling for furniture tiles (floor + furniture)
+        furniture_tiles = [
+            "crash_bed", "comfort_chair", "bar_stool",
+            "scrap_guitar_placed", "drum_kit_placed", "synth_placed",
+            "harmonica_placed", "amp_placed"
+        ]
+        
+        if tile_type in furniture_tiles:
+            # Draw floor first
+            floor_texture = self.get_tile_texture("finished_floor", x, y, z)
+            if floor_texture:
+                floor_sprite = arcade.Sprite()
+                floor_sprite.texture = floor_texture
+                floor_sprite.center_x = screen_x + TILE_SIZE // 2
+                floor_sprite.center_y = screen_y + TILE_SIZE // 2
+                floor_sprite.alpha = opacity
+                self.tile_sprite_list.append(floor_sprite)
+            
+            # Draw furniture on top
+            furniture_texture = self._get_furniture_texture(tile_type)
+            if furniture_texture:
+                furniture_sprite = arcade.Sprite()
+                furniture_sprite.texture = furniture_texture
+                furniture_sprite.center_x = screen_x + TILE_SIZE // 2
+                furniture_sprite.center_y = screen_y + TILE_SIZE // 2
+                furniture_sprite.alpha = opacity
+                self.tile_sprite_list.append(furniture_sprite)
+            return
+        
+        # Render structure texture
+        texture = self.get_tile_texture(tile_type, x, y, z)
+        if texture:
+            sprite = arcade.Sprite()
+            sprite.texture = texture
+            sprite.center_x = screen_x + TILE_SIZE // 2
+            sprite.center_y = screen_y + TILE_SIZE // 2
+            sprite.alpha = opacity
+            
+            # CONSTRUCTION DARKENING: Under construction tiles use same sprite but darkened
+            if is_construction:
+                # Darken by reducing color values (0.6 = 60% brightness)
+                sprite.color = (153, 153, 153)  # RGB(153,153,153) = 60% of 255
+            
+            self.tile_sprite_list.append(sprite)
+    
     def _add_overlay_sprite(self, x: int, y: int, z: int, overlay_type: str, opacity: int = 255):
         """Add overlay sprite (dirt, grass, rubble) on top of base tile.
         
@@ -376,23 +642,54 @@ class GridRenderer:
     def update_tile(self, x: int, y: int, z: int):
         """Update a single tile when it changes.
         
-        Removes old sprite for this tile and adds new one.
-        Much faster than rebuilding entire sprite list.
+        Uses smart batching to avoid rebuilding entire sprite list on every change.
+        Marks tiles as dirty and rebuilds in batches.
+        Invalidates Z-level cache when tiles change.
         """
-        # Remove old sprite for this tile if it exists
-        if (x, y, z) in self.rendered_tiles:
-            # Find and remove the sprite at this position
-            for sprite in self.tile_sprite_list:
-                if (sprite.center_x == x * TILE_SIZE + TILE_SIZE // 2 and 
-                    sprite.center_y == y * TILE_SIZE + TILE_SIZE // 2):
-                    sprite.remove_from_sprite_lists()
-                    break
-            self.rendered_tiles.discard((x, y, z))
+        # Invalidate cache for this Z-level since tiles changed
+        self.invalidate_cache(z)
         
-        # Add new sprite for current tile type
-        tile_type = self.grid.get_tile(x, y, z)
-        if tile_type:
-            self._add_tile_sprite(x, y, z, tile_type)
+        # Mark this tile as needing update
+        if not hasattr(self, '_dirty_tiles'):
+            self._dirty_tiles = set()
+        self._dirty_tiles.add((x, y, z))
+        
+        # If we have many dirty tiles, batch rebuild
+        # Otherwise, do single tile update for performance
+        if len(self._dirty_tiles) > 100:
+            self.build_tile_sprites(self.current_z)
+            self._dirty_tiles.clear()
+        else:
+            # Single tile update - remove old sprites at this position
+            sprites_to_remove = []
+            for sprite in self.tile_sprite_list:
+                sprite_x = int((sprite.center_x - TILE_SIZE // 2) / TILE_SIZE)
+                sprite_y = int((sprite.center_y - TILE_SIZE // 2) / TILE_SIZE)
+                if sprite_x == x and sprite_y == y:
+                    sprites_to_remove.append(sprite)
+            
+            for sprite in sprites_to_remove:
+                sprite.remove_from_sprite_lists()
+            
+            # Add new sprites for this tile using layered system
+            tile_type = self.grid.get_tile(x, y, z)
+            
+            # Layer 1: Concrete base
+            if tile_type:
+                self._add_concrete_base(x, y, z)
+            
+            # Layer 2: Dirt overlay (if exists)
+            overlay_type = self.grid.get_overlay_tile(x, y, z)
+            if overlay_type:
+                self._add_overlay_sprite(x, y, z, overlay_type)
+            
+            # Layer 3: Roads (if applicable)
+            if tile_type and ("street" in tile_type or "road" in tile_type):
+                self._add_road_sprite(x, y, z, tile_type)
+            
+            # Layer 4: Structures (if applicable)
+            if tile_type and not ("street" in tile_type or "road" in tile_type or "ground_" in tile_type):
+                self._add_structure_sprite(x, y, z, tile_type)
     
     def draw(self):
         """Draw all tile sprites."""
