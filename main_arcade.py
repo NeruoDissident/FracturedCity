@@ -79,6 +79,79 @@ class FracturedCityWindow(arcade.Window):
         # Sprite cache for tiles and colonists (avoid reloading every frame)
         self.texture_cache = {}
         
+        # Track wanderer/fixer colonist UIDs in renderer
+        self.tracked_wanderer_uids = set()
+        self.tracked_fixer_uids = set()
+    
+    def _sync_wanderers_with_renderer(self):
+        """Sync wanderers and fixers with colonist renderer."""
+        from wanderers import get_wanderers, get_fixers
+        
+        # Get current wanderers/fixers
+        wanderers = get_wanderers()
+        fixers = get_fixers()
+        
+        # Track current UIDs
+        current_wanderer_uids = {w["colonist"].uid for w in wanderers}
+        current_fixer_uids = {f["colonist"].uid for f in fixers}
+        
+        # Add new wanderers to renderer
+        for wanderer in wanderers:
+            colonist = wanderer["colonist"]
+            if colonist.uid not in self.tracked_wanderer_uids:
+                self.colonist_renderer.add_colonist(colonist)
+                self.tracked_wanderer_uids.add(colonist.uid)
+        
+        # Add new fixers to renderer
+        for fixer in fixers:
+            colonist = fixer["colonist"]
+            if colonist.uid not in self.tracked_fixer_uids:
+                self.colonist_renderer.add_colonist(colonist)
+                self.tracked_fixer_uids.add(colonist.uid)
+        
+        # Remove departed wanderers from renderer (but NOT recruited ones)
+        departed_wanderers = self.tracked_wanderer_uids - current_wanderer_uids
+        for uid in departed_wanderers:
+            # Check if this colonist was recruited (is now in main colonist list)
+            is_recruited = any(c.uid == uid for c in self.colonists)
+            if not is_recruited:
+                # Only remove if not recruited - rejected/left wanderers
+                for sprite_uid, sprite in list(self.colonist_renderer.colonist_sprites.items()):
+                    if sprite_uid == uid:
+                        self.colonist_renderer.remove_colonist(sprite.colonist)
+                        break
+            self.tracked_wanderer_uids.discard(uid)
+        
+        # Remove departed fixers from renderer
+        departed_fixers = self.tracked_fixer_uids - current_fixer_uids
+        for uid in departed_fixers:
+            for sprite_uid, sprite in list(self.colonist_renderer.colonist_sprites.items()):
+                if sprite_uid == uid:
+                    self.colonist_renderer.remove_colonist(sprite.colonist)
+                    break
+            self.tracked_fixer_uids.discard(uid)
+    
+    def snap_camera_to_tile(self, x: int, y: int, z: int):
+        """Snap camera to a specific tile position."""
+        # Switch to target Z-level if different
+        if z != self.grid.current_z:
+            self.grid.current_z = z
+            self.grid_renderer.build_tile_sprites(z_level=z)
+            print(f"[Camera] Switched to Z={z}")
+        
+        # Move camera to tile (camera position is viewport center)
+        target_x = x * TILE_SIZE + TILE_SIZE // 2
+        target_y = y * TILE_SIZE + TILE_SIZE // 2
+        self.camera.position = (target_x, target_y)
+        print(f"[Camera] Snapped to ({x}, {y}, {z})")
+    
+    def open_colonist_detail(self, colonist):
+        """Open colonist detail panel for a specific colonist."""
+        if colonist in self.colonists:
+            index = self.colonists.index(colonist)
+            self.colonist_detail_panel.open(self.colonists, index)
+            print(f"[UI] Opened detail panel for {colonist.name}")
+        
     def setup(self):
         """Initialize game state."""
         print("[Arcade] Setting up game...")
@@ -153,6 +226,14 @@ class FracturedCityWindow(arcade.Window):
         self.left_sidebar = LeftSidebar()
         self.colonist_detail_panel = ColonistDetailPanel()
         
+        # Wire sidebar callbacks
+        self.left_sidebar.on_colonist_locate = self.snap_camera_to_tile
+        self.left_sidebar.on_colonist_click = self.open_colonist_detail
+        
+        # Initialize notification panel
+        from ui_arcade_notifications import get_notification_panel
+        self.notification_panel = get_notification_panel()
+        
         # Initialize right panel with colonists (always visible)
         self.colonist_detail_panel.colonists = self.colonists
         
@@ -223,7 +304,7 @@ class FracturedCityWindow(arcade.Window):
             if self.drag_mode in ("wall", "door"):
                 # Line drag
                 preview_tiles = self._get_drag_line(self.drag_start, self.drag_end)
-            elif self.drag_mode in ("floor", "stockpile", "roof", "harvest", "salvage", "allow") or self.drag_mode.startswith("room_"):
+            elif self.drag_mode in ("floor", "stockpile", "roof", "harvest", "salvage") or self.drag_mode.startswith("room_"):
                 # Rectangle drag
                 preview_tiles = self._get_drag_rect(self.drag_start, self.drag_end)
             else:
@@ -252,23 +333,43 @@ class FracturedCityWindow(arcade.Window):
         # Draw hover highlight on top
         if self.hovered_tile:
             tile_x, tile_y, tile_z = self.hovered_tile
-            # Semi-transparent cyan fill
-            arcade.draw_lrbt_rectangle_filled(
-                left=tile_x * TILE_SIZE,
-                right=(tile_x + 1) * TILE_SIZE,
-                bottom=tile_y * TILE_SIZE,
-                top=(tile_y + 1) * TILE_SIZE,
-                color=(0, 220, 220, 40)  # Cyan with alpha
-            )
-            # Thick cyan border
-            arcade.draw_lrbt_rectangle_outline(
-                left=tile_x * TILE_SIZE,
-                right=(tile_x + 1) * TILE_SIZE,
-                bottom=tile_y * TILE_SIZE,
-                top=(tile_y + 1) * TILE_SIZE,
-                color=(0, 220, 220, 255),  # Bright cyan
-                border_width=4
-            )
+            
+            # Check if we're placing a multi-tile structure
+            width, height = 1, 1
+            if self.drag_mode:
+                # Check for workstation
+                from buildings import BUILDING_TYPES, get_building_size
+                if self.drag_mode in BUILDING_TYPES:
+                    width, height = get_building_size(self.drag_mode)
+                # Check for furniture
+                elif self.drag_mode.startswith("furn_"):
+                    from furniture import get_furniture_size
+                    item_id = self.drag_mode[5:]
+                    width, height = get_furniture_size(item_id)
+            
+            # Draw footprint for all tiles that will be occupied
+            for dy in range(height):
+                for dx in range(width):
+                    footprint_x = tile_x + dx
+                    footprint_y = tile_y + dy
+                    
+                    # Semi-transparent cyan fill
+                    arcade.draw_lrbt_rectangle_filled(
+                        left=footprint_x * TILE_SIZE,
+                        right=(footprint_x + 1) * TILE_SIZE,
+                        bottom=footprint_y * TILE_SIZE,
+                        top=(footprint_y + 1) * TILE_SIZE,
+                        color=(0, 220, 220, 40)  # Cyan with alpha
+                    )
+                    # Thick cyan border
+                    arcade.draw_lrbt_rectangle_outline(
+                        left=footprint_x * TILE_SIZE,
+                        right=(footprint_x + 1) * TILE_SIZE,
+                        bottom=footprint_y * TILE_SIZE,
+                        top=(footprint_y + 1) * TILE_SIZE,
+                        color=(0, 220, 220, 255),  # Bright cyan
+                        border_width=4
+                    )
         
         # Draw day/night cycle overlay (still in world camera)
         self._draw_day_night_overlay()
@@ -327,6 +428,19 @@ class FracturedCityWindow(arcade.Window):
         from ui_arcade_bed import get_bed_assignment_panel
         bed_panel = get_bed_assignment_panel()
         bed_panel.draw(self.colonists, self.mouse_x, self.mouse_y)
+        
+        # Draw visitor panel (popup over everything)
+        from ui_arcade_visitor import get_visitor_panel
+        visitor_panel = get_visitor_panel()
+        visitor_panel.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw trader panel (popup over everything)
+        from ui_arcade_trader import get_trader_panel
+        trader_panel = get_trader_panel()
+        trader_panel.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw notification panel (top-right, above everything)
+        self.notification_panel.draw()
         
         # Draw selected colonist info (if any)
         if self.selected_colonist:
@@ -732,7 +846,7 @@ class FracturedCityWindow(arcade.Window):
         
         # Update wanderers and traders
         if self.tick_count % 60 == 0:
-            from wanderers import spawn_wanderer_check, update_wanderers, spawn_fixer_check, update_fixers, process_trade_jobs
+            from wanderers import spawn_wanderer_check, update_wanderers, spawn_fixer_check, update_fixers, process_trade_jobs, get_wanderers, get_fixers
             from resources import get_colonist_spawn_location
             from time_system import get_game_time
             
@@ -744,6 +858,9 @@ class FracturedCityWindow(arcade.Window):
             spawn_fixer_check(current_day, colony_center, self.grid)
             update_fixers(self.grid, colony_center, self.tick_count)
             process_trade_jobs(jobs_module, zones_module)
+            
+            # Sync wanderers/fixers with renderer (add new ones, remove departed)
+            self._sync_wanderers_with_renderer()
         
         # Update audio
         if self.tick_count % 60 == 0:
@@ -786,6 +903,128 @@ class FracturedCityWindow(arcade.Window):
         
         if key == arcade.key.ESCAPE:
             arcade.close_window()
+        
+        # Debug keys
+        elif key == arcade.key.F4:
+            # Debug: Toggle free build mode (no material requirements)
+            from buildings import toggle_free_build_mode
+            new_state = toggle_free_build_mode()
+            status = "ENABLED" if new_state else "DISABLED"
+            print(f"[Debug] FREE BUILD MODE: {status}")
+            from notifications import add_notification, NotificationType
+            add_notification(NotificationType.INFO, 
+                           f"FREE BUILD MODE: {status}",
+                           "No material requirements" if new_state else "Normal building rules",
+                           duration=180)
+        
+        elif key == arcade.key.F7:
+            # Debug: Spawn wanderers (refugees) and fixer (trader)
+            from wanderers import _pick_group_spawn_location, _create_wanderer_at, _wanderers, _create_fixer, _fixers
+            from resources import get_colonist_spawn_location
+            from notifications import add_notification, NotificationType
+            import random
+            
+            colony_center = get_colonist_spawn_location()
+            
+            # Pick ONE spawn location for the group
+            group_spawn = _pick_group_spawn_location(self.grid)
+            if group_spawn:
+                # Spawn 1-3 wanderers around that point
+                num_wanderers = random.randint(1, 3)
+                spawned_names = []
+                for i in range(num_wanderers):
+                    offset_x = (i % 3) - 1
+                    offset_y = (i // 3) - 1
+                    spawn_x = group_spawn[0] + offset_x
+                    spawn_y = group_spawn[1] + offset_y
+                    if not self.grid.is_walkable(spawn_x, spawn_y, 0):
+                        spawn_x, spawn_y = group_spawn
+                    
+                    wanderer = _create_wanderer_at(spawn_x, spawn_y, colony_center, self.grid)
+                    if wanderer:
+                        _wanderers.append(wanderer)
+                        spawned_names.append(wanderer["name"])
+                
+                if spawned_names:
+                    print(f"[Debug] Spawned {len(spawned_names)} wanderer(s): {', '.join(spawned_names)}")
+                    add_notification(NotificationType.ARRIVAL,
+                                   f"// {len(spawned_names)} SIGNAL(S) DETECTED //",
+                                   ", ".join(spawned_names),
+                                   duration=480,
+                                   click_location=group_spawn)
+            
+            # Also spawn a fixer if none exists
+            if len(_fixers) == 0:
+                fixer = _create_fixer(colony_center, self.grid)
+                if fixer:
+                    _fixers.append(fixer)
+                    print(f"[Debug] Spawned fixer: {fixer['name']} from {fixer['origin'].name}")
+                    fixer_loc = (fixer["x"], fixer["y"])
+                    add_notification(NotificationType.INFO,
+                                   "// FIXER INBOUND //",
+                                   f"{fixer['name']} wants to trade",
+                                   duration=480,
+                                   click_location=fixer_loc)
+            else:
+                print("[Debug] Fixer already present, skipping")
+        
+        elif key == arcade.key.F8:
+            # Debug: Print construction site status
+            from buildings import get_all_construction_sites, get_missing_materials
+            import zones as zones_module
+            sites = get_all_construction_sites()
+            print(f"[Debug] Construction sites: {len(sites)}")
+            for (x, y, z), site in sites.items():
+                missing = get_missing_materials(x, y, z)
+                print(f"  ({x},{y},z={z}) type={site.get('type')} needed={site.get('materials_needed')} delivered={site.get('materials_delivered')} missing={missing}")
+            # Also print stockpile contents
+            print("[Debug] Stockpile contents:")
+            for res_type in ["wood", "scrap", "metal", "mineral", "power"]:
+                total = zones_module.get_total_stored(res_type)
+                print(f"  {res_type}: {total}")
+        
+        elif key == arcade.key.F11:
+            # Debug: Spawn a raider
+            from wanderers import spawn_raider
+            from notifications import add_notification, NotificationType
+            raider = spawn_raider(self.grid)
+            if raider:
+                self.colonists.append(raider)
+                self.colonist_renderer.add_colonist(raider)  # Add to renderer
+                add_notification(NotificationType.FIGHT_START, f"Raider: {raider.name}", 
+                               duration=180, click_location=(raider.x, raider.y))
+                print(f"[Debug] Spawned raider: {raider.name} at ({raider.x}, {raider.y})")
+        
+        elif key == arcade.key.F12:
+            # Debug: Toggle BERSERK MODE - everyone fights everyone
+            from notifications import add_notification, NotificationType
+            alive = [c for c in self.colonists if not c.is_dead]
+            if alive:
+                # Check if already berserk (toggle off)
+                if getattr(alive[0], '_debug_berserk', False):
+                    # Turn off berserk
+                    for c in alive:
+                        c._debug_berserk = False
+                        c.is_hostile = False
+                        c.in_combat = False
+                        c.combat_target = None
+                    print("[Debug] BERSERK MODE OFF - peace restored")
+                    add_notification(NotificationType.INFO,
+                                   "// PEACE PROTOCOL //",
+                                   "Combat systems disengaged",
+                                   duration=180)
+                else:
+                    # UNLEASH HELL
+                    for c in alive:
+                        c._debug_berserk = True
+                        c.is_hostile = True
+                        c.state = "idle"
+                        c.current_job = None
+                    print(f"[Debug] BERSERK MODE ON - {len(alive)} colonists going wild!")
+                    add_notification(NotificationType.FIGHT_START,
+                                   "// BERSERK PROTOCOL //",
+                                   f"All {len(alive)} colonists hostile!",
+                                   duration=300)
     
     def on_key_release(self, key, modifiers):
         """Handle key release."""
@@ -857,7 +1096,27 @@ class FracturedCityWindow(arcade.Window):
     def on_mouse_press(self, x, y, button, modifiers):
         """Handle mouse clicks - wire to existing game functions."""
         if button == arcade.MOUSE_BUTTON_LEFT:
-            # Check native Arcade bed assignment panel first (highest priority)
+            # Check notification panel first (click-to-snap)
+            click_location = self.notification_panel.handle_click(x, y)
+            if click_location:
+                # Snap camera to notification location
+                tile_x, tile_y = click_location
+                self.snap_camera_to_tile(tile_x, tile_y, self.grid.current_z)
+                return
+            
+            # Check visitor panel (highest priority popup)
+            from ui_arcade_visitor import get_visitor_panel
+            visitor_panel = get_visitor_panel()
+            if visitor_panel.visible and visitor_panel.handle_click(x, y):
+                return
+            
+            # Check trader panel
+            from ui_arcade_trader import get_trader_panel
+            trader_panel = get_trader_panel()
+            if trader_panel.visible and trader_panel.handle_click(x, y):
+                return
+            
+            # Check native Arcade bed assignment panel
             from ui_arcade_bed import get_bed_assignment_panel
             bed_panel = get_bed_assignment_panel()
             if bed_panel.visible and bed_panel.handle_click(x, y, self.colonists):
@@ -935,18 +1194,19 @@ class FracturedCityWindow(arcade.Window):
                 self.drag_start = (tile_x, tile_y)
                 self.drag_mode = active_tool
                 
-                # For single-click items (workstations, furniture, special structures),
-                # set drag_end immediately so they place on click without requiring drag
+                # ALWAYS set drag_end immediately so single clicks work
+                # User can still drag for walls/floors/zones, but single clicks place immediately
+                self.drag_end = (tile_x, tile_y)
+                
                 from buildings import BUILDING_TYPES
                 is_workstation = active_tool in BUILDING_TYPES and BUILDING_TYPES[active_tool].get("workstation")
                 is_furniture = active_tool.startswith("furn_")
-                is_single_click = active_tool in ("stage_stairs", "fire_escape", "bridge") or is_workstation or is_furniture
+                is_single_tile = active_tool in ("stage_stairs", "fire_escape", "bridge", "door", "window") or is_workstation or is_furniture
                 
-                if is_single_click:
-                    self.drag_end = (tile_x, tile_y)
+                if is_single_tile:
                     print(f"[Build] Placing {active_tool} at ({tile_x}, {tile_y})")
                 else:
-                    print(f"[Drag] Started {active_tool} at ({tile_x}, {tile_y})")
+                    print(f"[Build] Started {active_tool} at ({tile_x}, {tile_y}) - drag to extend")
                 return
             
             # Default: select tile or colonist
@@ -970,6 +1230,49 @@ class FracturedCityWindow(arcade.Window):
                     self.colonist_detail_panel.open(self.colonists, self.colonists.index(clicked_colonist))
                 else:
                     self.selected_colonist = None
+                    
+                    # Check if clicking on a wanderer/visitor (open visitor panel)
+                    from wanderers import get_wanderer_at, get_fixer_at
+                    wanderer = get_wanderer_at(tile_x, tile_y, tile_z)
+                    if wanderer:
+                        from ui_arcade_visitor import get_visitor_panel
+                        visitor_panel = get_visitor_panel()
+                        
+                        # Set up callbacks
+                        def accept_visitor(w):
+                            from wanderers import recruit_wanderer
+                            from resources import get_colonist_spawn_location
+                            colonist = recruit_wanderer(w)
+                            if colonist:
+                                self.colonists.append(colonist)
+                                # Colonist already in renderer from wanderer tracking
+                                # Give them a path to walk to colony center
+                                colony_center = get_colonist_spawn_location()
+                                colonist.current_path = colonist._calculate_path(
+                                    self.grid, colony_center[0], colony_center[1], 0, self.tick_count
+                                )
+                                colonist.state = "idle"  # Let them take jobs or wander normally
+                                print(f"[Visitor] Accepted {colonist.name}! Pathfinding to colony center at {colony_center}")
+                        
+                        def deny_visitor(w):
+                            from wanderers import reject_wanderer
+                            reject_wanderer(w)
+                            print(f"[Visitor] Rejected {w['name']}")
+                        
+                        visitor_panel.on_accept = accept_visitor
+                        visitor_panel.on_deny = deny_visitor
+                        visitor_panel.open(wanderer)
+                        print(f"[Visitor] Opened panel for {wanderer['name']}")
+                        return
+                    
+                    # Check if clicking on a fixer/trader
+                    fixer = get_fixer_at(tile_x, tile_y, tile_z)
+                    if fixer:
+                        from ui_arcade_trader import get_trader_panel
+                        trader_panel = get_trader_panel()
+                        trader_panel.open(fixer)
+                        print(f"[Trader] Opened panel for {fixer['name']}")
+                        return
                     
                     # Check if clicking on a workstation (open recipe panel)
                     tile = self.grid.get_tile(tile_x, tile_y, tile_z)
@@ -1111,14 +1414,6 @@ class FracturedCityWindow(arcade.Window):
                     print(f"[Room] Cannot create {room_type}:")
                     for error in errors:
                         print(f"  - {error}")
-            
-            elif self.drag_mode == "allow":
-                # Allow access - rectangle drag for roof access
-                tiles = self._get_drag_rect((start_x, start_y), (end_x, end_y))
-                from rooms import set_roof_access_allowed
-                for tx, ty in tiles:
-                    set_roof_access_allowed(self.grid, tx, ty, current_z, True)
-                print(f"[Allow] Set roof access for {len(tiles)} tile(s)")
             
             elif self.drag_mode.startswith("furn_"):
                 # Furniture placement - single click

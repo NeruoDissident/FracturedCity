@@ -23,30 +23,61 @@ FURNITURE_TILE_MAPPING = {
     "amp": "amp_placed",
 }
 
+# Furniture size definitions (width, height) in tiles
+# Items not listed default to 1x1
+FURNITURE_SIZES = {
+    "crash_bed": (1, 2),  # 1x2 vertical bed
+    # Future: Add more multi-tile furniture as needed
+}
+
+
+def get_furniture_size(item_id: str) -> tuple:
+    """Get the size (width, height) of a furniture item.
+    
+    Returns:
+        (width, height) tuple in tiles. Defaults to (1, 1) if not specified.
+    """
+    return FURNITURE_SIZES.get(item_id, (1, 1))
+
 
 def can_place_furniture(grid: Grid, x: int, y: int, z: int, item_id: str) -> bool:
     """Check if furniture can be placed at the given location.
     
+    For multi-tile furniture, (x, y) is the bottom-left origin tile.
+    All tiles in the footprint must be valid floor tiles.
+    
     Args:
         grid: The game grid
-        x, y, z: Target coordinates
+        x, y, z: Target coordinates (origin for multi-tile)
         item_id: ID of the furniture item to place
         
     Returns:
         True if furniture can be placed here
     """
-    # Must be on a floor or stage tile
-    tile = grid.get_tile(x, y, z)
-    if tile not in ("finished_floor", "floor", "finished_stage", "finished_stage_stairs"):
-        return False
-    
-    # Tile must be walkable (not blocked)
-    if not grid.is_walkable(x, y, z):
-        return False
-    
     # Check if item is valid furniture
     if item_id not in FURNITURE_TILE_MAPPING:
         return False
+    
+    # Get size (defaults to 1x1)
+    width, height = get_furniture_size(item_id)
+    
+    # Check all tiles in footprint
+    for dy in range(height):
+        for dx in range(width):
+            check_x = x + dx
+            check_y = y + dy
+            
+            if not grid.in_bounds(check_x, check_y, z):
+                return False
+            
+            # Must be on a floor or stage tile
+            tile = grid.get_tile(check_x, check_y, z)
+            if tile not in ("finished_floor", "floor", "finished_stage", "finished_stage_stairs"):
+                return False
+            
+            # Tile must be walkable (not blocked)
+            if not grid.is_walkable(check_x, check_y, z):
+                return False
     
     return True
 

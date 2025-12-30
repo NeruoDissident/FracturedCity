@@ -537,8 +537,9 @@ def _place_node(grid, x: int, y: int, node_type: str) -> bool:
     instead of creating a harvestable node.
     """
     tile = grid.get_tile(x, y)
-    # Allow placement on empty tiles, finished floors, and decorative tiles
-    if tile not in ["empty", "finished_floor", "weeds", "sidewalk", "debris"]:
+    # Allow placement on empty tiles, finished floors, decorative tiles, and ground overlays
+    # Resources can spawn on dirt overlays, concrete base, etc.
+    if tile not in ["empty", "finished_floor", "weeds", "sidewalk", "debris", "ground_dirt_overlay", "ground_concrete_0"]:
         return False
     
     node_def = NODE_TYPES[node_type]
@@ -566,6 +567,14 @@ def _place_node(grid, x: int, y: int, node_type: str) -> bool:
     }
     _RESOURCE_NODES[(x, y)] = node
     grid.set_tile(x, y, "resource_node")
+    
+    # Debug: Log first few placements
+    if not hasattr(_place_node, '_debug_count'):
+        _place_node._debug_count = 0
+    if _place_node._debug_count < 3:
+        _place_node._debug_count += 1
+        print(f"[ResourceDebug] Placed {node_type} at ({x}, {y}), tile now: {grid.get_tile(x, y, 0)}")
+    
     return True
 
 

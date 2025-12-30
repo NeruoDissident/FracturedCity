@@ -351,7 +351,7 @@ def _is_area_enclosed(grid, tiles: List[Coord], z: int) -> bool:
             # If neighbor is not in room, check if it's a wall/door
             if (nx, ny) not in tile_set:
                 neighbor_tile = grid.get_tile(nx, ny, z)
-                if neighbor_tile not in ("finished_wall", "finished_wall_advanced", "door", "finished_window"):
+                if neighbor_tile not in ("finished_wall", "finished_wall_autotile", "finished_wall_advanced", "door", "finished_window", "window_tile"):
                     return False
     
     return True
@@ -373,7 +373,7 @@ def _check_wall_type(grid, tiles: List[Coord], z: int, wall_type: str) -> bool:
     if wall_type == "reinforced":
         required_walls = ("finished_wall_advanced", "wall_advanced")
     else:
-        required_walls = ("finished_wall", "wall")
+        required_walls = ("finished_wall", "finished_wall_autotile", "wall")
     
     for x, y in tiles:
         for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
@@ -396,7 +396,8 @@ def _count_entrances(grid, tiles: List[Coord], z: int) -> int:
             nx, ny = x + dx, y + dy
             if (nx, ny) not in tile_set:
                 neighbor_tile = grid.get_tile(nx, ny, z)
-                if neighbor_tile in ("door", "finished_window"):
+                # Count doors and windows as entrances (not walls)
+                if neighbor_tile in ("door", "finished_door", "finished_window", "window", "window_tile"):
                     entrances += 1
     
     return entrances

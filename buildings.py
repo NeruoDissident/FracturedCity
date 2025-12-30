@@ -115,6 +115,7 @@ BUILDING_TYPES = {
         "walkable": False,
         "workstation": True,  # Bartender crafts drinks here
         "multi_recipe": True,
+        "size": (3, 3),  # 3x3 tiles (width, height)
         "recipes": [
             {"id": "brew_swill", "name": "Brew Swill", "input": {"raw_food": 2, "scrap": 1}, "output_item": "swill", "work_time": 120},
             {"id": "distill_guttershine", "name": "Distill Guttershine", "input": {"raw_food": 3, "scrap": 2}, "output_item": "guttershine", "work_time": 180},
@@ -175,6 +176,7 @@ BUILDING_TYPES = {
         "walkable": False,  # Workstation blocks movement
         "workstation": True,  # This is a workstation
         "multi_recipe": True,  # Supports multiple recipes
+        "size": (2, 2),  # 2x2 tiles (width, height)
         "recipes": [
             {"id": "power_from_wood", "name": "Burn Wood for Power", "input": {"wood": 3}, "output": {"power": 1}, "work_time": 80},
             {"id": "power_from_scrap", "name": "Burn Scrap for Power", "input": {"scrap": 4}, "output": {"power": 1}, "work_time": 90},
@@ -188,6 +190,7 @@ BUILDING_TYPES = {
         "walkable": False,  # Workstation blocks movement
         "workstation": True,  # This is a workstation
         "multi_recipe": True,  # Supports multiple recipes
+        "size": (2, 1),  # 2x1 tiles (width, height) - horizontal
         "recipes": [
             {"id": "simple_meal", "name": "Simple Meal", "input": {"raw_food": 1, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
             {"id": "fine_meal", "name": "Fine Meal", "input": {"raw_food": 2, "power": 1}, "output": {"cooked_meal": 2}, "work_time": 90},
@@ -203,6 +206,7 @@ BUILDING_TYPES = {
         "walkable": False,
         "workstation": True,
         "multi_recipe": True,  # Supports multiple recipes
+        "size": (3, 3),  # 3x3 tiles (width, height)
         "recipes": [
             {"id": "salvage_tool", "name": "Salvage Tool", "input": {"metal": 2, "scrap": 1}, "output_item": "salvage_tool", "work_time": 80},
             {"id": "work_gloves", "name": "Work Gloves", "input": {"scrap": 2}, "output_item": "work_gloves", "work_time": 60},
@@ -447,7 +451,6 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
         "barracks", "finished_barracks",
         "bridge", "finished_bridge",
         "fire_escape", "fire_escape_platform",
-        "roof",  # Must use Allow tool first
     }
     
     if current_tile in blocked_tiles:
@@ -459,8 +462,8 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
         resources.clear_node_for_construction(x, y)
         # Cancel any gathering job on this tile
         remove_job_at(x, y)
-    elif current_tile in ("roof_floor", "roof_access"):
-        # Allow building on walkable rooftop surfaces (z=1)
+    elif current_tile in ("roof", "roof_floor", "roof_access"):
+        # Allow building on walkable rooftop surfaces (z>0)
         pass
     elif z == 0:
         # Z0: Allow building on any walkable ground tile (weeds, debris, scorched, streets, etc.)
@@ -496,9 +499,34 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
     }
     _CONSTRUCTION_SITES[(x, y, z)] = site
     
-    # Set tile to the building's tile type
+    # Get size for multi-tile structures
+    width, height = building_def.get("size", (1, 1))
     tile_type = building_def.get("tile_type", building_type)
-    grid.set_tile(x, y, tile_type, z=z)
+    
+    # For multi-tile structures, set all tiles in footprint
+    # For workstations, preserve the floor layer
+    is_workstation = building_def.get("workstation", False)
+    
+    for dy in range(height):
+        for dx in range(width):
+            tile_x = x + dx
+            tile_y = y + dy
+            
+            # Store original floor tile for workstations (so they render on top)
+            if is_workstation:
+                original_tile = grid.get_tile(tile_x, tile_y, z)
+                if original_tile and original_tile in ("finished_floor", "floor", "roof_floor", "roof_access"):
+                    if not hasattr(grid, 'base_tiles'):
+                        grid.base_tiles = {}
+                    grid.base_tiles[(tile_x, tile_y, z)] = original_tile
+            
+            # Set tile_type on ALL tiles in footprint
+            # This is needed for construction completion to work properly
+            grid.set_tile(tile_x, tile_y, tile_type, z=z)
+            
+            # Keep multi-tile construction sites WALKABLE during construction
+            # Colonists need to access the site to deliver materials and build
+            # Will be marked unwalkable when construction completes
     
     # Determine subtype for job priority
     # Priority order: workstation > door > wall > floor
@@ -700,17 +728,49 @@ def place_barracks(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     return place_building(grid, x, y, "barracks", z)
 
 
+def get_building_size(building_type: str) -> tuple:
+    """Get the size (width, height) of a building/workstation/furniture.
+    
+    Returns:
+        (width, height) tuple in tiles. Defaults to (1, 1) if not specified.
+    """
+    # Strip 'finished_' prefix if present (renderer passes finished tile types)
+    lookup_type = building_type.replace("finished_", "")
+    building_def = BUILDING_TYPES.get(lookup_type)
+    if building_def is None:
+        return (1, 1)
+    return building_def.get("size", (1, 1))
+
+
 def place_workstation_generic(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -> bool:
-    """Generic placement helper for 1x1 workstations."""
+    """Generic placement helper for workstations (supports multi-tile).
+    
+    For multi-tile structures, (x, y) is the bottom-left origin tile.
+    All tiles in the footprint must be valid floor tiles.
+    """
     building_def = BUILDING_TYPES.get(building_type)
     if building_def is None or not building_def.get("workstation", False):
         return False
     
-    tile = grid.get_tile(x, y, z)
-    if tile not in ("finished_floor", "roof_floor", "roof_access"):
-        print(f"[Build Debug] {building_type}: tile at ({x},{y}) is '{tile}', need floor")
-        return False
+    # Get size (defaults to 1x1 for backward compatibility)
+    width, height = building_def.get("size", (1, 1))
     
+    # Check all tiles in footprint
+    for dy in range(height):
+        for dx in range(width):
+            check_x = x + dx
+            check_y = y + dy
+            
+            if not grid.in_bounds(check_x, check_y, z):
+                print(f"[Build Debug] {building_type}: tile ({check_x},{check_y}) out of bounds")
+                return False
+            
+            tile = grid.get_tile(check_x, check_y, z)
+            if tile not in ("finished_floor", "roof_floor", "roof_access"):
+                print(f"[Build Debug] {building_type}: tile at ({check_x},{check_y}) is '{tile}', need floor")
+                return False
+    
+    # Place at origin tile - multi-tile rendering will handle the rest
     return place_building(grid, x, y, building_type, z)
 
 
@@ -893,52 +953,19 @@ def demolish_tile(grid: Grid, x: int, y: int, z: int = 0) -> bool:
 def can_place_fire_escape(grid: Grid, x: int, y: int, z: int = 0) -> Tuple[bool, Optional[Tuple[int, int]]]:
     """Check if a fire escape can be placed at (x, y, z).
     
-    Requirements:
-    - Must be on a finished wall
-    - Must have a roof tile above (z+1)
-    - Must have an adjacent tile for the external platform
-    
-    Returns (can_place, platform_direction) where platform_direction is (dx, dy)
-    pointing to where the external platform would be.
-    
-    The platform MUST be placed on the EXTERIOR side (opposite from interior floor).
+    Simplified: Just needs to be on a wall with an adjacent empty/walkable tile.
     """
-    import rooms
-    
-    # Must be a finished wall on the specified Z-level
+    # Must be a wall tile
     tile = grid.get_tile(x, y, z)
-    if tile not in ("finished_wall", "finished_wall_advanced"):
+    if "wall" not in tile:
+        print(f"[FireEscape] Cannot place - tile at ({x},{y},{z}) is '{tile}', need wall")
         return False, None
     
-    # Interior tiles (inside the building)
-    interior_tiles = {"finished_floor", "roof_access", "roof_floor", "floor"}
-    # Placeable exterior tiles (outside the building)
-    placeable_tiles = {"empty", "roof"}
+    # Find adjacent tiles for platform placement
+    # Prefer EXTERIOR tiles (empty, roof, outdoor) over INTERIOR tiles (floors)
+    exterior_candidates = []
+    interior_candidates = []
     
-    # Check all four directions
-    # Priority: Find a direction where ONE side is interior and the OTHER side is exterior
-    # This ensures the window_tile replaces the wall and platform goes outside
-    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-        # One side of the wall
-        side_a_x, side_a_y = x + dx, y + dy
-        # Opposite side of the wall
-        side_b_x, side_b_y = x - dx, y - dy
-        
-        if not grid.in_bounds(side_a_x, side_a_y, z) or not grid.in_bounds(side_b_x, side_b_y, z):
-            continue
-        
-        tile_a = grid.get_tile(side_a_x, side_a_y, z)
-        tile_b = grid.get_tile(side_b_x, side_b_y, z)
-        
-        # Case 1: Side A is interior, Side B is exterior (platform goes to B)
-        if tile_a in interior_tiles and tile_b in placeable_tiles:
-            return True, (-dx, -dy)  # Platform direction is AWAY from interior
-        
-        # Case 2: Side B is interior, Side A is exterior (platform goes to A)
-        if tile_b in interior_tiles and tile_a in placeable_tiles:
-            return True, (dx, dy)  # Platform direction is AWAY from interior
-    
-    # Fallback: If no clear interior/exterior distinction, find any placeable exterior
     for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
         px, py = x + dx, y + dy
         if not grid.in_bounds(px, py, z):
@@ -946,10 +973,36 @@ def can_place_fire_escape(grid: Grid, x: int, y: int, z: int = 0) -> Tuple[bool,
         
         platform_tile = grid.get_tile(px, py, z)
         
-        # Platform must be placeable (empty ground or roof)
-        if platform_tile in placeable_tiles:
-            return True, (dx, dy)
+        # Skip walls - platform can't go on walls
+        if platform_tile and "wall" in platform_tile:
+            continue
+        
+        # Categorize as exterior or interior
+        # Exterior: empty, roof, outdoor tiles
+        # Interior: floor tiles (inside building)
+        if platform_tile in ("empty", "roof", "roof_access", "roof_floor", None):
+            exterior_candidates.append((dx, dy))
+        elif "floor" in platform_tile:
+            interior_candidates.append((dx, dy))
+        else:
+            # Other tiles (streets, etc.) - treat as exterior
+            exterior_candidates.append((dx, dy))
     
+    # Prefer exterior placement (platform goes OUTSIDE building)
+    if exterior_candidates:
+        dx, dy = exterior_candidates[0]
+        px, py = x + dx, y + dy
+        print(f"[FireEscape] Can place at ({x},{y},{z}), platform will be at ({px},{py}) [EXTERIOR]")
+        return True, (dx, dy)
+    
+    # Fallback to interior if no exterior available
+    if interior_candidates:
+        dx, dy = interior_candidates[0]
+        px, py = x + dx, y + dy
+        print(f"[FireEscape] Can place at ({x},{y},{z}), platform will be at ({px},{py}) [INTERIOR - fallback]")
+        return True, (dx, dy)
+    
+    print(f"[FireEscape] Cannot place - no valid adjacent tile for platform")
     return False, None
 
 
@@ -975,11 +1028,8 @@ def place_fire_escape(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     dx, dy = platform_dir
     platform_x, platform_y = x + dx, y + dy
     
-    # Double-check platform tile is valid (safety check)
-    # Platform can be on empty (air/ground) or roof (exterior roof)
-    platform_tile = grid.get_tile(platform_x, platform_y, z)
-    if platform_tile not in ("empty", "roof"):
-        return False
+    # Platform can go on any tile (we already validated in can_place_fire_escape)
+    # This allows platforms on floors, roofs, empty tiles, etc.
     
     # Create construction site
     site = {
@@ -1006,7 +1056,8 @@ def place_fire_escape(grid: Grid, x: int, y: int, z: int = 0) -> bool:
     
     # Create construction job
     from jobs import add_job
-    add_job("construction", x, y, required=building_def["construction_work"], category="construction", subtype="fire_escape", z=z)
+    job = add_job("construction", x, y, required=building_def["construction_work"], category="construction", subtype="fire_escape", z=z)
+    print(f"[FireEscape] Created construction job at ({x}, {y}, {z}) - Job ID in queue, work required: {building_def['construction_work']}")
     return True
 
 

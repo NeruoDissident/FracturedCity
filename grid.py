@@ -215,17 +215,17 @@ class Grid:
             # Only finished buildings/walls block movement, not those under construction
             # Doors are handled specially - they can be opened
             # Fire escapes are walkable (they're transition points)
-            # roof tiles are NOT walkable - must be converted to roof_access first
-            if value in ("finished_building", "finished_wall", "finished_wall_autotile", "finished_wall_advanced", "roof", "finished_salvagers_bench", "finished_generator", "finished_stove", "finished_gutter_forge", "finished_skinshop_loom", "finished_cortex_spindle", "finished_barracks"):
+            # Roofs are now walkable by default (no need for allow tool)
+            if value in ("finished_building", "finished_wall", "finished_wall_autotile", "finished_wall_advanced", "finished_salvagers_bench", "finished_generator", "finished_stove", "finished_gutter_forge", "finished_skinshop_loom", "finished_cortex_spindle", "finished_barracks"):
                 self.walkable[z][y][x] = False
             elif value == "finished_window":
                 # Windows are passable (like doors) - colonists can climb through
                 self.walkable[z][y][x] = True
-            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "barracks", "street", "street_cracked", "street_scar", "street_ripped", "street_designated", "sidewalk", "sidewalk_designated", "debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap", "dirt", "grass", "rock", "scorched", "gutter_slab", "crash_bed"):
+            elif value in ("empty", "building", "wall", "wall_advanced", "door", "floor", "finished_floor", "roof", "roof_floor", "roof_access", "fire_escape", "finished_fire_escape", "window_tile", "fire_escape_platform", "window", "bridge", "finished_bridge", "salvagers_bench", "generator", "stove", "gutter_forge", "skinshop_loom", "cortex_spindle", "barracks", "street", "street_cracked", "street_scar", "street_ripped", "street_designated", "sidewalk", "sidewalk_designated", "debris", "weeds", "prop_barrel", "prop_sign", "prop_scrap", "dirt", "grass", "rock", "scorched", "gutter_slab", "crash_bed"):
                 # window_tile: passable wall with fire escape window
                 # fire_escape_platform: external platform for fire escape
-                # roof_access: walkable/buildable rooftop tile (player-allowed)
-                # roof_floor: legacy walkable roof (kept for compatibility)
+                # roof: walkable rooftop tile (now walkable by default)
+                # roof_access/roof_floor: legacy walkable roof (kept for compatibility)
                 # bridge/finished_bridge: walkable connections between buildings
                 # street/street_designated: walkable city streets
                 # sidewalk/debris/weeds/props: decorative, walkable

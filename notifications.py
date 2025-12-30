@@ -107,6 +107,11 @@ def add_notification(ntype: NotificationType, title: str, detail: str = "",
     pass
 
 
+def get_notifications() -> List[Notification]:
+    """Get list of active notifications."""
+    return _notifications.copy()
+
+
 def update_notifications():
     """Update all notifications, removing expired ones."""
     global _notifications

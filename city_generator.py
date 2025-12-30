@@ -354,18 +354,18 @@ class CityGenerator:
         """
         print("[CityGen] Generating procedural city...")
         
-        # Step 1: Generate road network
+        # Step 1: Generate road network (FEWER roads = BIGGER blocks = BIGGER buildings)
         print("[CityGen] Creating road network...")
-        self.road_network.generate_arterial_roads(num_horizontal=4, num_vertical=4)
-        self.road_network.generate_local_streets(block_size_range=(10, 16))
+        self.road_network.generate_arterial_roads(num_horizontal=3, num_vertical=3)
+        self.road_network.generate_local_streets(block_size_range=(15, 25))
         
-        # Step 2: Add curved connector roads for organic feel
+        # Step 2: Add curved connector roads for organic feel (FEWER for bigger blocks)
         print("[CityGen] Adding curved roads...")
-        self.road_network.add_curved_roads(num_curves=8)
+        self.road_network.add_curved_roads(num_curves=3)
         
-        # Step 3: Add alleys through blocks
+        # Step 3: Add alleys through blocks (FEWER for bigger blocks)
         print("[CityGen] Adding alleys...")
-        self.road_network.add_alleys(probability=0.3)
+        self.road_network.add_alleys(probability=0.1)
         
         # Step 4: Identify city blocks (before placing roads, so we know zones)
         blocks = self.road_network.get_city_blocks()
@@ -382,15 +382,72 @@ class CityGenerator:
             if self.grid.in_bounds(x, y, 0):
                 self.grid.set_tile(x, y, "street", z=0)
         
-        # Step 6: Place buildings in blocks
+        # Step 6: Place buildings in blocks - dense placement with new tile system
         print("[CityGen] Placing buildings...")
-        building_count = self._place_buildings_in_blocks(blocks)
+        building_count = 0
+        
+        for block in blocks:
+            if block["zone_type"] == "road":
+                continue
+            
+            # Skip only TINY blocks (need at least 3x3)
+            if block["width"] < 3 or block["height"] < 3:
+                continue
+            
+            # MAXIMUM DENSITY: Fill each block with building(s) sized to fit
+            # Calculate building size based on block size
+            margin = 1
+            available_width = block["width"] - margin * 2
+            available_height = block["height"] - margin * 2
+            
+            # Place one LARGE building filling most of block (5-20 tiles)
+            bldg_width = max(5, min(20, available_width))
+            bldg_height = max(5, min(20, available_height))
+            
+            bx = block["x"] + margin
+            by = block["y"] + margin
+            
+            if self._place_building_new_system(bx, by, bldg_width, bldg_height):
+                building_count += 1
         
         # Step 7: Add landmarks (plazas, parks, major structures)
         print("[CityGen] Adding landmarks...")
         self._add_landmarks(blocks)
         
-        # Step 8: Find spawn location (near center, on a road)
+        # Step 8: Spawn resources throughout city (overlay system)
+        print("[CityGen] Spawning resources...")
+        from resources import _place_node, spawn_salvage_object
+        
+        wood_count = 0
+        mineral_count = 0
+        food_count = 0
+        scrap_count = 0
+        
+        # Scatter resources across map - 15-20% spawn rate for good density
+        for y in range(self.grid.height):
+            for x in range(self.grid.width):
+                if not self.grid.in_bounds(x, y, 0):
+                    continue
+                
+                # 18% chance to spawn a resource on this tile
+                if random.random() < 0.18:
+                    resource_type = random.choice(["tree", "mineral_node", "food_plant", "salvage"])
+                    
+                    if resource_type == "tree":
+                        if _place_node(self.grid, x, y, "tree"):
+                            wood_count += 1
+                    elif resource_type == "mineral_node":
+                        if _place_node(self.grid, x, y, "mineral_node"):
+                            mineral_count += 1
+                    elif resource_type == "food_plant":
+                        if _place_node(self.grid, x, y, "food_plant"):
+                            food_count += 1
+                    elif resource_type == "salvage":
+                        if spawn_salvage_object(x, y, "salvage_pile"):
+                            self.grid.set_tile(x, y, "salvage_object", z=0)
+                            scrap_count += 1
+        
+        # Step 9: Find spawn location (near center, on a road)
         spawn_x, spawn_y = self._find_spawn_location()
         
         print(f"[CityGen] City generation complete!")
@@ -398,6 +455,7 @@ class CityGenerator:
         print(f"[CityGen]   Blocks: {len(blocks)}")
         print(f"[CityGen]   Buildings: {building_count}")
         print(f"[CityGen]   Curves & Alleys: Added for organic layout")
+        print(f"[CityGen]   Resources: {wood_count} wood, {mineral_count} mineral, {food_count} food, {scrap_count} scrap")
         print(f"[CityGen]   Spawn: ({spawn_x}, {spawn_y})")
         
         return spawn_x, spawn_y
@@ -481,7 +539,7 @@ class CityGenerator:
         
         return tiles_placed
     
-    def _place_buildings_in_blocks(self, blocks: List[Dict]) -> int:
+    def _OLD_place_buildings_in_blocks(self, blocks: List[Dict]) -> int:
         """Place buildings within city blocks.
         
         Returns number of buildings placed.
@@ -715,6 +773,142 @@ class CityGenerator:
                         y = block["y"] + dy
                         if self.grid.in_bounds(x, y, 0) and random.random() < 0.3:
                             self.grid.set_tile(x, y, "debris", z=0)
+    
+    def _OLD_spawn_resources(self, blocks: List[Dict]) -> Dict[str, int]:
+        """Spawn harvestable resources throughout the city.
+        
+        Returns dict with counts of each resource type spawned.
+        """
+        from resources import _place_node, spawn_salvage_object
+        
+        wood_count = 0
+        mineral_count = 0
+        food_count = 0
+        scrap_count = 0
+        
+        # Debug: Check first few blocks
+        debug_count = 0
+        
+        for block in blocks:
+            # Skip roads
+            if block["zone_type"] == "road":
+                continue
+            
+            # Wood patches - ABUNDANT in all blocks (this is a colony sim, need resources to build!)
+            # Place 15-25 tree nodes per block
+            num_trees = random.randint(15, 25)
+            for _ in range(num_trees):
+                tx = block["x"] + random.randint(1, max(1, block["width"] - 2))
+                ty = block["y"] + random.randint(1, max(1, block["height"] - 2))
+                if self.grid.in_bounds(tx, ty, 0):
+                    if _place_node(self.grid, tx, ty, "tree"):
+                        wood_count += 1
+            
+            # Mineral nodes - ABUNDANT rubble piles everywhere
+            # Place 10-20 mineral nodes per block
+            num_minerals = random.randint(10, 20)
+            for _ in range(num_minerals):
+                mx = block["x"] + random.randint(1, max(1, block["width"] - 2))
+                my = block["y"] + random.randint(1, max(1, block["height"] - 2))
+                if self.grid.in_bounds(mx, my, 0):
+                    if _place_node(self.grid, mx, my, "mineral_node"):
+                        mineral_count += 1
+            
+            # Food plants - scattered throughout
+            # Place 8-15 food plants per block
+            num_food = random.randint(8, 15)
+            for _ in range(num_food):
+                fx = block["x"] + random.randint(1, max(1, block["width"] - 2))
+                fy = block["y"] + random.randint(1, max(1, block["height"] - 2))
+                if self.grid.in_bounds(fx, fy, 0):
+                    if _place_node(self.grid, fx, fy, "food_plant"):
+                        food_count += 1
+            
+            # Scrap/salvage - EVERYWHERE in a ruined city
+            # Place 12-20 salvage objects per block
+            num_scrap = random.randint(12, 20)
+            for _ in range(num_scrap):
+                sx = block["x"] + random.randint(1, max(1, block["width"] - 2))
+                sy = block["y"] + random.randint(1, max(1, block["height"] - 2))
+                if self.grid.in_bounds(sx, sy, 0):
+                    if spawn_salvage_object(sx, sy, "salvage_pile"):
+                        self.grid.set_tile(sx, sy, "salvage_object", z=0)
+                        scrap_count += 1
+        
+        return {
+            "wood": wood_count,
+            "mineral": mineral_count,
+            "food": food_count,
+            "scrap": scrap_count
+        }
+    
+    def _place_building_new_system(self, x: int, y: int, width: int, height: int) -> bool:
+        """Place a building using NEW tile system (autotiling, layering).
+        
+        Returns True if building was placed.
+        """
+        # Check if area is clear
+        for dx in range(width):
+            for dy in range(height):
+                if not self.grid.in_bounds(x + dx, y + dy, 0):
+                    return False
+                tile = self.grid.get_tile(x + dx, y + dy, 0)
+                # Allow placement on ground tiles
+                if tile not in ["empty", "ground_concrete_0", "ground_dirt_overlay"]:
+                    return False
+        
+        # Place floor tiles (interior)
+        for dx in range(1, width - 1):
+            for dy in range(1, height - 1):
+                self.grid.set_tile(x + dx, y + dy, "finished_floor", z=0)
+        
+        # Place walls (edges) - use finished_wall_autotile for proper autotiling
+        # Determine building condition
+        condition = random.choices(
+            ["intact", "partial", "ruined"],
+            weights=[0.3, 0.4, 0.3]
+        )[0]
+        
+        if condition == "intact":
+            # Full walls with entrance
+            entrance_side = random.choice(["north", "south", "east", "west"])
+            entrance_pos = random.randint(2, max(2, min(width, height) - 3))
+            
+            for dx in range(width):
+                for dy in range(height):
+                    is_edge = (dx == 0 or dx == width - 1 or dy == 0 or dy == height - 1)
+                    if not is_edge:
+                        continue
+                    
+                    # Skip entrance
+                    if entrance_side == "north" and dy == 0 and dx == entrance_pos:
+                        continue
+                    if entrance_side == "south" and dy == height - 1 and dx == entrance_pos:
+                        continue
+                    if entrance_side == "east" and dx == width - 1 and dy == entrance_pos:
+                        continue
+                    if entrance_side == "west" and dx == 0 and dy == entrance_pos:
+                        continue
+                    
+                    self.grid.set_tile(x + dx, y + dy, "finished_wall_autotile", z=0)
+        
+        elif condition == "partial":
+            # Partial walls (50% coverage)
+            for dx in range(width):
+                for dy in range(height):
+                    is_edge = (dx == 0 or dx == width - 1 or dy == 0 or dy == height - 1)
+                    if is_edge and random.random() < 0.5:
+                        self.grid.set_tile(x + dx, y + dy, "finished_wall_autotile", z=0)
+        
+        else:  # ruined
+            # Minimal walls (25% coverage)
+            for dx in range(width):
+                for dy in range(height):
+                    is_edge = (dx == 0 or dx == width - 1 or dy == 0 or dy == height - 1)
+                    if is_edge and random.random() < 0.25:
+                        self.grid.set_tile(x + dx, y + dy, "finished_wall_autotile", z=0)
+        
+        return True
     
     def _find_spawn_location(self) -> Tuple[int, int]:
         """Find a good spawn location near center on a road."""

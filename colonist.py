@@ -2933,10 +2933,20 @@ class Colonist:
                     buildings.register_workstation(job.x, job.y, job.z, "salvagers_bench")
                 elif current_tile == "generator":
                     grid.set_tile(job.x, job.y, "finished_generator", z=job.z)
+                    # Mark multi-tile footprint as unwalkable
+                    width, height = buildings.get_building_size("generator")
+                    for dy in range(height):
+                        for dx in range(width):
+                            grid.walkable[job.z][job.y + dy][job.x + dx] = False
                     # Register as workstation
                     buildings.register_workstation(job.x, job.y, job.z, "generator")
                 elif current_tile == "stove":
                     grid.set_tile(job.x, job.y, "finished_stove", z=job.z)
+                    # Mark multi-tile footprint as unwalkable
+                    width, height = buildings.get_building_size("stove")
+                    for dy in range(height):
+                        for dx in range(width):
+                            grid.walkable[job.z][job.y + dy][job.x + dx] = False
                     # Register as workstation
                     buildings.register_workstation(job.x, job.y, job.z, "stove")
                 elif current_tile == "gutter_forge":
