@@ -124,7 +124,7 @@ def place_furniture_direct(grid: Grid, x: int, y: int, z: int, item_id: str) -> 
     
     Args:
         grid: The game grid
-        x, y, z: Target coordinates
+        x, y, z: Target coordinates (origin for multi-tile)
         item_id: ID of the furniture item
         
     Returns:
@@ -137,21 +137,31 @@ def place_furniture_direct(grid: Grid, x: int, y: int, z: int, item_id: str) -> 
     if tile_type is None:
         return False
     
-    # Store original tile type before placing furniture (for rendering background)
-    original_tile = grid.get_tile(x, y, z)
-    if original_tile and original_tile not in ("empty", "air"):
-        grid.base_tiles[(x, y, z)] = original_tile
-        print(f"[Furniture] Storing base tile at ({x}, {y}, {z}): {original_tile}")
+    # Get size for multi-tile furniture
+    width, height = get_furniture_size(item_id)
     
-    # Place the furniture tile
+    # Store original tile and mark footprint as unwalkable
+    for dy in range(height):
+        for dx in range(width):
+            tile_x = x + dx
+            tile_y = y + dy
+            
+            # Store original tile type before placing furniture (for rendering background)
+            original_tile = grid.get_tile(tile_x, tile_y, z)
+            if original_tile and original_tile not in ("empty", "air"):
+                grid.base_tiles[(tile_x, tile_y, z)] = original_tile
+                if dx == 0 and dy == 0:  # Only log once for origin
+                    print(f"[Furniture] Storing base tile at ({tile_x}, {tile_y}, {z}): {original_tile}")
+            
+            # Mark as walkable or not based on furniture type
+            # Beds and large furniture block movement
+            if item_id in ("crash_bed", "comfort_chair", "storage_locker", "drum_kit", "synth"):
+                grid.walkable[z][tile_y][tile_x] = False
+            else:
+                # Small items like stools, guitars, harmonicas don't block
+                grid.walkable[z][tile_y][tile_x] = True
+    
+    # Place the furniture tile ONLY on origin (multi-tile renderer handles the rest)
     grid.set_tile(x, y, tile_type, z=z)
-    
-    # Mark as walkable or not based on furniture type
-    # Beds and large furniture block movement
-    if item_id in ("crash_bed", "comfort_chair", "storage_locker", "drum_kit", "synth"):
-        grid.walkable[z][y][x] = False
-    else:
-        # Small items like stools, guitars, harmonicas don't block
-        grid.walkable[z][y][x] = True
     
     return True

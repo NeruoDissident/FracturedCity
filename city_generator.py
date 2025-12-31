@@ -292,7 +292,13 @@ class RoadNetwork:
     def _determine_zone_type(self, x: int, y: int, width: int, height: int) -> str:
         """Determine zone type for a city block.
         
-        Returns: "residential", "commercial", "industrial", or "abandoned"
+        Returns: "residential", "commercial", "industrial", "abandoned", "suburban", or "rural"
+        
+        Creates natural urban sprawl:
+        - Core: Dense commercial/residential
+        - Mid: Residential/industrial
+        - Outer: Suburban (fewer buildings, more nature)
+        - Edge: Rural (mostly nature, few intact buildings)
         """
         # Distance from center influences zone type
         center_x = self.width // 2
@@ -304,27 +310,37 @@ class RoadNetwork:
         normalized_dist = dist_from_center / max_dist
         
         # Zone distribution based on distance from center
-        # Center: More commercial
-        # Mid: Residential
-        # Edge: Industrial and abandoned
+        # Creates natural urban -> suburban -> rural gradient
         
-        if normalized_dist < 0.3:
-            # Central area - mostly commercial
+        if normalized_dist < 0.25:
+            # Urban core - dense commercial/residential
             return random.choices(
                 ["commercial", "residential", "abandoned"],
                 weights=[0.6, 0.3, 0.1]
             )[0]
-        elif normalized_dist < 0.6:
-            # Mid area - mostly residential
+        elif normalized_dist < 0.45:
+            # Inner city - residential/industrial
             return random.choices(
-                ["residential", "commercial", "abandoned"],
-                weights=[0.6, 0.2, 0.2]
+                ["residential", "commercial", "industrial", "abandoned"],
+                weights=[0.5, 0.2, 0.2, 0.1]
+            )[0]
+        elif normalized_dist < 0.65:
+            # Suburban transition - fewer buildings, more nature
+            return random.choices(
+                ["suburban", "residential", "abandoned"],
+                weights=[0.6, 0.3, 0.1]
+            )[0]
+        elif normalized_dist < 0.85:
+            # Outer suburbs - sparse buildings
+            return random.choices(
+                ["suburban", "rural", "abandoned"],
+                weights=[0.5, 0.4, 0.1]
             )[0]
         else:
-            # Outer area - industrial and abandoned
+            # Rural outskirts - mostly nature
             return random.choices(
-                ["industrial", "abandoned", "residential"],
-                weights=[0.5, 0.3, 0.2]
+                ["rural", "suburban"],
+                weights=[0.8, 0.2]
             )[0]
     
     def _is_horizontal_road(self, x: int, y: int) -> bool:
@@ -414,38 +430,9 @@ class CityGenerator:
         print("[CityGen] Adding landmarks...")
         self._add_landmarks(blocks)
         
-        # Step 8: Spawn resources throughout city (overlay system)
-        print("[CityGen] Spawning resources...")
-        from resources import _place_node, spawn_salvage_object
-        
-        wood_count = 0
-        mineral_count = 0
-        food_count = 0
-        scrap_count = 0
-        
-        # Scatter resources across map - 15-20% spawn rate for good density
-        for y in range(self.grid.height):
-            for x in range(self.grid.width):
-                if not self.grid.in_bounds(x, y, 0):
-                    continue
-                
-                # 18% chance to spawn a resource on this tile
-                if random.random() < 0.18:
-                    resource_type = random.choice(["tree", "mineral_node", "food_plant", "salvage"])
-                    
-                    if resource_type == "tree":
-                        if _place_node(self.grid, x, y, "tree"):
-                            wood_count += 1
-                    elif resource_type == "mineral_node":
-                        if _place_node(self.grid, x, y, "mineral_node"):
-                            mineral_count += 1
-                    elif resource_type == "food_plant":
-                        if _place_node(self.grid, x, y, "food_plant"):
-                            food_count += 1
-                    elif resource_type == "salvage":
-                        if spawn_salvage_object(x, y, "salvage_pile"):
-                            self.grid.set_tile(x, y, "salvage_object", z=0)
-                            scrap_count += 1
+        # Step 8: Spawn resources throughout city (zone-based intelligent placement)
+        print("[CityGen] Spawning resources (zone-based)...")
+        wood_count, mineral_count, food_count, scrap_count = self._spawn_resources_intelligent(blocks)
         
         # Step 9: Find spawn location (near center, on a road)
         spawn_x, spawn_y = self._find_spawn_location()
@@ -517,25 +504,11 @@ class CityGenerator:
                     self.grid.set_tile(x, y, "ground_concrete_0", z=0)
                     tiles_placed += 1
         
-        # Generate organic dirt patches using terrain overlay generator
-        print("[CityGen] Generating organic dirt patches...")
-        from terrain_overlay_generator import TerrainOverlayGenerator
-        overlay_gen = TerrainOverlayGenerator(self.grid)
+        # Generate zone-aware organic dirt patches
+        print("[CityGen] Generating zone-aware dirt patches...")
+        dirt_count = self._place_dirt_intelligent(blocks)
         
-        dirt_tiles = overlay_gen.generate_overlay(
-            overlay_type="ground_dirt_overlay_autotile",
-            num_patches=(8, 15),  # More patches for city environment
-            radius_range=(8, 20),  # Varied sizes
-            strength_range=(0.5, 0.9),
-            threshold_base=0.4,
-            threshold_variance=0.3
-        )
-        
-        # Place dirt tiles in overlay layer
-        for x, y in dirt_tiles:
-            self.grid.overlay_tiles[(x, y, 0)] = "ground_dirt_overlay_autotile"
-        
-        print(f"[CityGen] Placed {len(dirt_tiles)} dirt overlay tiles in organic patterns")
+        print(f"[CityGen] Placed {dirt_count} dirt overlay tiles (zone-aware)")
         
         return tiles_placed
     
@@ -547,11 +520,33 @@ class CityGenerator:
         building_count = 0
         
         for block in blocks:
-            # Decide how to fill this block
-            fill_type = random.choices(
-                ["dense", "sparse", "single_large", "empty"],
-                weights=[0.4, 0.3, 0.2, 0.1]
-            )[0]
+            zone_type = block["zone_type"]
+            
+            # Adjust building density based on zone type
+            if zone_type == "rural":
+                # Rural: Very few buildings (10% chance)
+                if random.random() < 0.1:
+                    fill_type = random.choices(
+                        ["sparse", "single_large", "empty"],
+                        weights=[0.5, 0.3, 0.2]
+                    )[0]
+                else:
+                    fill_type = "empty"
+            elif zone_type == "suburban":
+                # Suburban: Sparse buildings (40% chance)
+                if random.random() < 0.4:
+                    fill_type = random.choices(
+                        ["sparse", "single_large", "empty"],
+                        weights=[0.6, 0.2, 0.2]
+                    )[0]
+                else:
+                    fill_type = "empty"
+            else:
+                # Urban zones: Normal density
+                fill_type = random.choices(
+                    ["dense", "sparse", "single_large", "empty"],
+                    weights=[0.4, 0.3, 0.2, 0.1]
+                )[0]
             
             if fill_type == "dense":
                 # Multiple small buildings
@@ -570,6 +565,7 @@ class CityGenerator:
         """Fill block with multiple small buildings."""
         count = 0
         margin = 1
+        zone_type = block.get("zone_type")
         
         # Try to fit multiple buildings
         x = block["x"] + margin
@@ -583,7 +579,7 @@ class CityGenerator:
                 # Check if it fits
                 if x + bldg_width <= block["x"] + block["width"] - margin:
                     if y + bldg_height <= block["y"] + block["height"] - margin:
-                        self._place_single_building(x, y, bldg_width, bldg_height)
+                        self._place_single_building(x, y, bldg_width, bldg_height, zone_type)
                         count += 1
                 
                 y += bldg_height + 1  # Gap between buildings
@@ -593,9 +589,10 @@ class CityGenerator:
         return count
     
     def _place_sparse_buildings(self, block: Dict) -> int:
-        """Place a few medium buildings with space between."""
+        """Place a few medium-sized buildings with gaps."""
         count = 0
-        num_buildings = random.randint(1, 3)
+        num_buildings = random.randint(2, 4)
+        zone_type = block.get("zone_type")
         
         for _ in range(num_buildings):
             # Random position in block
@@ -608,7 +605,7 @@ class CityGenerator:
             x = block["x"] + random.randint(1, max(1, block["width"] - bldg_width - 1))
             y = block["y"] + random.randint(1, max(1, block["height"] - bldg_height - 1))
             
-            if self._place_single_building(x, y, bldg_width, bldg_height):
+            if self._place_single_building(x, y, bldg_width, bldg_height, zone_type):
                 count += 1
         
         return count
@@ -618,6 +615,7 @@ class CityGenerator:
         margin = 1
         bldg_width = block["width"] - margin * 2
         bldg_height = block["height"] - margin * 2
+        zone_type = block.get("zone_type")
         
         if bldg_width < 3 or bldg_height < 3:
             return 0
@@ -625,12 +623,15 @@ class CityGenerator:
         x = block["x"] + margin
         y = block["y"] + margin
         
-        if self._place_single_building(x, y, bldg_width, bldg_height):
+        if self._place_single_building(x, y, bldg_width, bldg_height, zone_type):
             return 1
         return 0
     
-    def _place_single_building(self, x: int, y: int, width: int, height: int) -> bool:
+    def _place_single_building(self, x: int, y: int, width: int, height: int, zone_type: str = None) -> bool:
         """Place a single building structure.
+        
+        Args:
+            zone_type: Optional zone type to adjust building condition
         
         Returns True if successful.
         """
@@ -643,11 +644,25 @@ class CityGenerator:
                 if tile != "empty":
                     return False
         
-        # Determine building condition
-        condition = random.choices(
-            ["intact", "partial", "ruined"],
-            weights=[0.15, 0.35, 0.5]  # Most buildings are damaged
-        )[0]
+        # Determine building condition based on zone
+        if zone_type == "rural":
+            # Rural buildings are mostly intact (survivors' homes)
+            condition = random.choices(
+                ["intact", "partial", "ruined"],
+                weights=[0.7, 0.2, 0.1]
+            )[0]
+        elif zone_type == "suburban":
+            # Suburban buildings are moderately intact
+            condition = random.choices(
+                ["intact", "partial", "ruined"],
+                weights=[0.5, 0.3, 0.2]
+            )[0]
+        else:
+            # Urban buildings are mostly damaged
+            condition = random.choices(
+                ["intact", "partial", "ruined"],
+                weights=[0.15, 0.35, 0.5]
+            )[0]
         
         # Place floor
         for dx in range(1, width - 1):
@@ -863,7 +878,7 @@ class CityGenerator:
                 self.grid.set_tile(x + dx, y + dy, "finished_floor", z=0)
         
         # Place walls (edges) - use finished_wall_autotile for proper autotiling
-        # Determine building condition
+        # Determine building condition (will be overridden by _place_single_building if zone is passed)
         condition = random.choices(
             ["intact", "partial", "ruined"],
             weights=[0.3, 0.4, 0.3]
@@ -928,3 +943,225 @@ class CityGenerator:
                 best_pos = (x, y)
         
         return best_pos
+    
+    def _spawn_resources_intelligent(self, blocks: List[Dict]) -> Tuple[int, int, int, int]:
+        """Spawn resources based on zone types and building conditions.
+        
+        Returns: (wood_count, mineral_count, food_count, scrap_count)
+        """
+        from resources import _place_node, spawn_salvage_object
+        
+        wood_count = 0
+        mineral_count = 0
+        food_count = 0
+        scrap_count = 0
+        
+        # Process each block based on zone type
+        for block in blocks:
+            zone_type = block["zone_type"]
+            x_start = block["x"]
+            y_start = block["y"]
+            width = block["width"]
+            height = block["height"]
+            
+            # Determine resource spawn rates based on zone
+            if zone_type == "rural":
+                # Rural: Mostly trees, minimal other resources
+                tree_rate = 0.35  # Heavy tree coverage
+                mineral_rate = 0.03  # Very few minerals
+                food_rate = 0.05  # Minimal canned food
+                scrap_rate = 0.04  # Very little scrap
+            elif zone_type == "suburban":
+                # Suburban: Heavy trees, moderate resources
+                tree_rate = 0.25  # Lots of trees
+                mineral_rate = 0.08  # Some minerals
+                food_rate = 0.12  # Moderate canned food
+                scrap_rate = 0.10  # Some scrap
+            elif zone_type == "abandoned":
+                # Abandoned: Heavy resources, lots of scrap and minerals
+                tree_rate = 0.15  # Trees growing through ruins
+                mineral_rate = 0.20  # Rubble piles
+                food_rate = 0.18  # Canned food in ruins
+                scrap_rate = 0.25  # Salvage everywhere
+            elif zone_type == "industrial":
+                # Industrial: Minerals and scrap, few trees
+                tree_rate = 0.05
+                mineral_rate = 0.18
+                food_rate = 0.08  # Some canned food in warehouses
+                scrap_rate = 0.22
+            elif zone_type == "residential":
+                # Residential: Trees, food, moderate scrap
+                tree_rate = 0.12
+                mineral_rate = 0.08
+                food_rate = 0.15  # Canned food in homes
+                scrap_rate = 0.12
+            else:  # commercial
+                # Commercial: Least resources, some food/scrap
+                tree_rate = 0.03
+                mineral_rate = 0.05
+                food_rate = 0.10  # Canned food in stores
+                scrap_rate = 0.10
+            
+            # Spawn resources in this block
+            for dy in range(height):
+                for dx in range(width):
+                    x = x_start + dx
+                    y = y_start + dy
+                    
+                    if not self.grid.in_bounds(x, y, 0):
+                        continue
+                    
+                    tile = self.grid.get_tile(x, y, 0)
+                    
+                    # Trees - cluster in open areas (not on floors)
+                    if tile in ["ground_concrete_0", "ground_dirt_overlay_autotile"] and random.random() < tree_rate:
+                        if _place_node(self.grid, x, y, "tree"):
+                            wood_count += 1
+                    
+                    # Minerals - near walls and on open ground
+                    elif tile in ["ground_concrete_0", "ground_dirt_overlay_autotile"] and random.random() < mineral_rate:
+                        # Check if near a wall (more likely near ruins)
+                        near_wall = False
+                        for check_dx in [-1, 0, 1]:
+                            for check_dy in [-1, 0, 1]:
+                                if check_dx == 0 and check_dy == 0:
+                                    continue
+                                check_tile = self.grid.get_tile(x + check_dx, y + check_dy, 0)
+                                if check_tile and "wall" in check_tile:
+                                    near_wall = True
+                                    break
+                            if near_wall:
+                                break
+                        
+                        # Higher chance near walls
+                        if near_wall or random.random() < 0.5:
+                            if _place_node(self.grid, x, y, "mineral_node"):
+                                mineral_count += 1
+                    
+                    # Food (canned) - INSIDE and AROUND ruined buildings
+                    elif tile == "finished_floor" and random.random() < food_rate:
+                        if _place_node(self.grid, x, y, "food_plant"):
+                            food_count += 1
+                    # Also spawn food on ground near buildings
+                    elif tile in ["ground_concrete_0", "ground_dirt_overlay_autotile"] and random.random() < (food_rate * 0.3):
+                        # Check if near a floor tile (near building)
+                        near_building = False
+                        for check_dx in [-1, 0, 1]:
+                            for check_dy in [-1, 0, 1]:
+                                if check_dx == 0 and check_dy == 0:
+                                    continue
+                                check_tile = self.grid.get_tile(x + check_dx, y + check_dy, 0)
+                                if check_tile == "finished_floor":
+                                    near_building = True
+                                    break
+                            if near_building:
+                                break
+                        
+                        if near_building:
+                            if _place_node(self.grid, x, y, "food_plant"):
+                                food_count += 1
+                    
+                    # Scrap - everywhere, but concentrated in industrial/abandoned
+                    if random.random() < scrap_rate:
+                        # Can spawn on floors or ground
+                        if tile in ["finished_floor", "ground_concrete_0", "ground_dirt_overlay_autotile"]:
+                            if spawn_salvage_object(x, y, "salvage_pile"):
+                                self.grid.set_tile(x, y, "salvage_object", z=0)
+                                scrap_count += 1
+        
+        return wood_count, mineral_count, food_count, scrap_count
+    
+    def _place_dirt_intelligent(self, blocks: List[Dict]) -> int:
+        """Place dirt overlays based on zone types and building conditions.
+        
+        Returns: Number of dirt tiles placed
+        """
+        from terrain_overlay_generator import TerrainOverlayGenerator
+        overlay_gen = TerrainOverlayGenerator(self.grid)
+        
+        total_dirt_count = 0
+        
+        # Process each block based on zone type
+        for block in blocks:
+            zone_type = block["zone_type"]
+            x_start = block["x"]
+            y_start = block["y"]
+            width = block["width"]
+            height = block["height"]
+            
+            # Determine dirt density based on zone
+            if zone_type == "rural":
+                # Very heavy dirt coverage in rural areas (natural ground)
+                num_patches = random.randint(3, 6)
+                radius_range = (10, 18)
+                strength_range = (0.7, 0.95)
+            elif zone_type == "suburban":
+                # Heavy dirt in suburban areas
+                num_patches = random.randint(2, 4)
+                radius_range = (8, 14)
+                strength_range = (0.6, 0.85)
+            elif zone_type == "abandoned":
+                # Heavy dirt coverage in abandoned areas
+                num_patches = random.randint(2, 4)
+                radius_range = (6, 12)
+                strength_range = (0.6, 0.9)
+            elif zone_type == "industrial":
+                # Medium dirt in industrial zones
+                num_patches = random.randint(1, 3)
+                radius_range = (5, 10)
+                strength_range = (0.5, 0.8)
+            elif zone_type == "residential":
+                # Light dirt in residential
+                num_patches = random.randint(1, 2)
+                radius_range = (4, 8)
+                strength_range = (0.4, 0.7)
+            else:  # commercial
+                # Minimal dirt in commercial areas
+                num_patches = random.randint(0, 1)
+                radius_range = (3, 6)
+                strength_range = (0.3, 0.6)
+            
+            # Generate dirt patches for this block
+            for _ in range(num_patches):
+                # Pick a random center point in the block
+                center_x = x_start + random.randint(2, max(2, width - 3))
+                center_y = y_start + random.randint(2, max(2, height - 3))
+                
+                # Generate patch around this center
+                radius = random.randint(*radius_range)
+                strength = random.uniform(*strength_range)
+                
+                # Place dirt in a circular pattern
+                for dy in range(-radius, radius + 1):
+                    for dx in range(-radius, radius + 1):
+                        x = center_x + dx
+                        y = center_y + dy
+                        
+                        if not self.grid.in_bounds(x, y, 0):
+                            continue
+                        
+                        # Calculate distance from center
+                        dist = (dx * dx + dy * dy) ** 0.5
+                        if dist > radius:
+                            continue
+                        
+                        # Falloff based on distance
+                        falloff = 1.0 - (dist / radius)
+                        if random.random() > (falloff * strength):
+                            continue
+                        
+                        # Check tile type - only place on concrete base, avoid roads and floors
+                        tile = self.grid.get_tile(x, y, 0)
+                        if tile == "ground_concrete_0":
+                            # Don't place on roads
+                            if (x, y) not in self.road_network.roads:
+                                self.grid.overlay_tiles[(x, y, 0)] = "ground_dirt_overlay_autotile"
+                                total_dirt_count += 1
+                        # Also place dirt near ruined buildings (on floors)
+                        elif tile == "finished_floor" and zone_type in ["abandoned", "industrial"]:
+                            # 30% chance to place dirt on floors in ruined areas
+                            if random.random() < 0.3:
+                                self.grid.overlay_tiles[(x, y, 0)] = "ground_dirt_overlay_autotile"
+                                total_dirt_count += 1
+        
+        return total_dirt_count

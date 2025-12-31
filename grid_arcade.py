@@ -411,6 +411,9 @@ class GridRenderer:
                         continue
                     add_to_cache(x, y, z_level, tile_type)
         
+        # Pass 7: Construction footprint highlighting
+        # (Now drawn as outlines in _draw_construction_footprints() method)
+        
         print(f"[GridRenderer] Cached {len(sprite_list)} sprites for Z={z_level}")
         
         # Index all sprites by position for fast lookup
@@ -518,6 +521,128 @@ class GridRenderer:
                 "floor" in tile_type or tile_type in ("resource_node", "salvage_object")):
             # Use _add_structure_sprite for proper multi-tile handling
             self._add_structure_sprite(x, y, z, tile_type, 255, sprite_list)
+        
+        # Layer 7: Construction footprint highlighting
+        # Check if this tile is part of any construction site footprint
+        from buildings import get_all_construction_sites, get_building_size
+        from furniture import FURNITURE_SIZES
+        
+        construction_sites = get_all_construction_sites()
+        for (site_x, site_y, site_z), site_data in construction_sites.items():
+            if site_z != z:
+                continue
+            
+            # Get footprint size
+            building_type = site_data.get("type", "")
+            width, height = get_building_size(building_type)
+            
+            # If it's furniture, check furniture sizes
+            if width == 1 and height == 1:
+                width, height = FURNITURE_SIZES.get(building_type, (1, 1))
+            
+            # Check if (x, y) is within this construction site's footprint
+            if site_x <= x < site_x + width and site_y <= y < site_y + height:
+                # This tile is part of a construction footprint - add highlight
+                # Store for later drawing as outline (can't use sprites for outlines)
+                if not hasattr(self, '_construction_footprints'):
+                    self._construction_footprints = []
+                self._construction_footprints.append((x, y, z))
+                break  # Only need one highlight per tile
+    
+    def _draw_construction_footprints(self):
+        """Draw border outlines around construction and furniture placement footprints."""
+        if not hasattr(self, '_construction_footprints'):
+            return
+        
+        # Clear old footprints and rebuild from current construction sites
+        self._construction_footprints = []
+        
+        from buildings import get_all_construction_sites, get_building_size
+        from furniture import FURNITURE_SIZES
+        import jobs as jobs_module
+        
+        # Draw construction site footprints (teal)
+        construction_sites = get_all_construction_sites()
+        for (site_x, site_y, site_z), site_data in construction_sites.items():
+            if site_z != self.current_z:
+                continue
+            
+            # Get footprint size
+            building_type = site_data.get("type", "")
+            width, height = get_building_size(building_type)
+            
+            # If it's furniture, check furniture sizes
+            if width == 1 and height == 1:
+                width, height = FURNITURE_SIZES.get(building_type, (1, 1))
+            
+            # Draw border outline for each tile in footprint
+            for dy in range(height):
+                for dx in range(width):
+                    tile_x = site_x + dx
+                    tile_y = site_y + dy
+                    
+                    if not self.grid.in_bounds(tile_x, tile_y, site_z):
+                        continue
+                    
+                    # Draw teal border outline for construction
+                    left = tile_x * TILE_SIZE
+                    right = (tile_x + 1) * TILE_SIZE
+                    bottom = tile_y * TILE_SIZE
+                    top = (tile_y + 1) * TILE_SIZE
+                    
+                    arcade.draw_lrbt_rectangle_outline(
+                        left, right, bottom, top,
+                        color=(0, 220, 220, 200),  # Bright teal
+                        border_width=3
+                    )
+        
+        # Draw furniture placement job footprints (yellow/orange)
+        all_jobs = jobs_module.JOB_QUEUE
+        for job in all_jobs:
+            # Check for both install_furniture and place_furniture job types
+            if job.type not in ("install_furniture", "place_furniture"):
+                continue
+            
+            # For install_furniture jobs, use dest_x/dest_y (destination) not x/y (source)
+            if job.type == "install_furniture":
+                if job.dest_z != self.current_z:
+                    continue
+                job_x = job.dest_x
+                job_y = job.dest_y
+                furniture_item = job.resource_type  # install_furniture uses resource_type field
+            else:  # place_furniture
+                if job.z != self.current_z:
+                    continue
+                job_x = job.x
+                job_y = job.y
+                furniture_item = getattr(job, 'furniture_item', None)
+            
+            if job_x is None or job_y is None or furniture_item is None:
+                continue
+            
+            # Get furniture size
+            width, height = FURNITURE_SIZES.get(furniture_item, (1, 1))
+            
+            # Draw border outline for each tile in footprint
+            for dy in range(height):
+                for dx in range(width):
+                    tile_x = job_x + dx
+                    tile_y = job_y + dy
+                    
+                    if not self.grid.in_bounds(tile_x, tile_y, self.current_z):
+                        continue
+                    
+                    # Draw yellow/orange border outline for furniture placement
+                    left = tile_x * TILE_SIZE
+                    right = (tile_x + 1) * TILE_SIZE
+                    bottom = tile_y * TILE_SIZE
+                    top = (tile_y + 1) * TILE_SIZE
+                    
+                    arcade.draw_lrbt_rectangle_outline(
+                        left, right, bottom, top,
+                        color=(255, 180, 0, 200),  # Yellow/orange
+                        border_width=3
+                    )
     
     def invalidate_cache(self, z_level: int = None):
         """Invalidate Z-level(s) to force rebuild when tiles change.
@@ -686,8 +811,9 @@ class GridRenderer:
         
         if tile_type in furniture_tiles:
             # Check if this is multi-tile furniture
-            from furniture import get_furniture_size
-            width, height = get_furniture_size(tile_type)
+            # Note: For furniture, tile_type is the same as item_id (e.g., "crash_bed")
+            from furniture import FURNITURE_SIZES
+            width, height = FURNITURE_SIZES.get(tile_type, (1, 1))
             
             if width > 1 or height > 1:
                 # Skip if this tile is already part of a rendered multi-tile structure
@@ -803,22 +929,21 @@ class GridRenderer:
                 screen_y = tile_y * TILE_SIZE
                 
                 # Check if there's a stored base tile (floor)
+                # Only render floor layer if explicitly stored - otherwise let ground show through
                 floor_tile = None
                 if hasattr(self.grid, 'base_tiles'):
                     floor_tile = self.grid.base_tiles.get((tile_x, tile_y, z))
                 
-                # Default to finished_floor if no base tile stored
-                if not floor_tile:
-                    floor_tile = "finished_floor"
-                
-                floor_texture = self.get_tile_texture(floor_tile, tile_x, tile_y, z)
-                if floor_texture:
-                    floor_sprite = arcade.Sprite()
-                    floor_sprite.texture = floor_texture
-                    floor_sprite.center_x = screen_x + TILE_SIZE // 2
-                    floor_sprite.center_y = screen_y + TILE_SIZE // 2
-                    floor_sprite.alpha = opacity
-                    target_list.append(floor_sprite)
+                # Only render floor if we have a stored base tile
+                if floor_tile:
+                    floor_texture = self.get_tile_texture(floor_tile, tile_x, tile_y, z)
+                    if floor_texture:
+                        floor_sprite = arcade.Sprite()
+                        floor_sprite.texture = floor_texture
+                        floor_sprite.center_x = screen_x + TILE_SIZE // 2
+                        floor_sprite.center_y = screen_y + TILE_SIZE // 2
+                        floor_sprite.alpha = opacity
+                        target_list.append(floor_sprite)
         
         # Render structure tiles
         for dy in range(height):
@@ -968,3 +1093,6 @@ class GridRenderer:
         current_list = self.z_level_sprite_lists.get(self.current_z)
         if current_list:
             current_list.draw()
+        
+        # Draw construction footprint outlines on top
+        self._draw_construction_footprints()

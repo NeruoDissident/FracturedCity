@@ -54,6 +54,9 @@ class Job:
     delivery_queue: List[Tuple[int, int, int, int]] = field(default_factory=list)
     # Total amount to pick up for batch supply jobs
     pickup_amount: int = 1
+    # Furniture placement job metadata
+    furniture_item: str | None = None  # Item ID for furniture (e.g., "crash_bed")
+    furniture_tile: str | None = None  # Tile type for furniture (e.g., "crash_bed")
     # Additional metadata (faction, priority, etc.) can be added later via
     # new fields.
 
@@ -134,14 +137,16 @@ def add_job(
     x: int,
     y: int,
     required: int = 100,
-    resource_type: str | None = None,
     category: str | None = None,
     subtype: str | None = None,
+    resource_type: str | None = None,
     dest_x: int | None = None,
     dest_y: int | None = None,
     dest_z: int = 0,
     z: int = 0,
     pressure: int = 1,
+    furniture_item: str | None = None,
+    furniture_tile: str | None = None,
 ) -> Job:
     """Create and enqueue a new job.
 
@@ -189,6 +194,8 @@ def add_job(
         dest_x=dest_x,
         dest_y=dest_y,
         dest_z=dest_z,
+        furniture_item=furniture_item,
+        furniture_tile=furniture_tile,
     )
     JOB_QUEUE.append(job)
     # Update spatial cache

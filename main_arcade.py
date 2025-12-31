@@ -183,6 +183,10 @@ class FracturedCityWindow(arcade.Window):
         from tileset_loader import initialize_tilesets
         initialize_tilesets()
         
+        # Initialize audio system and start music
+        from audio import init_audio
+        init_audio()
+        
         # Create grid (uses global config values)
         self.grid = Grid()
         
