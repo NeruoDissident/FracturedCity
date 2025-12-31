@@ -32,6 +32,10 @@ class FracturedCityWindow(arcade.Window):
         # Clear to dark immediately
         self.clear()
         
+        # Track current window dimensions (updated on resize)
+        self.current_width = SCREEN_W
+        self.current_height = SCREEN_H
+        
         # Game state
         self.grid = None
         self.grid_renderer = None
@@ -41,7 +45,8 @@ class FracturedCityWindow(arcade.Window):
         
         # Camera for scrolling (Arcade 3.0 API)
         self.camera = arcade.camera.Camera2D()
-        self.gui_camera = arcade.camera.Camera2D()  # Fixed UI camera
+        # GUI camera for UI rendering (no zoom, centered on window)
+        self.gui_camera = arcade.camera.Camera2D()
         
         # Sprite lists (GPU batching)
         self.colonist_sprite_list = arcade.SpriteList()
@@ -221,22 +226,22 @@ class FracturedCityWindow(arcade.Window):
         cam_y = spawn_y * TILE_SIZE
         self.camera.position = (cam_x, cam_y)
         
-        # Initialize native Arcade UI
+        # Initialize native Arcade UI with current window dimensions
         from ui_arcade import ArcadeUI
-        self.ui = ArcadeUI()
+        self.ui = ArcadeUI(self.current_width, self.current_height)
         
-        # Initialize left sidebar
+        # Initialize left sidebar with current window dimensions
         from ui_arcade_panels import LeftSidebar, ColonistDetailPanel
-        self.left_sidebar = LeftSidebar()
-        self.colonist_detail_panel = ColonistDetailPanel()
+        self.left_sidebar = LeftSidebar(self.current_width, self.current_height)
+        self.colonist_detail_panel = ColonistDetailPanel(self.current_width, self.current_height)
         
         # Wire sidebar callbacks
         self.left_sidebar.on_colonist_locate = self.snap_camera_to_tile
         self.left_sidebar.on_colonist_click = self.open_colonist_detail
         
-        # Initialize notification panel
+        # Initialize notification panel with current window dimensions
         from ui_arcade_notifications import get_notification_panel
-        self.notification_panel = get_notification_panel()
+        self.notification_panel = get_notification_panel(self.current_width, self.current_height)
         
         # Initialize right panel with colonists (always visible)
         self.colonist_detail_panel.colonists = self.colonists
@@ -253,6 +258,11 @@ class FracturedCityWindow(arcade.Window):
     def on_draw(self):
         """Render the game."""
         self.clear()
+        
+        # Update current dimensions from actual window size every frame
+        # This ensures we always use the correct drawable area
+        self.current_width = self.width
+        self.current_height = self.height
         
         # Use game camera for world rendering
         self.camera.use()
@@ -378,13 +388,11 @@ class FracturedCityWindow(arcade.Window):
         # Draw day/night cycle overlay (still in world camera)
         self._draw_day_night_overlay()
         
-        # Use GUI camera for UI (default viewport, no zoom/pan)
+        # Switch to GUI camera for UI rendering
+        # GUI camera uses default projection matching window size
         self.gui_camera.use()
         
-        # GUI camera should have default projection (0,0 at bottom-left, SCREEN_W,SCREEN_H at top-right)
-        # This matches the mouse coordinate system
-        
-        # Draw native Arcade UI
+        # Draw native Arcade UI (top bar and bottom action bar)
         from time_system import get_display_string
         import zones as zones_module
         import jobs as jobs_module
@@ -408,15 +416,14 @@ class FracturedCityWindow(arcade.Window):
             "job_count": len(jobs_module.get_all_available_jobs()),
         }
         
-        # Draw clean native Arcade UI
+        # Draw top bar and bottom action bar
         self.ui.draw(game_data)
         
-        # Draw left sidebar
-        import jobs as jobs_module
+        # Draw left sidebar with resources (also has items tab)
         self.left_sidebar.draw(
             colonists=self.colonists,
             jobs=jobs_module.JOB_QUEUE,
-            items={},  # TODO: Get from stockpiles
+            items=game_data["resources"],  # Pass resources to items tab
             rooms={}   # TODO: Get from room system
         )
         
@@ -521,10 +528,10 @@ class FracturedCityWindow(arcade.Window):
         
         # Only draw if there's visible alpha
         if a > 0:
-            # Get camera viewport bounds
+            # Get camera viewport bounds using current window dimensions
             cam_x, cam_y = self.camera.position
-            viewport_width = SCREEN_W / self.zoom_level
-            viewport_height = SCREEN_H / self.zoom_level
+            viewport_width = self.current_width / self.zoom_level
+            viewport_height = self.current_height / self.zoom_level
             
             # Draw overlay covering visible area
             left = cam_x - viewport_width / 2
@@ -1034,6 +1041,31 @@ class FracturedCityWindow(arcade.Window):
         """Handle key release."""
         self.keys_pressed.discard(key)
     
+    def on_resize(self, width: int, height: int):
+        """Handle window resize - update all UI components."""
+        super().on_resize(width, height)
+        
+        # Update tracked dimensions
+        self.current_width = width
+        self.current_height = height
+        
+        print(f"[Window] Resized to {width}x{height}")
+        print(f"[Window] Window dimensions: {self.width}x{self.height}")
+        print(f"[Window] Updating UI components to new dimensions...")
+        
+        # Camera2D automatically handles viewport on resize in Arcade 3.0
+        # Just need to update UI component dimensions
+        
+        # Update UI components with new dimensions
+        if hasattr(self, 'ui'):
+            self.ui.on_resize(width, height)
+        if hasattr(self, 'left_sidebar'):
+            self.left_sidebar.on_resize(width, height)
+        if hasattr(self, 'colonist_detail_panel'):
+            self.colonist_detail_panel.on_resize(width, height)
+        if hasattr(self, 'notification_panel'):
+            self.notification_panel.on_resize(width, height)
+    
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
         """Handle mouse wheel for zoom and UI scrolling."""
         # Check if bed assignment panel wants to handle scroll
@@ -1076,8 +1108,8 @@ class FracturedCityWindow(arcade.Window):
         
         # Screen coords relative to center, then account for zoom and camera
         # Mouse (0,0) is bottom-left of screen, camera position is center of viewport
-        screen_center_x = SCREEN_W / 2
-        screen_center_y = SCREEN_H / 2
+        screen_center_x = self.current_width / 2
+        screen_center_y = self.current_height / 2
         
         # Offset from screen center, scaled by zoom, plus camera position
         world_x = ((x - screen_center_x) / self.zoom_level) + cam_x
@@ -1149,8 +1181,8 @@ class FracturedCityWindow(arcade.Window):
             if self.ui.action_bar.active_tool is None:
                 # Convert screen to world coordinates
                 world_x, world_y = self.camera.position
-                viewport_width = SCREEN_W / self.zoom_level
-                viewport_height = SCREEN_H / self.zoom_level
+                viewport_width = self.current_width / self.zoom_level
+                viewport_height = self.current_height / self.zoom_level
                 view_left = world_x - viewport_width / 2
                 view_bottom = world_y - viewport_height / 2
                 
@@ -1173,8 +1205,8 @@ class FracturedCityWindow(arcade.Window):
                 import zones as zones_module
                 # Convert screen to world coordinates
                 world_x, world_y = self.camera.position
-                viewport_width = SCREEN_W / self.zoom_level
-                viewport_height = SCREEN_H / self.zoom_level
+                viewport_width = self.current_width / self.zoom_level
+                viewport_height = self.current_height / self.zoom_level
                 view_left = world_x - viewport_width / 2
                 view_bottom = world_y - viewport_height / 2
                 

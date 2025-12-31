@@ -80,20 +80,33 @@ TAB_HEIGHT = 50
 class TopBar:
     """Top bar showing resources, time, and alerts."""
     
-    def __init__(self):
+    def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         self.x = 0
-        self.y = SCREEN_H - TOP_BAR_HEIGHT
-        self.width = SCREEN_W
+        self.y = screen_height - TOP_BAR_HEIGHT
+        self.width = screen_width
         self.height = TOP_BAR_HEIGHT
+    
+    def on_resize(self, width: int, height: int):
+        """Update dimensions on window resize."""
+        self.screen_width = width
+        self.screen_height = height
+        self.y = height - TOP_BAR_HEIGHT
+        self.width = width
         
     def draw(self, game_data: Dict):
         """Draw the top bar with resources and time."""
-        # Background
+        # Update dimensions to match current window size
+        self.width = self.screen_width
+        self.y = self.screen_height - self.height
+        
+        # Background - fills full width at top of window
         arcade.draw_lrbt_rectangle_filled(
             left=0,
             right=self.width,
             bottom=self.y,
-            top=self.y + self.height,
+            top=self.screen_height,  # Draw to actual top of window
             color=COLOR_BG_PANEL
         )
         
@@ -172,7 +185,7 @@ class TopBar:
 
         y_center = self.y + self.height / 2
         slot_w = 78
-        right_edge = SCREEN_W - RIGHT_PANEL_WIDTH - PADDING
+        right_edge = self.screen_width - RIGHT_PANEL_WIDTH - PADDING
         start_x = right_edge - slot_w * len(resource_order)
         if start_x < 260:
             start_x = 260
@@ -200,11 +213,20 @@ class TopBar:
 class ColonistListPanel:
     """Right panel showing colonist list."""
     
-    def __init__(self):
-        self.x = SCREEN_W - RIGHT_PANEL_WIDTH
+    def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        self.x = screen_width - RIGHT_PANEL_WIDTH
         self.y = 0
         self.width = RIGHT_PANEL_WIDTH
-        self.height = SCREEN_H - TOP_BAR_HEIGHT
+        self.height = screen_height - TOP_BAR_HEIGHT
+    
+    def on_resize(self, width: int, height: int):
+        """Update dimensions on window resize."""
+        self.screen_width = width
+        self.screen_height = height
+        self.x = width - RIGHT_PANEL_WIDTH
+        self.height = height - TOP_BAR_HEIGHT
         
     def draw(self, game_data: Dict):
         """Draw colonist list panel."""
@@ -272,10 +294,12 @@ class ActionBar:
     Calls existing place_wall(), place_floor(), etc. from buildings.py.
     """
     
-    def __init__(self):
+    def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         self.x = 0
         self.y = 0
-        self.width = SCREEN_W
+        self.width = screen_width
         self.height = BOTTOM_BAR_HEIGHT
         
         # Main button layout - single row at bottom
@@ -351,6 +375,11 @@ class ActionBar:
             {"label": "Workshop Table", "tool": "furn_workshop_table"},
             {"label": "Tool Rack", "tool": "furn_tool_rack"},
             {"label": "Weapon Rack", "tool": "furn_weapon_rack"},
+            {"label": "Scrap Guitar", "tool": "furn_scrap_guitar"},
+            {"label": "Drum Kit", "tool": "furn_drum_kit"},
+            {"label": "Synth", "tool": "furn_synth"},
+            {"label": "Harmonica", "tool": "furn_harmonica"},
+            {"label": "Amplifier", "tool": "furn_amp"},
         ]
         
         self.zone_submenu = [
@@ -384,6 +413,12 @@ class ActionBar:
             self.get_tooltip = get_tooltip
         except ImportError:
             self.get_tooltip = lambda item_id: (item_id, "No tooltip available", "")
+    
+    def on_resize(self, width: int, height: int):
+        """Update dimensions on window resize."""
+        self.screen_width = width
+        self.screen_height = height
+        self.width = width
         
     def update_hover(self, mouse_x: int, mouse_y: int):
         """Update hover state for tooltips."""
@@ -631,9 +666,9 @@ class ActionBar:
         # Keep on screen
         if tooltip_x < 10:
             tooltip_x = 10
-        if tooltip_x + tooltip_width > SCREEN_W - 10:
-            tooltip_x = SCREEN_W - tooltip_width - 10
-        if tooltip_y + tooltip_height > SCREEN_H - 10:
+        if tooltip_x + tooltip_width > self.screen_width - 10:
+            tooltip_x = self.screen_width - tooltip_width - 10
+        if tooltip_y + tooltip_height > self.screen_height - 10:
             tooltip_y = mouse_pos["y"] - tooltip_height - 10
         
         # Shadow
@@ -778,9 +813,18 @@ class ArcadeUI:
     Left sidebar and Right panel are in ui_arcade_panels.py and managed separately.
     """
     
-    def __init__(self):
-        self.top_bar = TopBar()
-        self.action_bar = ActionBar()
+    def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
+        self.top_bar = TopBar(screen_width, screen_height)
+        self.action_bar = ActionBar(screen_width, screen_height)
+    
+    def on_resize(self, width: int, height: int):
+        """Update dimensions on window resize."""
+        self.screen_width = width
+        self.screen_height = height
+        self.top_bar.on_resize(width, height)
+        self.action_bar.on_resize(width, height)
         
     def draw(self, game_data: Dict):
         """Draw top bar and bottom action bar."""

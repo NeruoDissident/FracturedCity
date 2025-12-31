@@ -463,8 +463,8 @@ class WorkstationPanel:
                 font_name=UI_FONT
             )
             
-            # Inputs
-            inputs = recipe.get("inputs", {})
+            # Inputs - check both "input" and "inputs" keys
+            inputs = recipe.get("inputs", recipe.get("input", {}))
             if inputs:
                 input_text = ", ".join(f"{amt} {res}" for res, amt in inputs.items())
                 arcade.draw_text(
@@ -554,6 +554,8 @@ class WorkstationPanel:
         if self.view_mode == "recipe_select" and self.hovered_recipe_idx >= 0:
             if self.hovered_recipe_idx < len(self.recipes):
                 recipe = self.recipes[self.hovered_recipe_idx]
+                print(f"[Tooltip] Showing tooltip for recipe: {recipe.get('name', 'Unknown')}")
+                print(f"[Tooltip] Recipe data: {recipe}")
         
         # Check if hovering over an order in orders view
         elif self.view_mode == "orders" and self.hovered_order_idx >= 0:
@@ -571,35 +573,59 @@ class WorkstationPanel:
             return
         
         # Build tooltip content with proper formatting
-        title = recipe["name"]
+        title = recipe.get("name", "Unknown Recipe")
         desc_lines = []
         
-        # Required materials section
-        inputs = recipe.get("inputs", {})
-        if inputs:
+        print(f"[Tooltip] Full recipe data: {recipe}")
+        
+        # Required materials section - check both "input" and "inputs" keys
+        inputs = recipe.get("inputs", recipe.get("input", {}))
+        print(f"[Tooltip] Recipe inputs: {inputs}, type: {type(inputs)}")
+        
+        if inputs and isinstance(inputs, dict):
             desc_lines.append("REQUIRED MATERIALS:")
             for resource, amount in inputs.items():
                 # Check if we have enough in stockpile
-                from resources import get_stockpile_amount
-                available = get_stockpile_amount(resource)
+                try:
+                    from resources import get_stockpile_amount
+                    available = get_stockpile_amount(resource)
+                except:
+                    available = 0
                 status = "✓" if available >= amount else "✗"
                 resource_name = resource.replace('_', ' ').title()
                 desc_lines.append(f"  {status} {amount}x {resource_name}")
                 desc_lines.append(f"     (Have: {available})")
+        else:
+            print(f"[Tooltip] No valid inputs found or inputs is not a dict")
         
-        # Output section
+        # Output section - check both "output" and "output_item"
         output_item = recipe.get("output_item")
-        if output_item:
+        output_dict = recipe.get("output", {})
+        
+        if output_dict and isinstance(output_dict, dict):
+            if desc_lines:
+                desc_lines.append("")
+            desc_lines.append("PRODUCES:")
+            for item, amount in output_dict.items():
+                desc_lines.append(f"  {amount}x {item.replace('_', ' ').title()}")
+        elif output_item:
             if desc_lines:
                 desc_lines.append("")
             desc_lines.append("PRODUCES:")
             desc_lines.append(f"  {output_item.replace('_', ' ').title()}")
         
-        # Craft time if available
-        craft_time = recipe.get("time", 0)
+        # Craft time if available - check both "time" and "work_time"
+        craft_time = recipe.get("time", recipe.get("work_time", 0))
         if craft_time > 0:
-            desc_lines.append("")
+            if desc_lines:
+                desc_lines.append("")
             desc_lines.append(f"Time: {craft_time} ticks")
+        
+        print(f"[Tooltip] desc_lines count: {len(desc_lines)}")
+        if len(desc_lines) > 0:
+            print(f"[Tooltip] First few lines: {desc_lines[:5]}")
+        else:
+            print("[Tooltip] WARNING: No description lines generated!")
         
         # Calculate tooltip size with proper padding
         padding = 16
@@ -622,6 +648,8 @@ class WorkstationPanel:
         tooltip_width = min(max_width, 400)  # Cap at 400px
         tooltip_height = padding * 2 + title_font_size + line_spacing
         tooltip_height += len(desc_lines) * (desc_font_size + 4)
+        
+        print(f"[Tooltip] Calculated dimensions: {tooltip_width}x{tooltip_height}")
         
         # Position tooltip near mouse, but keep on screen
         # Try to the right first

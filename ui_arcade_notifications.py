@@ -42,7 +42,9 @@ NOTIFICATION_PREFIXES = {
 class NotificationPanel:
     """Arcade-native notification panel with click-to-snap functionality."""
     
-    def __init__(self):
+    def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         self.max_visible = 5
         self.notification_height = 70
         self.notification_width = 380
@@ -50,15 +52,26 @@ class NotificationPanel:
         self.spacing = 8
         
         # Position: center-top (avoid overlapping right panel)
-        self.x = (SCREEN_W - self.notification_width) // 2
-        self.y = SCREEN_H - 60  # Below top bar
+        self.x = (screen_width - self.notification_width) // 2
+        self.y = screen_height - 60  # Below top bar
         
         # Track notification rects for click detection
         self.notification_rects = []  # List of (notif, x, y, w, h)
     
+    def on_resize(self, width: int, height: int):
+        """Update dimensions on window resize."""
+        self.screen_width = width
+        self.screen_height = height
+        self.x = (width - self.notification_width) // 2
+        self.y = height - 60
+    
     def draw(self):
         """Draw all active notifications."""
         from notifications import get_notifications
+        
+        # Recalculate position every frame to stay centered at top
+        self.x = (self.screen_width - self.notification_width) // 2
+        self.y = self.screen_height - 60
         
         notifications = get_notifications()
         visible_notifications = notifications[:self.max_visible]
@@ -187,9 +200,9 @@ class NotificationPanel:
 _notification_panel: Optional[NotificationPanel] = None
 
 
-def get_notification_panel() -> NotificationPanel:
+def get_notification_panel(screen_width=SCREEN_W, screen_height=SCREEN_H) -> NotificationPanel:
     """Get the singleton notification panel instance."""
     global _notification_panel
     if _notification_panel is None:
-        _notification_panel = NotificationPanel()
+        _notification_panel = NotificationPanel(screen_width, screen_height)
     return _notification_panel

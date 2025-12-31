@@ -53,11 +53,13 @@ class LeftSidebar:
     
     TABS = ["COLONISTS", "JOBS", "ITEMS", "ROOMS"]
     
-    def __init__(self):
+    def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         self.x = 0
         self.y = BOTTOM_BAR_HEIGHT
         self.width = LEFT_SIDEBAR_WIDTH
-        self.height = SCREEN_H - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
+        self.height = screen_height - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
         
         # Tab state
         self.current_tab = 0  # 0=COLONISTS, 1=JOBS, 2=ITEMS, 3=ROOMS
@@ -71,6 +73,12 @@ class LeftSidebar:
         # Callbacks
         self.on_colonist_locate: Optional[Callable] = None  # (x, y, z) -> None
         self.on_colonist_click: Optional[Callable] = None   # (colonist) -> None
+    
+    def on_resize(self, width: int, height: int):
+        """Update dimensions on window resize."""
+        self.screen_width = width
+        self.screen_height = height
+        self.height = height - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
     
     def handle_click(self, x: int, y: int, colonists: List) -> bool:
         """Handle mouse click. Returns True if consumed."""
@@ -137,6 +145,9 @@ class LeftSidebar:
     
     def draw(self, colonists: List, jobs: List, items: Dict, rooms: Dict) -> None:
         """Draw the left sidebar with premium cyberpunk styling."""
+        # Recalculate height every frame to ensure proper sizing
+        self.height = self.screen_height - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
+        
         # === MAIN BACKGROUND ===
         arcade.draw_lrbt_rectangle_filled(
             left=self.x,
@@ -232,14 +243,8 @@ class LeftSidebar:
             # JOBS tab
             self._draw_jobs_tab(jobs, content_y)
         elif self.current_tab == 2:
-            # ITEMS tab (placeholder)
-            arcade.draw_text(
-                text="ITEMS",
-                x=self.x + 10,
-                y=content_y,
-                color=COLOR_TEXT_DIM,
-                font_size=10
-            )
+            # ITEMS tab - show resources with icons
+            self._draw_items_tab(items, content_y)
         elif self.current_tab == 3:
             # ROOMS tab - show all rooms grouped by type
             self._draw_rooms_tab(rooms, content_y)
@@ -591,6 +596,116 @@ class LeftSidebar:
             return (0, 220, 220)  # Cyan
         else:
             return (200, 200, 200)  # White
+    
+    def _draw_items_tab(self, items: Dict, content_y: int) -> None:
+        """Draw the ITEMS tab content - resources with icons."""
+        # Header
+        arcade.draw_text(
+            text="Resources",
+            x=self.x + 10,
+            y=content_y,
+            color=COLOR_ACCENT_CYAN,
+            font_size=11,
+            bold=True,
+            font_name=UI_FONT
+        )
+        
+        content_y += 25
+        
+        # Resource order and colors
+        resource_order = ["wood", "scrap", "metal", "mineral", "power", "raw_food", "cooked_meal"]
+        resource_colors = {
+            "wood": (139, 90, 43),
+            "scrap": (150, 150, 150),
+            "metal": (180, 180, 200),
+            "mineral": (100, 150, 200),
+            "power": COLOR_ACCENT_CYAN,
+            "raw_food": (100, 200, 100),
+            "cooked_meal": (255, 180, 100)
+        }
+        resource_labels = {
+            "wood": "Wood",
+            "scrap": "Scrap",
+            "metal": "Metal",
+            "mineral": "Mineral",
+            "power": "Power",
+            "raw_food": "Raw Food",
+            "cooked_meal": "Cooked Meal"
+        }
+        
+        # Draw each resource with icon
+        for resource in resource_order:
+            amount = items.get(resource, 0)
+            accent = resource_colors.get(resource, COLOR_TEXT_BRIGHT)
+            label = resource_labels.get(resource, resource)
+            
+            # Draw icon
+            icon_x = self.x + 20
+            icon_y = content_y + 10
+            self._draw_resource_icon(resource, icon_x, icon_y, accent)
+            
+            # Draw label
+            arcade.draw_text(
+                text=label,
+                x=self.x + 45,
+                y=content_y + 5,
+                color=COLOR_TEXT_BRIGHT,
+                font_size=11,
+                bold=True,
+                font_name=UI_FONT
+            )
+            
+            # Draw amount
+            arcade.draw_text(
+                text=str(amount),
+                x=self.x + self.width - 15,
+                y=content_y + 5,
+                color=accent,
+                font_size=11,
+                bold=True,
+                anchor_x="right",
+                font_name=UI_FONT
+            )
+            
+            content_y += 35
+    
+    def _draw_resource_icon(self, kind: str, cx: float, cy: float, accent: Tuple[int, int, int]) -> None:
+        """Draw a resource icon (same as top bar icons)."""
+        # Backplate
+        arcade.draw_circle_filled(cx, cy, 8, COLOR_BG_ELEVATED)
+        arcade.draw_circle_outline(cx, cy, 8, COLOR_BORDER_BRIGHT, 1)
+
+        if kind == "power":
+            pts = [(cx - 2, cy + 6), (cx + 1, cy + 1), (cx - 1, cy + 1), (cx + 2, cy - 6), (cx - 1, cy - 1), (cx + 1, cy - 1)]
+            arcade.draw_polygon_filled(pts, accent)
+        elif kind == "mineral":
+            pts = [(cx, cy + 6), (cx + 5, cy), (cx, cy - 6), (cx - 5, cy)]
+            arcade.draw_polygon_filled(pts, accent)
+        elif kind == "metal":
+            pts = [(cx - 5, cy + 3), (cx, cy + 6), (cx + 5, cy + 3), (cx + 5, cy - 3), (cx, cy - 6), (cx - 5, cy - 3)]
+            arcade.draw_polygon_filled(pts, accent)
+        elif kind == "wood":
+            arcade.draw_lrbt_rectangle_filled(
+                left=cx - 5,
+                right=cx + 5,
+                bottom=cy - 3,
+                top=cy + 3,
+                color=accent
+            )
+            arcade.draw_line(cx - 4, cy - 2, cx + 4, cy + 2, (60, 40, 20), 1)
+        elif kind == "scrap":
+            arcade.draw_circle_filled(cx, cy, 4, accent)
+            for dx, dy in [(0, 6), (6, 0), (0, -6), (-6, 0)]:
+                arcade.draw_line(cx, cy, cx + dx, cy + dy, accent, 2)
+        elif kind == "raw_food":
+            pts = [(cx - 1, cy + 6), (cx + 5, cy + 1), (cx + 1, cy - 6), (cx - 5, cy - 1)]
+            arcade.draw_polygon_filled(pts, accent)
+            arcade.draw_line(cx - 2, cy - 5, cx + 2, cy + 5, (30, 80, 40), 1)
+        elif kind == "cooked_meal":
+            arcade.draw_arc_outline(cx, cy - 1, 12, 8, (180, 120, 60), 0, 180, 2)
+            arcade.draw_line(cx - 6, cy - 1, cx + 6, cy - 1, (180, 120, 60), 2)
+        else:
+            arcade.draw_circle_filled(cx, cy, 4, accent)
 
 
 class ColonistDetailPanel:
@@ -598,7 +713,9 @@ class ColonistDetailPanel:
     
     TABS = ["Status", "Bio", "Body", "Links", "Stats", "Drives", "Mind", "Chat", "Help"]
     
-    def __init__(self):
+    def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
+        self.screen_width = screen_width
+        self.screen_height = screen_height
         self.visible = True  # Always visible
         self.colonists = []  # Reference to all colonists
         self.current_index = 0  # Currently viewed colonist
@@ -606,14 +723,21 @@ class ColonistDetailPanel:
         
         # Panel dimensions - more compact
         self.width = RIGHT_PANEL_WIDTH
-        self.height = SCREEN_H - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
-        self.x = SCREEN_W - self.width
+        self.height = screen_height - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
+        self.x = screen_width - self.width
         self.y = BOTTOM_BAR_HEIGHT
         
         # VERTICAL tab dimensions (on left side of panel)
         self.tab_width = 78
         self.tab_height = 32
         self.tab_spacing = 3
+    
+    def on_resize(self, width: int, height: int):
+        """Update dimensions on window resize."""
+        self.screen_width = width
+        self.screen_height = height
+        self.height = height - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
+        self.x = width - self.width
     
     def open(self, colonists: List, colonist_index: int = 0):
         """Open the panel for a specific colonist."""
@@ -672,6 +796,10 @@ class ColonistDetailPanel:
         """Draw the colonist detail panel with VERTICAL tabs and premium styling."""
         if not self.visible or not self.colonists:
             return
+        
+        # Recalculate position and height every frame to ensure proper sizing
+        self.x = self.screen_width - self.width
+        self.height = self.screen_height - TOP_BAR_HEIGHT - BOTTOM_BAR_HEIGHT
         
         colonist = self.colonists[self.current_index]
         
