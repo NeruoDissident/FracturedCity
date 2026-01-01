@@ -362,6 +362,7 @@ class ActionBar:
             {"label": "Stove", "tool": "stove", "cost": "2 metal, 1 mineral"},
             {"label": "Gutter Forge", "tool": "gutter_forge", "cost": "3 metal, 2 scrap"},
             {"label": "Skinshop Loom", "tool": "skinshop_loom", "cost": "3 wood, 2 scrap"},
+            {"label": "Bio-Matter Salvage", "tool": "bio_matter_salvage_station", "cost": "3 metal, 2 scrap"},
             {"label": "Cortex Spindle", "tool": "cortex_spindle", "cost": "2 metal, 2 mineral, 1 power"},
         ]
         
@@ -370,10 +371,9 @@ class ActionBar:
             {"label": "Comfort Chair", "tool": "furn_comfort_chair"},
             {"label": "Bar Stool", "tool": "furn_bar_stool"},
             {"label": "Storage Locker", "tool": "furn_storage_locker"},
+            {"label": "Vending Machine", "tool": "furn_vending_machine"},
             {"label": "Dining Table", "tool": "furn_dining_table"},
             {"label": "Wall Lamp", "tool": "furn_wall_lamp"},
-            {"label": "Workshop Table", "tool": "furn_workshop_table"},
-            {"label": "Tool Rack", "tool": "furn_tool_rack"},
             {"label": "Weapon Rack", "tool": "furn_weapon_rack"},
             {"label": "Scrap Guitar", "tool": "furn_scrap_guitar"},
             {"label": "Drum Kit", "tool": "furn_drum_kit"},

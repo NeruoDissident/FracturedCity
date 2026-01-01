@@ -35,8 +35,8 @@ class WorkstationPanel:
         # Panel dimensions
         self.panel_x = 400
         self.panel_y = 150
-        self.panel_width = 380
-        self.panel_height = 600
+        self.panel_width = 450
+        self.panel_height = 650
         
         # Clickable areas (rebuilt each frame)
         self.new_order_button_rect: Optional[Tuple[float, float, float, float]] = None  # (left, right, bottom, top)
@@ -229,10 +229,10 @@ class WorkstationPanel:
         
         arcade.draw_text(
             title,
-            self.panel_x + 12,
-            self.panel_y + self.panel_height - 30,
+            self.panel_x + 16,
+            self.panel_y + self.panel_height - 35,
             COLOR_NEON_CYAN,
-            font_size=16,
+            font_size=18,
             bold=True,
             font_name=UI_FONT
         )
@@ -435,7 +435,6 @@ class WorkstationPanel:
             is_hovered = (rect_left <= mouse_x <= rect_right and rect_bottom <= mouse_y <= rect_top)
             if is_hovered:
                 self.hovered_recipe_idx = i
-                print(f"[Workstation] Hovering over recipe {i}: {recipe['name']}, rect: ({rect_left}, {rect_right}, {rect_bottom}, {rect_top})")
             
             # Recipe background
             bg_color = (50, 30, 60) if is_selected else ((45, 50, 60) if is_hovered else COLOR_BG_ELEVATED)
@@ -547,15 +546,13 @@ class WorkstationPanel:
             arcade.draw_text("Add", btn_x + btn_w / 2, y + btn_h / 2, (150, 255, 150), 11, bold=True, anchor_x="center", anchor_y="center", font_name=UI_FONT)
     
     def _draw_tooltip(self, mouse_x: int, mouse_y: int) -> None:
-        """Draw tooltip showing recipe details on hover - full Pygame-style implementation."""
+        """Draw tooltip showing recipe details on hover - matches ui_arcade.py style."""
         recipe = None
         
         # Check if hovering over a recipe in recipe select view
         if self.view_mode == "recipe_select" and self.hovered_recipe_idx >= 0:
             if self.hovered_recipe_idx < len(self.recipes):
                 recipe = self.recipes[self.hovered_recipe_idx]
-                print(f"[Tooltip] Showing tooltip for recipe: {recipe.get('name', 'Unknown')}")
-                print(f"[Tooltip] Recipe data: {recipe}")
         
         # Check if hovering over an order in orders view
         elif self.view_mode == "orders" and self.hovered_order_idx >= 0:
@@ -572,183 +569,150 @@ class WorkstationPanel:
         if not recipe:
             return
         
-        # Build tooltip content with proper formatting
+        # Build tooltip content - simple text lines
         title = recipe.get("name", "Unknown Recipe")
-        desc_lines = []
+        description_parts = []
         
-        print(f"[Tooltip] Full recipe data: {recipe}")
-        
-        # Required materials section - check both "input" and "inputs" keys
-        inputs = recipe.get("inputs", recipe.get("input", {}))
-        print(f"[Tooltip] Recipe inputs: {inputs}, type: {type(inputs)}")
-        
-        if inputs and isinstance(inputs, dict):
-            desc_lines.append("REQUIRED MATERIALS:")
+        # Required materials
+        inputs = recipe.get("input", {})
+        if inputs:
+            materials = []
             for resource, amount in inputs.items():
-                # Check if we have enough in stockpile
-                try:
-                    from resources import get_stockpile_amount
-                    available = get_stockpile_amount(resource)
-                except:
-                    available = 0
-                status = "✓" if available >= amount else "✗"
-                resource_name = resource.replace('_', ' ').title()
-                desc_lines.append(f"  {status} {amount}x {resource_name}")
-                desc_lines.append(f"     (Have: {available})")
-        else:
-            print(f"[Tooltip] No valid inputs found or inputs is not a dict")
+                materials.append(f"{amount}x {resource.replace('_', ' ').title()}")
+            description_parts.append("Requires: " + ", ".join(materials))
         
-        # Output section - check both "output" and "output_item"
+        # Output
         output_item = recipe.get("output_item")
-        output_dict = recipe.get("output", {})
+        if output_item:
+            description_parts.append(f"Produces: {output_item.replace('_', ' ').title()}")
         
-        if output_dict and isinstance(output_dict, dict):
-            if desc_lines:
-                desc_lines.append("")
-            desc_lines.append("PRODUCES:")
-            for item, amount in output_dict.items():
-                desc_lines.append(f"  {amount}x {item.replace('_', ' ').title()}")
-        elif output_item:
-            if desc_lines:
-                desc_lines.append("")
-            desc_lines.append("PRODUCES:")
-            desc_lines.append(f"  {output_item.replace('_', ' ').title()}")
-        
-        # Craft time if available - check both "time" and "work_time"
-        craft_time = recipe.get("time", recipe.get("work_time", 0))
+        # Craft time
+        craft_time = recipe.get("work_time", 0)
         if craft_time > 0:
-            if desc_lines:
-                desc_lines.append("")
-            desc_lines.append(f"Time: {craft_time} ticks")
+            description_parts.append(f"Time: {craft_time} ticks")
         
-        print(f"[Tooltip] desc_lines count: {len(desc_lines)}")
-        if len(desc_lines) > 0:
-            print(f"[Tooltip] First few lines: {desc_lines[:5]}")
-        else:
-            print("[Tooltip] WARNING: No description lines generated!")
+        description = " | ".join(description_parts)
         
-        # Calculate tooltip size with proper padding
-        padding = 16
-        line_spacing = 18
-        title_font_size = 16
-        desc_font_size = 12
+        # Add item flavor text if available
+        flavor_text = ""
+        if output_item:
+            try:
+                from items import get_item_def
+                item_def = get_item_def(output_item)
+                if item_def and item_def.description:
+                    # Get first line of description as flavor text
+                    flavor_text = item_def.description.split('\n')[0].strip()
+            except Exception:
+                pass
         
-        # Measure text to get proper width
-        max_width = 250  # Minimum width
+        # Tooltip dimensions - match ui_arcade.py
+        tooltip_width = 280
+        tooltip_padding = 10
+        line_height = 16
         
-        # Title width
-        title_width = len(title) * (title_font_size * 0.6)  # Rough estimate
-        max_width = max(max_width, title_width + padding * 2)
+        # Build lines with simple word wrapping
+        lines = [title]
         
-        # Description lines width
-        for line in desc_lines:
-            line_width = len(line) * (desc_font_size * 0.6)
-            max_width = max(max_width, line_width + padding * 2)
+        # Add basic info
+        words = description.split()
+        current_line = ""
+        for word in words:
+            test_line = current_line + " " + word if current_line else word
+            if len(test_line) * 7 > tooltip_width - tooltip_padding * 2:
+                if current_line:
+                    lines.append(current_line)
+                current_line = word
+            else:
+                current_line = test_line
+        if current_line:
+            lines.append(current_line)
         
-        tooltip_width = min(max_width, 400)  # Cap at 400px
-        tooltip_height = padding * 2 + title_font_size + line_spacing
-        tooltip_height += len(desc_lines) * (desc_font_size + 4)
+        # Add flavor text if available
+        if flavor_text:
+            lines.append("")  # Blank line for spacing
+            words = flavor_text.split()
+            current_line = ""
+            for word in words:
+                test_line = current_line + " " + word if current_line else word
+                if len(test_line) * 7 > tooltip_width - tooltip_padding * 2:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+                else:
+                    current_line = test_line
+            if current_line:
+                lines.append(current_line)
         
-        print(f"[Tooltip] Calculated dimensions: {tooltip_width}x{tooltip_height}")
+        tooltip_height = len(lines) * line_height + tooltip_padding * 2 + 8
         
-        # Position tooltip near mouse, but keep on screen
-        # Try to the right first
+        # Position tooltip near mouse
         tooltip_x = mouse_x + 15
-        tooltip_y = mouse_y - tooltip_height // 2
+        tooltip_y = mouse_y + 20
         
-        # Keep on screen horizontally
+        # Keep on screen
         if tooltip_x + tooltip_width > SCREEN_W - 10:
             tooltip_x = mouse_x - tooltip_width - 15
         if tooltip_x < 10:
             tooltip_x = 10
-        
-        # Keep on screen vertically
         if tooltip_y + tooltip_height > SCREEN_H - 10:
-            tooltip_y = SCREEN_H - tooltip_height - 10
+            tooltip_y = mouse_y - tooltip_height - 10
         if tooltip_y < 10:
             tooltip_y = 10
         
-        # Draw shadow
-        shadow_offset = 4
+        # Shadow - match ui_arcade.py
         arcade.draw_lrbt_rectangle_filled(
-            tooltip_x + shadow_offset, tooltip_x + tooltip_width + shadow_offset,
-            tooltip_y - shadow_offset, tooltip_y + tooltip_height - shadow_offset,
-            (15, 15, 20, 180)
+            tooltip_x + 3, tooltip_x + tooltip_width + 3,
+            tooltip_y - 3, tooltip_y + tooltip_height - 3,
+            (0, 0, 0, 120)
         )
         
-        # Draw tooltip background (darker, more opaque)
+        # Background - match ui_arcade.py
         arcade.draw_lrbt_rectangle_filled(
             tooltip_x, tooltip_x + tooltip_width,
             tooltip_y, tooltip_y + tooltip_height,
-            (45, 45, 55, 250)
+            (15, 18, 25)
         )
         
-        # Draw tooltip border (thicker, brighter)
+        # Border - match ui_arcade.py
         arcade.draw_lrbt_rectangle_outline(
             tooltip_x, tooltip_x + tooltip_width,
             tooltip_y, tooltip_y + tooltip_height,
-            (70, 70, 90), 2
+            COLOR_NEON_CYAN, 2
         )
         
-        # Draw title
-        text_y = tooltip_y + tooltip_height - padding - title_font_size
-        arcade.draw_text(
-            title,
-            tooltip_x + padding,
-            text_y,
-            (255, 220, 150),  # Gold color for title
-            font_size=title_font_size,
-            bold=True,
-            font_name=UI_FONT
-        )
-        text_y -= line_spacing
-        
-        # Draw separator line
-        arcade.draw_line(
-            tooltip_x + padding, text_y + 6,
-            tooltip_x + tooltip_width - padding, text_y + 6,
-            (80, 80, 100), 1
-        )
-        text_y -= 6
-        
-        # Draw description lines
-        for line in desc_lines:
-            if not line:  # Empty line for spacing
-                text_y -= desc_font_size // 2
+        # Text - match ui_arcade.py style
+        y = tooltip_y + tooltip_height - tooltip_padding - 14
+        in_flavor_section = False
+        for i, line in enumerate(lines):
+            # Check if we've hit the blank line separator
+            if line == "":
+                in_flavor_section = True
+                y -= line_height // 2  # Half spacing for blank line
                 continue
             
-            # Color based on content
-            if line.endswith(":"):
-                # Section headers
-                color = (150, 180, 220)  # Light blue
+            if i == 0:
+                # Title - bright cyan
+                color = COLOR_NEON_CYAN
                 bold = True
-            elif "✓" in line:
-                # Available items
-                color = (100, 220, 100)  # Green
-                bold = False
-            elif "✗" in line:
-                # Missing items
-                color = (220, 100, 100)  # Red
-                bold = False
-            elif line.startswith("     "):
-                # Sub-info (Have: X)
-                color = (140, 140, 150)  # Gray
+            elif in_flavor_section:
+                # Flavor text - dimmed
+                color = COLOR_TEXT_DIM
                 bold = False
             else:
-                # Regular text
-                color = (220, 220, 220)  # White
+                # Description - normal text
+                color = COLOR_TEXT_NORMAL
                 bold = False
             
             arcade.draw_text(
                 line,
-                tooltip_x + padding,
-                text_y,
+                tooltip_x + tooltip_padding,
+                y,
                 color,
-                font_size=desc_font_size,
+                font_size=10 if i == 0 else 9,
                 bold=bold,
                 font_name=UI_FONT
             )
-            text_y -= desc_font_size + 4
+            y -= line_height
 
 
 # Singleton instance

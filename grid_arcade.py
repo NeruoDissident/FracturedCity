@@ -325,6 +325,12 @@ class GridRenderer:
         
         # Helper to add sprite to cache
         def add_to_cache(x, y, z, tile_type, opacity=255):
+            # Skip multi-tile structures - they're handled by _add_structure_sprite
+            from buildings import get_building_size
+            width, height = get_building_size(tile_type)
+            if width > 1 or height > 1:
+                return
+            
             texture = self.get_tile_texture(tile_type, x, y, z)
             if texture:
                 sprite = arcade.Sprite()
@@ -961,6 +967,10 @@ class GridRenderer:
                 texture = self._get_multi_tile_texture(sprite_name, is_furniture)
                 
                 if texture:
+                    # DEBUG: Log 2x1 rendering
+                    if width == 2 and height == 1:
+                        print(f"[2x1 Render] {tile_type} at ({tile_x},{tile_y}) dx={dx} suffix='{suffix}' sprite_name='{sprite_name}'")
+                    
                     sprite = arcade.Sprite()
                     sprite.texture = texture
                     sprite.center_x = screen_x + TILE_SIZE // 2

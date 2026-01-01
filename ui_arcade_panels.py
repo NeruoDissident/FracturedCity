@@ -49,9 +49,9 @@ COLOR_TAB_INACTIVE = (20, 25, 35)
 
 
 class LeftSidebar:
-    """Left sidebar with 4 tabs: COLONISTS, JOBS, ITEMS, ROOMS."""
+    """Left sidebar with 5 tabs: COLONISTS, ANIMALS, JOBS, ITEMS, ROOMS."""
     
-    TABS = ["COLONISTS", "JOBS", "ITEMS", "ROOMS"]
+    TABS = ["COLONISTS", "ANIMALS", "JOBS", "ITEMS", "ROOMS"]
     
     def __init__(self, screen_width=SCREEN_W, screen_height=SCREEN_H):
         self.screen_width = screen_width
@@ -70,9 +70,16 @@ class LeftSidebar:
         self.colonist_item_height = 50
         self.hovered_colonist_index = -1
         
+        # Animal list state
+        self.animal_scroll = 0
+        self.animal_item_height = 50
+        self.hovered_animal_index = -1
+        
         # Callbacks
         self.on_colonist_locate: Optional[Callable] = None  # (x, y, z) -> None
         self.on_colonist_click: Optional[Callable] = None   # (colonist) -> None
+        self.on_animal_locate: Optional[Callable] = None    # (x, y, z) -> None
+        self.on_animal_click: Optional[Callable] = None     # (animal) -> None
     
     def on_resize(self, width: int, height: int):
         """Update dimensions on window resize."""
@@ -120,6 +127,33 @@ class LeftSidebar:
                         # Open detail panel
                         if self.on_colonist_click:
                             self.on_colonist_click(colonist)
+                    return True
+        
+        # Check animal list clicks (ANIMALS tab only)
+        if self.current_tab == 1:
+            from animals import get_all_animals
+            animals = get_all_animals()
+            content_y = self.y + len(self.TABS) * self.tab_height + 10
+            # Account for header offset (20px for "Animals (N)" header)
+            list_start_y = content_y + 20
+            for i, animal in enumerate(animals):
+                item_y = list_start_y + i * self.animal_item_height - self.animal_scroll
+                
+                # Skip if not visible
+                if item_y < content_y or item_y > self.y + self.height:
+                    continue
+                
+                if (self.x <= x <= self.x + self.width and 
+                    item_y <= y <= item_y + self.animal_item_height):
+                    # Left half = locate, right half = open panel
+                    if x < self.x + self.width / 2:
+                        # Locate animal
+                        if self.on_animal_locate:
+                            self.on_animal_locate(animal.x, animal.y, animal.z)
+                    else:
+                        # Open detail panel
+                        if self.on_animal_click:
+                            self.on_animal_click(animal)
                     return True
         
         return True  # Consumed click (in sidebar area)
@@ -240,12 +274,18 @@ class LeftSidebar:
             # COLONISTS tab
             self._draw_colonists_tab(colonists, content_y)
         elif self.current_tab == 1:
+            # ANIMALS tab
+            from animals import get_all_animals
+            from ui_arcade_panels_animals import draw_animals_tab
+            animals = get_all_animals()
+            draw_animals_tab(self, animals, content_y)
+        elif self.current_tab == 2:
             # JOBS tab
             self._draw_jobs_tab(jobs, content_y)
-        elif self.current_tab == 2:
+        elif self.current_tab == 3:
             # ITEMS tab - show resources with icons
             self._draw_items_tab(items, content_y)
-        elif self.current_tab == 3:
+        elif self.current_tab == 4:
             # ROOMS tab - show all rooms grouped by type
             self._draw_rooms_tab(rooms, content_y)
     

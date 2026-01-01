@@ -151,6 +151,7 @@ BUILDING_TYPES = {
             {"id": "craft_synth", "name": "Synth Keyboard", "input": {"chip": 2, "wire": 3, "scrap": 2}, "output_item": "synth", "work_time": 120},
             {"id": "craft_harmonica", "name": "Harmonica", "input": {"metal": 1, "scrap": 1}, "output_item": "harmonica", "work_time": 50},
             {"id": "craft_amp", "name": "Amplifier", "input": {"chip": 1, "wire": 2, "metal": 2}, "output_item": "amp", "work_time": 80},
+            {"id": "craft_vending_machine", "name": "Vending Machine", "input": {"metal": 3, "chip": 2, "led": 1}, "output_item": "vending_machine", "work_time": 150},
         ],
     },
     "salvagers_bench": {
@@ -164,8 +165,6 @@ BUILDING_TYPES = {
         "recipes": [
             {"id": "scrap_to_metal", "name": "Refine Metal", "input": {"scrap": 2}, "output": {"metal": 1}, "work_time": 60},
             {"id": "metal_components", "name": "Metal Components", "input": {"metal": 1}, "output": {"scrap": 3}, "work_time": 50},
-            {"id": "workshop_table", "name": "Workshop Table", "input": {"wood": 3, "metal": 2}, "output_item": "workshop_table", "work_time": 100},
-            {"id": "tool_rack", "name": "Tool Rack", "input": {"wood": 2, "metal": 1}, "output_item": "tool_rack", "work_time": 70},
         ],
     },
     "generator": {
@@ -192,9 +191,11 @@ BUILDING_TYPES = {
         "multi_recipe": True,  # Supports multiple recipes
         "size": (2, 1),  # 2x1 tiles (width, height) - horizontal
         "recipes": [
-            {"id": "simple_meal", "name": "Simple Meal", "input": {"raw_food": 1, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
-            {"id": "fine_meal", "name": "Fine Meal", "input": {"raw_food": 2, "power": 1}, "output": {"cooked_meal": 2}, "work_time": 90},
-            {"id": "preserved_rations", "name": "Preserved Rations", "input": {"raw_food": 3, "metal": 1}, "output": {"cooked_meal": 4}, "work_time": 120},
+            {"id": "simple_meal", "name": "Simple Meal", "input_items": {"meat": 1}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
+            {"id": "fine_meal", "name": "Fine Meal", "input_items": {"meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 2}, "work_time": 90},
+            {"id": "meat_stew", "name": "Meat Stew", "input_items": {"meat": 6}, "input": {"power": 1}, "output": {"cooked_meal": 4}, "work_time": 120},
+            {"id": "poultry_roast", "name": "Poultry Roast", "input_items": {"meat+poultry": 4}, "input": {"power": 1}, "output": {"cooked_meal": 3}, "work_time": 100},
+            {"id": "rodent_skewers", "name": "Rodent Skewers", "input_items": {"meat+rodent": 3}, "input": {"power": 1}, "output": {"cooked_meal": 2}, "work_time": 80},
         ],
     },
     # === Item Crafting Stations ===
@@ -241,12 +242,29 @@ BUILDING_TYPES = {
             {"id": "wall_lamp", "name": "Wall Lamp", "input": {"metal": 1, "power": 1}, "output_item": "wall_lamp", "work_time": 50},
         ],
     },
+    "bio_matter_salvage_station": {
+        "name": "Bio-Matter Salvage Station",
+        "tile_type": "bio_matter_salvage_station",
+        "materials": {"metal": 3, "scrap": 2},
+        "construction_work": 100,
+        "walkable": False,
+        "placement_rule": "floor_only",
+        "workstation": True,
+        "multi_recipe": True,
+        "size": (2, 1),  # 2x1 horizontal like stove
+        "recipes": [
+            {"id": "butcher_rat", "name": "Butcher Rat Corpse", "input_items": {"rat_corpse": 1}, "output": {"rat_meat": 2, "rat_pelt": 1}, "work_time": 60},
+            {"id": "butcher_bird", "name": "Butcher Bird Corpse", "input_items": {"bird_corpse": 1}, "output": {"bird_meat": 3, "feathers": 2}, "work_time": 70},
+        ],
+        "description": "Cuts up rats and pigeons and shit.",
+    },
     "cortex_spindle": {
         "name": "Cortex Spindle",
         "tile_type": "cortex_spindle",
         "materials": {"metal": 2, "mineral": 2, "power": 1},
-        "construction_work": 150,
+        "construction_work": 120,
         "walkable": False,
+        "placement_rule": "floor_only",
         "workstation": True,
         "multi_recipe": True,
         "recipes": [
@@ -270,6 +288,21 @@ BUILDING_TYPES = {
         "walkable": False,
         "workstation": True,  # Acts like a workstation for training job spawning
         "training_station": True,  # Special flag for training
+    },
+    # === Hunting & Animal Processing ===
+    "butcher_shop": {
+        "name": "Butcher Shop",
+        "tile_type": "butcher_shop",
+        "materials": {"wood": 3, "metal": 2},
+        "construction_work": 100,
+        "walkable": False,
+        "workstation": True,
+        "multi_recipe": True,
+        "size": (2, 1),  # 2x1 horizontal
+        "recipes": [
+            {"id": "butcher_rat", "name": "Butcher Rat", "input": {"rat_corpse": 1}, "output": {"rat_meat": 2, "rat_pelt": 1}, "work_time": 60},
+            {"id": "butcher_bird", "name": "Butcher Bird", "input": {"bird_corpse": 1}, "output": {"bird_meat": 3, "feathers": 2}, "work_time": 70},
+        ],
     },
 }
 
@@ -1626,15 +1659,25 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
         # Check if stockpile has required inputs
         inputs_needed = recipe.get("input", {})
         can_craft = True
+        missing = []
         
         for res_type, amount in inputs_needed.items():
             source = zones_module.find_stockpile_with_resource(res_type, z=z)
             if source is None:
                 can_craft = False
-                break
+                missing.append(res_type)
         
         if not can_craft:
+            # Log once per order to avoid spam
+            if not current_order.get("logged_missing"):
+                ws_type = ws.get("type", "unknown")
+                print(f"[Crafting] {ws_type} at ({x},{y},{z}) waiting for: {missing} (recipe: {recipe['id']})")
+                current_order["logged_missing"] = True
             continue
+        
+        # Clear logged flag when resources become available
+        if current_order.get("logged_missing"):
+            current_order["logged_missing"] = False
         
         # Create crafting job at workstation location
         # Determine job category based on workstation type

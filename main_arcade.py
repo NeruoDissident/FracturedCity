@@ -6,15 +6,14 @@ Game logic from the original main.py will be integrated here.
 """
 
 import arcade
-import pygame
 from config import SCREEN_W, SCREEN_H, TILE_SIZE, GRID_W, GRID_H, COLONIST_COUNT
 from grid import Grid
 from grid_arcade import GridRenderer
 from colonist_arcade import ColonistRenderer
 from colonist import create_colonists, update_colonists
+from ui_arcade_tile_info import get_tile_info_panel
 
-# Initialize Pygame for UI rendering (surfaces only, no window)
-pygame.init()
+# Note: pygame is initialized by audio.py for mixer only
 
 # Window title
 WINDOW_TITLE = "Fractured City (Arcade)"
@@ -62,6 +61,7 @@ class FracturedCityWindow(arcade.Window):
         
         # Game speed
         self.game_speed = 3  # Default to 3x speed (1-5 range)
+        self.paused = False  # Pause state
         
         # Pygame surface for UI rendering (reuse existing UI code)
         self.ui_surface = None
@@ -87,6 +87,9 @@ class FracturedCityWindow(arcade.Window):
         # Track wanderer/fixer colonist UIDs in renderer
         self.tracked_wanderer_uids = set()
         self.tracked_fixer_uids = set()
+        
+        # Tile info panel
+        self.tile_info_panel = None
     
     def _sync_wanderers_with_renderer(self):
         """Sync wanderers and fixers with colonist renderer."""
@@ -156,6 +159,15 @@ class FracturedCityWindow(arcade.Window):
             index = self.colonists.index(colonist)
             self.colonist_detail_panel.open(self.colonists, index)
             print(f"[UI] Opened detail panel for {colonist.name}")
+    
+    def open_animal_detail(self, animal):
+        """Open animal detail panel for a specific animal."""
+        from animals import get_all_animals
+        animals = get_all_animals()
+        if animal in animals:
+            index = animals.index(animal)
+            self.animal_detail_panel.open(animals, index)
+            print(f"[UI] Opened animal panel for {animal.species} #{animal.variant}")
         
     def setup(self):
         """Initialize game state."""
@@ -221,6 +233,10 @@ class FracturedCityWindow(arcade.Window):
         for colonist in self.colonists:
             self.colonist_renderer.add_colonist(colonist)
         
+        # Create animal renderer
+        from animals_arcade import get_animal_renderer
+        self.animal_renderer = get_animal_renderer()
+        
         # Center camera on spawn (Camera2D position is viewport CENTER)
         cam_x = spawn_x * TILE_SIZE
         cam_y = spawn_y * TILE_SIZE
@@ -235,18 +251,44 @@ class FracturedCityWindow(arcade.Window):
         self.left_sidebar = LeftSidebar(self.current_width, self.current_height)
         self.colonist_detail_panel = ColonistDetailPanel(self.current_width, self.current_height)
         
+        # Initialize animal detail panel
+        from ui_arcade_animal_panel import get_animal_panel
+        self.animal_detail_panel = get_animal_panel(self.current_width, self.current_height)
+        
         # Wire sidebar callbacks
         self.left_sidebar.on_colonist_locate = self.snap_camera_to_tile
         self.left_sidebar.on_colonist_click = self.open_colonist_detail
+        self.left_sidebar.on_animal_locate = self.snap_camera_to_tile
+        self.left_sidebar.on_animal_click = self.open_animal_detail
         
-        # Initialize notification panel with current window dimensions
+        # Initialize notification panel
         from ui_arcade_notifications import get_notification_panel
         self.notification_panel = get_notification_panel(self.current_width, self.current_height)
+        
+        # Initialize tile info panel
+        self.tile_info_panel = get_tile_info_panel()
         
         # Initialize right panel with colonists (always visible)
         self.colonist_detail_panel.colonists = self.colonists
         
+        # TEMP: Spawn test animals for UI testing
+        from animals import spawn_animal
+        spawn_animal(self.grid, "rat", 10, 10, 0, variant=0)  # Feral rat
+        spawn_animal(self.grid, "rat", 12, 10, 0, variant=1)  # Different variant
+        spawn_animal(self.grid, "rat", 14, 10, 0, variant=2)  # Partially tamed
+        spawn_animal(self.grid, "bird", 15, 15, 1, variant=0)  # Bird on rooftop
+        
+        # Set different tame levels for testing progressive reveal
+        from animals import get_all_animals
+        test_animals = get_all_animals()
+        if len(test_animals) >= 3:
+            test_animals[2].tame_progress = 60  # Tier 2 unlock
+        if len(test_animals) >= 4:
+            test_animals[3].tame_progress = 100  # Fully tamed
+            test_animals[3].is_wild = False
+        
         print(f"[Arcade] Setup complete! {len(self.colonists)} colonists spawned.")
+        print(f"[Arcade] Spawned {len(test_animals)} test animals")
         print("[Arcade] Use WASD or Arrow Keys to move camera")
         print("[Arcade] Use Mouse Wheel to zoom")
     
@@ -274,6 +316,11 @@ class FracturedCityWindow(arcade.Window):
         # Draw colonists using GPU batching (existing system)
         if self.colonist_renderer:
             self.colonist_renderer.draw(current_z=self.grid.current_z)
+        
+        # Draw animals using GPU batching
+        if self.animal_renderer:
+            self.animal_renderer.update_sprites()
+            self.animal_renderer.draw(current_z=self.grid.current_z)
         
         # Draw construction overlays (material icons + progress bars)
         self._draw_construction_overlays()
@@ -430,6 +477,9 @@ class FracturedCityWindow(arcade.Window):
         # Draw colonist detail panel (right side)
         self.colonist_detail_panel.draw()
         
+        # Draw animal detail panel (right side, overlays colonist panel if open)
+        self.animal_detail_panel.draw()
+        
         # Draw native Arcade workstation panel
         from ui_arcade_workstation import get_workstation_panel
         ws_panel = get_workstation_panel()
@@ -452,6 +502,67 @@ class FracturedCityWindow(arcade.Window):
         
         # Draw notification panel (top-right, above everything)
         self.notification_panel.draw()
+        
+        # Draw tile info panel (bottom-right)
+        if self.tile_info_panel and self.hovered_tile:
+            cam_x, cam_y = self.camera.position
+            self.tile_info_panel.draw(
+                self.grid, 
+                self.colonists,
+                cam_x, 
+                cam_y, 
+                self.grid.current_z
+            )
+        
+        # Draw PAUSED indicator
+        if self.paused:
+            # Center of screen
+            center_x = self.width / 2
+            center_y = self.height / 2
+            
+            # Semi-transparent dark background
+            arcade.draw_lrbt_rectangle_filled(
+                center_x - 150,
+                center_x + 150,
+                center_y - 40,
+                center_y + 40,
+                (0, 0, 0, 180)
+            )
+            
+            # Cyan border
+            arcade.draw_lrbt_rectangle_outline(
+                center_x - 150,
+                center_x + 150,
+                center_y - 40,
+                center_y + 40,
+                (0, 220, 220, 255),
+                border_width=3
+            )
+            
+            # PAUSED text
+            arcade.draw_text(
+                "PAUSED",
+                center_x,
+                center_y,
+                (0, 220, 220),
+                font_size=32,
+                bold=True,
+                anchor_x="center",
+                anchor_y="center",
+                font_name="Arial"
+            )
+            
+            # Subtitle
+            arcade.draw_text(
+                "Press SPACE to resume",
+                center_x,
+                center_y - 20,
+                (150, 150, 150),
+                font_size=12,
+                anchor_x="center",
+                anchor_y="center",
+                font_name="Arial"
+            )
         
         # Draw selected colonist info (if any)
         if self.selected_colonist:
@@ -788,10 +899,11 @@ class FracturedCityWindow(arcade.Window):
         
         self.camera.position = (cam_x, cam_y)
         
-        # Update game logic at current speed
-        for _ in range(self.game_speed):
-            self.tick_count += 1
-            self._run_game_tick()
+        # Update game logic at current speed (skip if paused)
+        if not self.paused:
+            for _ in range(self.game_speed):
+                self.tick_count += 1
+                self._run_game_tick()
         
     
     def _run_game_tick(self):
@@ -820,6 +932,10 @@ class FracturedCityWindow(arcade.Window):
         # Update sprite positions after colonist logic
         if self.colonist_renderer:
             self.colonist_renderer.update_positions()
+        
+        # Update animals
+        from animals import update_animals
+        update_animals(self.grid, self.tick_count)
         
         # Update resource nodes
         update_resource_nodes(self.grid)
@@ -854,6 +970,12 @@ class FracturedCityWindow(arcade.Window):
             process_auto_equip(self.colonists, zones_module, jobs_module)
             spawn_recreation_jobs(self.colonists, self.grid, self.tick_count)
             spawn_training_jobs(self.colonists, self.grid, self.tick_count)
+            
+            # Spawn hunt jobs for marked animals
+            from hunting import spawn_hunt_jobs
+            jobs_created = spawn_hunt_jobs(self.colonists)
+            if jobs_created > 0:
+                print(f"[Main] Created {jobs_created} hunt jobs")
         
         # Update wanderers and traders
         if self.tick_count % 60 == 0:
@@ -882,6 +1004,15 @@ class FracturedCityWindow(arcade.Window):
     def on_key_press(self, key, modifiers):
         """Handle key press."""
         self.keys_pressed.add(key)
+        
+        # Pause toggle with SPACE
+        if key == arcade.key.SPACE:
+            self.paused = not self.paused
+            if self.paused:
+                print("[Game] PAUSED")
+            else:
+                print("[Game] RESUMED")
+            return
         
         # Game speed controls (1-5 keys)
         if key == arcade.key.KEY_1:
@@ -1063,6 +1194,8 @@ class FracturedCityWindow(arcade.Window):
             self.left_sidebar.on_resize(width, height)
         if hasattr(self, 'colonist_detail_panel'):
             self.colonist_detail_panel.on_resize(width, height)
+        if hasattr(self, 'animal_detail_panel'):
+            self.animal_detail_panel.on_resize(width, height)
         if hasattr(self, 'notification_panel'):
             self.notification_panel.on_resize(width, height)
     
@@ -1102,14 +1235,20 @@ class FracturedCityWindow(arcade.Window):
         # Update left sidebar hover state
         self.left_sidebar.update_hover(x, y, self.colonists)
         
+        # Update tile info panel with hovered tile
+        if self.tile_info_panel and self.hovered_tile:
+            tile_x, tile_y, tile_z = self.hovered_tile
+            self.tile_info_panel.set_hover_tile(tile_x, tile_y, tile_z)
+        
         # Convert screen coords to world coords
         # Camera2D viewport is CENTERED on camera.position
         cam_x, cam_y = self.camera.position
         
         # Screen coords relative to center, then account for zoom and camera
         # Mouse (0,0) is bottom-left of screen, camera position is center of viewport
-        screen_center_x = self.current_width / 2
-        screen_center_y = self.current_height / 2
+        # Use self.width/height directly for accurate mouse coords (not cached values)
+        screen_center_x = self.width / 2
+        screen_center_y = self.height / 2
         
         # Offset from screen center, scaled by zoom, plus camera position
         world_x = ((x - screen_center_x) / self.zoom_level) + cam_x
@@ -1165,6 +1304,10 @@ class FracturedCityWindow(arcade.Window):
                 return
             
             # UI elements use screen coordinates (not world coordinates)
+            # Check if click is on animal detail panel (check first since it overlays)
+            if self.animal_detail_panel.handle_click(x, y):
+                return
+            
             # Check if click is on colonist detail panel
             if self.colonist_detail_panel.handle_click(x, y):
                 return

@@ -74,6 +74,25 @@ def get_items_with_tag(tag: str) -> List[ItemDef]:
 # Default Item Definitions
 # ============================================================================
 
+# --- Animal Corpses (not equippable, used for butchering) ---
+register_item(ItemDef(
+    id="rat_corpse",
+    name="Rat Corpse",
+    slot=None,
+    tags=["corpse", "organic"],
+    icon_color=(120, 80, 60),
+    description="A dead rat. Can be processed for meat and scraps."
+))
+
+register_item(ItemDef(
+    id="bird_corpse",
+    name="Bird Corpse",
+    slot=None,
+    tags=["corpse", "organic"],
+    icon_color=(140, 120, 100),
+    description="A dead bird. Can be processed for meat."
+))
+
 # --- Head Slot ---
 register_item(ItemDef(
     id="hard_hat",
@@ -321,25 +340,6 @@ register_item(ItemDef(
 # NEW ITEMS - Room-focused recipes
 # ============================================================================
 
-# --- Workshop Furniture ---
-register_item(ItemDef(
-    id="workshop_table",
-    name="Workshop Table",
-    slot=None,
-    tags=["furniture", "workshop"],
-    icon_color=(120, 100, 80),
-    description="Sturdy work surface for crafting and assembly."
-))
-
-register_item(ItemDef(
-    id="tool_rack",
-    name="Tool Rack",
-    slot=None,
-    tags=["furniture", "workshop", "storage"],
-    icon_color=(140, 110, 90),
-    description="Wall-mounted rack for organizing tools."
-))
-
 # --- Comfort Furniture ---
 register_item(ItemDef(
     id="comfort_chair",
@@ -396,6 +396,24 @@ register_item(ItemDef(
     tags=["furniture", "bar"],
     icon_color=(90, 70, 50),
     description="Rusty metal stool for sitting at the bar."
+))
+
+register_item(ItemDef(
+    id="vending_machine",
+    name="Vending Machine",
+    slot=None,
+    tags=["furniture", "social", "kitchen", "convenience"],
+    icon_color=(180, 60, 80),
+    description=(
+        "Flickering neon, cracked glass, and a coin slot that only takes scrip.\n"
+        "Type: Convenience Furniture / Automated Vendor\n"
+        "Room Tags: Social Venue, Kitchen, Dining Hall\n"
+        "Quality Bonus: +8 (convenience, morale boost)\n"
+        "Rarity: Salvaged from old metro stations and corp lobbies\n"
+        "Crafted At: Tinker Station\n"
+        "Recipe: 3 Metal + 2 Chip + 1 LED\n"
+        "Function: Provides snacks and drinks without colonist labor. Boosts room quality."
+    )
 ))
 
 # --- Consumables / Booze ---
@@ -513,6 +531,61 @@ register_item(ItemDef(
     tags=["instrument", "recreation", "music", "electronic"],
     icon_color=(80, 90, 100),
     description="Amplifier for instruments. Makes everything louder."
+))
+
+# --- Animal Products & Corpses ---
+register_item(ItemDef(
+    id="rat_corpse",
+    name="Rat Corpse",
+    slot=None,
+    tags=["corpse", "animal"],
+    icon_color=(100, 80, 70),
+    description="Dead rat. Can be butchered for meat and pelt."
+))
+
+register_item(ItemDef(
+    id="bird_corpse",
+    name="Bird Corpse",
+    slot=None,
+    tags=["corpse", "animal"],
+    icon_color=(120, 110, 100),
+    description="Dead bird. Can be butchered for meat and feathers."
+))
+
+register_item(ItemDef(
+    id="rat_meat",
+    name="Rat Meat",
+    slot=None,
+    tags=["food", "meat", "raw", "rodent", "rat", "low_quality", "common"],
+    icon_color=(140, 90, 80),
+    description="Raw rat meat. Low quality but edible. Cook before eating."
+))
+
+register_item(ItemDef(
+    id="bird_meat",
+    name="Bird Meat",
+    slot=None,
+    tags=["food", "meat", "raw", "poultry", "bird", "medium_quality", "common"],
+    icon_color=(160, 120, 100),
+    description="Raw bird meat. Decent quality protein. Cook before eating."
+))
+
+register_item(ItemDef(
+    id="rat_pelt",
+    name="Rat Pelt",
+    slot=None,
+    tags=["material", "leather", "pelt", "rodent", "rat", "low_quality"],
+    icon_color=(90, 70, 60),
+    description="Rat skin. Low quality material for crafting."
+))
+
+register_item(ItemDef(
+    id="feathers",
+    name="Feathers",
+    slot=None,
+    tags=["material", "soft", "feather", "poultry", "bird", "medium_quality"],
+    icon_color=(200, 190, 180),
+    description="Bird feathers. Used for crafting comfort items."
 ))
 
 # --- Weapons (Hands slot) ---
@@ -688,17 +761,33 @@ def process_equipment_haul_jobs(jobs_module, zones_module) -> int:
         if jobs_module.get_job_at(x, y, z) is not None:
             continue
         
-        # Determine storage type based on item tags
+        # Determine storage type based on item tags (priority order)
         item_id = item.get("id", "")
         item_def = get_item_def(item_id)
         
         # Default to equipment stockpile
         storage_type = "equipment"
         
-        # Check item tags to determine proper storage
+        # Check item tags to determine proper storage (most specific first)
         if item_def:
             tags = getattr(item_def, "tags", [])
-            if "component" in tags or "electronics" in tags:
+            
+            # Priority 1: Corpses (separate from food)
+            if "corpse" in tags:
+                storage_type = "corpses"
+            # Priority 2: Food items
+            elif "food" in tags:
+                if "raw" in tags:
+                    storage_type = "raw_food"
+                elif "cooked" in tags or "meal" in tags:
+                    storage_type = "cooked_meal"
+                else:
+                    storage_type = "raw_food"  # Default food to raw
+            # Priority 3: Materials (pelts, feathers, leather)
+            elif "material" in tags:
+                storage_type = "materials"
+            # Priority 4: Specialized items
+            elif "component" in tags or "electronics" in tags:
                 storage_type = "components"
             elif "instrument" in tags or "music" in tags:
                 storage_type = "instruments"
@@ -739,6 +828,84 @@ def process_equipment_haul_jobs(jobs_module, zones_module) -> int:
         jobs_created += 1
     
     return jobs_created
+
+
+# ============================================================================
+# Tag-Based Item Matching (Phase 3)
+# ============================================================================
+
+def find_items_by_tag(tag_requirement: str, count: int, zones_module) -> List[Tuple[Coord3D, dict]]:
+    """Find items that match tag requirements.
+    
+    Args:
+        tag_requirement: Single tag ("meat") or multi-tag ("meat+poultry")
+        count: Number of items needed
+        zones_module: Reference to zones module for stockpile access
+    
+    Returns:
+        List of (coord, item) tuples matching the requirement
+    """
+    matches = []
+    
+    # Parse multi-tag requirements (e.g., "meat+poultry")
+    required_tags = tag_requirement.split("+")
+    
+    # Search equipment storage in stockpiles
+    all_equipment = zones_module.get_all_stored_equipment()
+    for coord, items in all_equipment.items():
+        for item in items:
+            item_def = get_item_def(item.get("id", ""))
+            if item_def:
+                item_tags = getattr(item_def, "tags", [])
+                # Check if item has ALL required tags
+                if all(tag in item_tags for tag in required_tags):
+                    matches.append((coord, item))
+                    if len(matches) >= count:
+                        return matches
+    
+    return matches
+
+
+def find_items_for_recipe(recipe: dict, zones_module) -> Optional[Dict[str, List[Tuple[Coord3D, dict]]]]:
+    """Find items matching recipe input_items requirements.
+    
+    Args:
+        recipe: Recipe dict with "input_items" field
+        zones_module: Reference to zones module
+    
+    Returns:
+        Dict mapping requirement -> list of (coord, item) tuples, or None if insufficient items
+    """
+    input_items = recipe.get("input_items", {})
+    if not input_items:
+        return {}
+    
+    found_items = {}
+    
+    for requirement, count in input_items.items():
+        # Check if it's a specific item ID or tag match
+        if requirement in ITEM_REGISTRY:
+            # Specific item - find exact matches
+            matches = []
+            all_equipment = zones_module.get_all_stored_equipment()
+            for coord, items in all_equipment.items():
+                for item in items:
+                    if item.get("id") == requirement:
+                        matches.append((coord, item))
+                        if len(matches) >= count:
+                            break
+                if len(matches) >= count:
+                    break
+        else:
+            # Tag match - find any items with this tag
+            matches = find_items_by_tag(requirement, count, zones_module)
+        
+        if len(matches) < count:
+            return None  # Not enough items
+        
+        found_items[requirement] = matches[:count]
+    
+    return found_items
 
 
 # ============================================================================

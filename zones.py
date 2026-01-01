@@ -123,7 +123,13 @@ def create_stockpile_zone(tiles: List[Coord3D], grid=None, z: int = 0) -> int:
         "allow_power": True,
         "allow_raw_food": True,
         "allow_cooked_meal": True,
+        "allow_materials": True,  # Pelts, feathers, leather, etc.
+        "allow_corpses": True,    # Animal corpses (unprocessed)
         "allow_equipment": True,  # Crafted items (armor, tools, implants, charms)
+        "allow_components": True, # Electronics, parts
+        "allow_instruments": True, # Musical instruments
+        "allow_furniture": True,  # Placeable furniture
+        "allow_consumables": True, # Consumable items
     }
     
     # Register tiles
@@ -697,7 +703,13 @@ def get_zone_filters(zone_id: int) -> Optional[Dict[str, bool]]:
         "power": zone.get("allow_power", True),
         "raw_food": zone.get("allow_raw_food", True),
         "cooked_meal": zone.get("allow_cooked_meal", True),
+        "materials": zone.get("allow_materials", True),
+        "corpses": zone.get("allow_corpses", True),
         "equipment": zone.get("allow_equipment", True),
+        "components": zone.get("allow_components", True),
+        "instruments": zone.get("allow_instruments", True),
+        "furniture": zone.get("allow_furniture", True),
+        "consumables": zone.get("allow_consumables", True),
     }
 
 

@@ -2941,11 +2941,11 @@ class Colonist:
                     # Register as workstation
                     buildings.register_workstation(job.x, job.y, job.z, "generator")
                 elif current_tile == "stove":
-                    grid.set_tile(job.x, job.y, "finished_stove", z=job.z)
-                    # Mark multi-tile footprint as unwalkable
+                    # Set ALL tiles in footprint to finished
                     width, height = buildings.get_building_size("stove")
                     for dy in range(height):
                         for dx in range(width):
+                            grid.set_tile(job.x + dx, job.y + dy, "finished_stove", z=job.z)
                             grid.walkable[job.z][job.y + dy][job.x + dx] = False
                     # Register as workstation
                     buildings.register_workstation(job.x, job.y, job.z, "stove")
@@ -2961,6 +2961,14 @@ class Colonist:
                 elif current_tile == "barracks":
                     grid.set_tile(job.x, job.y, "finished_barracks", z=job.z)
                     buildings.register_workstation(job.x, job.y, job.z, "barracks")
+                elif current_tile == "bio_matter_salvage_station":
+                    # Set ALL tiles in footprint to finished
+                    width, height = buildings.get_building_size("bio_matter_salvage_station")
+                    for dy in range(height):
+                        for dx in range(width):
+                            grid.set_tile(job.x + dx, job.y + dy, "finished_bio_matter_salvage_station", z=job.z)
+                            grid.walkable[job.z][job.y + dy][job.x + dx] = False
+                    buildings.register_workstation(job.x, job.y, job.z, "bio_matter_salvage_station")
                 elif current_tile == "gutter_still":
                     grid.set_tile(job.x, job.y, "finished_gutter_still", z=job.z)
                     buildings.register_workstation(job.x, job.y, job.z, "gutter_still")

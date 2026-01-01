@@ -122,6 +122,11 @@ TOOLTIPS: Dict[str, Tuple[str, str, str]] = {
         "Delicate work - neural implants, lucky charms, and trauma patches. Handles the stuff between your ears.",
         "Crafts: Implants, Charms, Medical"
     ),
+    "bio_matter_salvage_station": (
+        "Bio-Matter Salvage Station",
+        "Cuts up rats and pigeons and shit.",
+        "Butchers: Corpses → Meat, Pelts, Feathers"
+    ),
     
     # Zones
     "stockpile": (
