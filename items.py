@@ -41,6 +41,31 @@ class ItemDef:
     # Visual
     icon_color: Tuple[int, int, int] = (150, 150, 150)  # Color for UI icon
     description: str = ""            # Flavor text
+    
+    # === Material System Fields ===
+    # Size classification for organic items ("tiny", "small", "medium", "large", "huge")
+    size_class: str | None = None
+    
+    # Material category - links to material properties
+    # Types: "meat", "hide", "bone", "feather", "fat", "organ", "sinew", "chitin", "leather"
+    material_type: str | None = None
+    
+    # Processing state for organic items
+    # States: "raw", "cleaned", "tanned", "cooked", "preserved", "smoked", "cured", "rotten"
+    processing_state: str = "raw"
+    
+    # Quality tier (0=terrible, 1=poor, 2=low, 3=normal, 4=good, 5=excellent)
+    quality: int = 3
+    
+    # Spoilage rate (0=never spoils, 1.0=spoils in 1 day, 0.1=spoils in 10 days)
+    spoilage_rate: float = 0.0
+    
+    # Stack size for inventory management
+    stack_size: int = 1
+    
+    # Weight and volume (for hauling/storage - future use)
+    weight: float = 1.0
+    volume: float = 1.0
 
 
 # ============================================================================
@@ -75,22 +100,21 @@ def get_items_with_tag(tag: str) -> List[ItemDef]:
 # ============================================================================
 
 # --- Animal Corpses (not equippable, used for butchering) ---
+# Generic corpse item - species determined by source_species metadata
 register_item(ItemDef(
-    id="rat_corpse",
-    name="Rat Corpse",
+    id="corpse",
+    name="Corpse",
     slot=None,
-    tags=["corpse", "organic"],
+    tags=["corpse", "organic", "animal"],
     icon_color=(120, 80, 60),
-    description="A dead rat. Can be processed for meat and scraps."
-))
-
-register_item(ItemDef(
-    id="bird_corpse",
-    name="Bird Corpse",
-    slot=None,
-    tags=["corpse", "organic"],
-    icon_color=(140, 120, 100),
-    description="A dead bird. Can be processed for meat."
+    description="An animal corpse. Can be butchered for meat and materials.",
+    size_class="small",  # Default, can vary by species
+    processing_state="raw",
+    quality=None,  # Determined by source species
+    spoilage_rate=1.0,  # Corpses rot fast (1 day)
+    stack_size=1,  # Corpses don't stack
+    weight=2.0,  # Default, varies by species
+    volume=3.0,  # Default, varies by species
 ))
 
 # --- Head Slot ---
@@ -533,50 +557,56 @@ register_item(ItemDef(
     description="Amplifier for instruments. Makes everything louder."
 ))
 
-# --- Animal Products & Corpses ---
+# --- Animal Products (Meat & Materials) ---
 register_item(ItemDef(
-    id="rat_corpse",
-    name="Rat Corpse",
+    id="scrap_meat",
+    name="Scrap Meat",
     slot=None,
-    tags=["corpse", "animal"],
-    icon_color=(100, 80, 70),
-    description="Dead rat. Can be butchered for meat and pelt."
-))
-
-register_item(ItemDef(
-    id="bird_corpse",
-    name="Bird Corpse",
-    slot=None,
-    tags=["corpse", "animal"],
-    icon_color=(120, 110, 100),
-    description="Dead bird. Can be butchered for meat and feathers."
-))
-
-register_item(ItemDef(
-    id="rat_meat",
-    name="Rat Meat",
-    slot=None,
-    tags=["food", "meat", "raw", "rodent", "rat", "low_quality", "common"],
+    tags=["food", "meat", "raw", "rodent", "low_quality", "common"],
     icon_color=(140, 90, 80),
-    description="Raw rat meat. Low quality but edible. Cook before eating."
+    description="Raw game meat. Quality varies by source. Cook before eating.",
+    size_class="small",
+    material_type="meat",
+    processing_state="raw",
+    quality=1,  # Poor quality
+    spoilage_rate=0.5,  # Spoils in 2 days
+    stack_size=10,
+    weight=0.5,
+    volume=0.5,
 ))
 
 register_item(ItemDef(
-    id="bird_meat",
-    name="Bird Meat",
+    id="poultry_meat",
+    name="Poultry Meat",
     slot=None,
-    tags=["food", "meat", "raw", "poultry", "bird", "medium_quality", "common"],
+    tags=["food", "meat", "raw", "poultry", "medium_quality", "common"],
     icon_color=(160, 120, 100),
-    description="Raw bird meat. Decent quality protein. Cook before eating."
+    description="Raw game meat. Quality varies by source. Cook before eating.",
+    size_class="small",
+    material_type="meat",
+    processing_state="raw",
+    quality=2,  # Low-medium quality
+    spoilage_rate=0.5,  # Spoils in 2 days
+    stack_size=10,
+    weight=0.5,
+    volume=0.5,
 ))
 
 register_item(ItemDef(
-    id="rat_pelt",
-    name="Rat Pelt",
+    id="rough_hide",
+    name="Rough Hide",
     slot=None,
-    tags=["material", "leather", "pelt", "rodent", "rat", "low_quality"],
+    tags=["material", "hide", "pelt", "rodent", "low_quality"],
     icon_color=(90, 70, 60),
-    description="Rat skin. Low quality material for crafting."
+    description="Raw animal hide. Quality varies by source. Needs tanning.",
+    size_class="small",
+    material_type="hide",
+    processing_state="raw",  # Needs tanning
+    quality=1,  # Poor quality
+    spoilage_rate=0.2,  # Rots slower than meat (5 days)
+    stack_size=20,
+    weight=0.2,
+    volume=0.3,
 ))
 
 register_item(ItemDef(
@@ -585,7 +615,83 @@ register_item(ItemDef(
     slot=None,
     tags=["material", "soft", "feather", "poultry", "bird", "medium_quality"],
     icon_color=(200, 190, 180),
-    description="Bird feathers. Used for crafting comfort items."
+    description="Bird feathers. Used for crafting comfort items.",
+    size_class="small",
+    material_type="feather",
+    processing_state="raw",
+    quality=2,
+    spoilage_rate=0.0,  # Feathers don't spoil
+    stack_size=50,
+    weight=0.1,
+    volume=0.5,
+))
+
+register_item(ItemDef(
+    id="cat_pelt",
+    name="Cat Pelt",
+    slot=None,
+    tags=["material", "hide", "pelt", "feline", "medium_quality"],
+    icon_color=(120, 100, 90),
+    description="Cat hide. Soft fur. Needs tanning.",
+    size_class="small",
+    material_type="hide",
+    processing_state="raw",
+    quality=2,
+    spoilage_rate=0.2,
+    stack_size=20,
+    weight=0.3,
+    volume=0.4,
+))
+
+register_item(ItemDef(
+    id="dog_pelt",
+    name="Dog Pelt",
+    slot=None,
+    tags=["material", "hide", "pelt", "canine", "medium_quality"],
+    icon_color=(110, 90, 80),
+    description="Dog hide. Durable fur. Needs tanning.",
+    size_class="medium",
+    material_type="hide",
+    processing_state="raw",
+    quality=2,
+    spoilage_rate=0.2,
+    stack_size=20,
+    weight=0.5,
+    volume=0.6,
+))
+
+register_item(ItemDef(
+    id="raccoon_pelt",
+    name="Raccoon Pelt",
+    slot=None,
+    tags=["material", "hide", "pelt", "medium_quality"],
+    icon_color=(100, 90, 85),
+    description="Raccoon hide. Thick fur. Needs tanning.",
+    size_class="small",
+    material_type="hide",
+    processing_state="raw",
+    quality=2,
+    spoilage_rate=0.2,
+    stack_size=20,
+    weight=0.4,
+    volume=0.5,
+))
+
+register_item(ItemDef(
+    id="mutant_tissue",
+    name="Mutant Tissue",
+    slot=None,
+    tags=["material", "organic", "mutant", "echo", "low_quality"],
+    icon_color=(140, 120, 160),
+    description="Mutated organic tissue. Faintly glows. Unknown properties.",
+    size_class="small",
+    material_type="organ",
+    processing_state="raw",
+    quality=1,
+    spoilage_rate=0.5,
+    stack_size=10,
+    weight=0.3,
+    volume=0.3,
 ))
 
 # --- Weapons (Hands slot) ---
@@ -735,6 +841,93 @@ def get_all_world_items() -> Dict[Coord3D, List[dict]]:
 def clear_world_items() -> None:
     """Clear all world items (for testing/reset)."""
     _WORLD_ITEMS.clear()
+
+
+# ============================================================================
+# Item Display & Flavor Text
+# ============================================================================
+
+def get_item_display_name(item_instance: dict, game_tick: int = 0) -> str:
+    """Generate flavor text for item display.
+    
+    Examples:
+    - "Stringy Meat (Rat) - 12h old"
+    - "Fresh Bird Meat - just harvested"
+    - "Rat Pelt (poor quality) - 2d old"
+    
+    Args:
+        item_instance: Item dict with id and optional metadata
+        game_tick: Current game tick for age calculation
+    
+    Returns:
+        Formatted display name with metadata
+    """
+    item_def = get_item_def(item_instance.get("id", ""))
+    if not item_def:
+        return item_instance.get("name", "Unknown")
+    
+    # Start with base name
+    name = item_def.name
+    
+    # Add quality descriptor for organic items
+    if item_def.material_type in ["meat", "hide", "bone", "organ", "fat"]:
+        quality_names = ["terrible", "poor", "low", "decent", "good", "excellent"]
+        quality_idx = item_instance.get("individual_quality", item_def.quality)
+        quality_idx = max(0, min(5, quality_idx))  # Clamp to 0-5
+        quality_desc = quality_names[quality_idx]
+        
+        # Only show quality if it's notable (not "decent")
+        if quality_desc in ["poor", "terrible", "good", "excellent"]:
+            name = f"{quality_desc.capitalize()} {name}"
+    
+    # Add source species for organic items (meat, hide, etc.) and corpses
+    if "source_species" in item_instance and (item_def.material_type or "corpse" in item_def.tags):
+        source = item_instance["source_species"].capitalize()
+        name = f"{name} ({source})"
+    
+    # Add age for spoilable items
+    if "harvest_tick" in item_instance and item_def.spoilage_rate > 0 and game_tick > 0:
+        age_ticks = game_tick - item_instance["harvest_tick"]
+        age_hours = age_ticks // 60  # Assuming 60 ticks = 1 hour
+        
+        if age_hours < 1:
+            age_str = "just harvested"
+        elif age_hours < 24:
+            age_str = f"{age_hours}h old"
+        else:
+            age_days = age_hours // 24
+            age_str = f"{age_days}d old"
+        
+        name = f"{name} - {age_str}"
+    
+    return name
+
+
+def add_item_metadata(item_instance: dict, source_species: str = None, 
+                     harvest_tick: int = None, harvested_by: int = None,
+                     individual_quality: int = None) -> dict:
+    """Add runtime metadata to an item instance.
+    
+    Args:
+        item_instance: Item dict to modify
+        source_species: Species the item came from ("rat", "bird", etc.)
+        harvest_tick: Game tick when item was harvested
+        harvested_by: UID of colonist who harvested it
+        individual_quality: Override quality (0-5)
+    
+    Returns:
+        Modified item instance
+    """
+    if source_species is not None:
+        item_instance["source_species"] = source_species
+    if harvest_tick is not None:
+        item_instance["harvest_tick"] = harvest_tick
+    if harvested_by is not None:
+        item_instance["harvested_by"] = harvested_by
+    if individual_quality is not None:
+        item_instance["individual_quality"] = individual_quality
+    
+    return item_instance
 
 
 def process_equipment_haul_jobs(jobs_module, zones_module) -> int:

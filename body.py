@@ -439,10 +439,172 @@ BODY_TEMPLATE: Dict[str, dict] = {
 }
 
 
-class Body:
-    """Complete body system for a colonist."""
+# Animal body templates
+ANIMAL_TEMPLATES = {
+    "rat": {
+        # === HEAD ===
+        "skull": {"name": "Skull", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "brain": {"name": "Brain", "category": PartCategory.HEAD, "is_vital": True, "is_internal": True, "parent": "skull", "stat_effects": {}},
+        "eye_left": {"name": "Left Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "eye_right": {"name": "Right Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "whiskers": {"name": "Whiskers", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        "teeth": {"name": "Teeth", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        
+        # === TORSO ===
+        "chest": {"name": "Chest", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "heart": {"name": "Heart", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "lungs": {"name": "Lungs", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "stomach": {"name": "Stomach", "category": PartCategory.TORSO, "is_vital": False, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        
+        # === LEGS (4 for rats) ===
+        "leg_front_left": {"name": "Front Left Leg", "category": PartCategory.ARM_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_front_right": {"name": "Front Right Leg", "category": PartCategory.ARM_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_left": {"name": "Back Left Leg", "category": PartCategory.LEG_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_right": {"name": "Back Right Leg", "category": PartCategory.LEG_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        
+        # === TAIL ===
+        "tail": {"name": "Tail", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {}},
+    },
     
-    def __init__(self):
+    "bird": {
+        # === HEAD ===
+        "skull": {"name": "Skull", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "brain": {"name": "Brain", "category": PartCategory.HEAD, "is_vital": True, "is_internal": True, "parent": "skull", "stat_effects": {}},
+        "eye_left": {"name": "Left Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "eye_right": {"name": "Right Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "beak": {"name": "Beak", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        
+        # === TORSO ===
+        "chest": {"name": "Chest", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "heart": {"name": "Heart", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "lungs": {"name": "Lungs", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        
+        # === WINGS ===
+        "wing_left": {"name": "Left Wing", "category": PartCategory.ARM_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"fly_speed": -0.5}},
+        "wing_right": {"name": "Right Wing", "category": PartCategory.ARM_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"fly_speed": -0.5}},
+        
+        # === LEGS ===
+        "leg_left": {"name": "Left Leg", "category": PartCategory.LEG_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.5}},
+        "leg_right": {"name": "Right Leg", "category": PartCategory.LEG_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.5}},
+        "talon_left": {"name": "Left Talon", "category": PartCategory.LEG_LEFT, "is_vital": False, "is_internal": False, "parent": "leg_left", "stat_effects": {}},
+        "talon_right": {"name": "Right Talon", "category": PartCategory.LEG_RIGHT, "is_vital": False, "is_internal": False, "parent": "leg_right", "stat_effects": {}},
+    },
+    
+    "cat": {
+        # === HEAD ===
+        "skull": {"name": "Skull", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "brain": {"name": "Brain", "category": PartCategory.HEAD, "is_vital": True, "is_internal": True, "parent": "skull", "stat_effects": {}},
+        "eye_left": {"name": "Left Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "eye_right": {"name": "Right Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "whiskers": {"name": "Whiskers", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        "teeth": {"name": "Teeth", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        "ears": {"name": "Ears", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        
+        # === TORSO ===
+        "chest": {"name": "Chest", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "heart": {"name": "Heart", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "lungs": {"name": "Lungs", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "stomach": {"name": "Stomach", "category": PartCategory.TORSO, "is_vital": False, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        
+        # === LEGS (4 for cats) ===
+        "leg_front_left": {"name": "Front Left Leg", "category": PartCategory.ARM_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_front_right": {"name": "Front Right Leg", "category": PartCategory.ARM_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_left": {"name": "Back Left Leg", "category": PartCategory.LEG_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_right": {"name": "Back Right Leg", "category": PartCategory.LEG_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        
+        # === TAIL ===
+        "tail": {"name": "Tail", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {}},
+    },
+    
+    "dog": {
+        # === HEAD ===
+        "skull": {"name": "Skull", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "brain": {"name": "Brain", "category": PartCategory.HEAD, "is_vital": True, "is_internal": True, "parent": "skull", "stat_effects": {}},
+        "eye_left": {"name": "Left Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "eye_right": {"name": "Right Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "snout": {"name": "Snout", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        "teeth": {"name": "Teeth", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        "ears": {"name": "Ears", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        
+        # === TORSO ===
+        "chest": {"name": "Chest", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "heart": {"name": "Heart", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "lungs": {"name": "Lungs", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "stomach": {"name": "Stomach", "category": PartCategory.TORSO, "is_vital": False, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        
+        # === LEGS (4 for dogs) ===
+        "leg_front_left": {"name": "Front Left Leg", "category": PartCategory.ARM_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_front_right": {"name": "Front Right Leg", "category": PartCategory.ARM_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_left": {"name": "Back Left Leg", "category": PartCategory.LEG_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_right": {"name": "Back Right Leg", "category": PartCategory.LEG_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        
+        # === TAIL ===
+        "tail": {"name": "Tail", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {}},
+    },
+    
+    "raccoon": {
+        # === HEAD ===
+        "skull": {"name": "Skull", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "brain": {"name": "Brain", "category": PartCategory.HEAD, "is_vital": True, "is_internal": True, "parent": "skull", "stat_effects": {}},
+        "eye_left": {"name": "Left Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "eye_right": {"name": "Right Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "snout": {"name": "Snout", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        "teeth": {"name": "Teeth", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        
+        # === TORSO ===
+        "chest": {"name": "Chest", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "heart": {"name": "Heart", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "lungs": {"name": "Lungs", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "stomach": {"name": "Stomach", "category": PartCategory.TORSO, "is_vital": False, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        
+        # === LEGS (4 for raccoons) ===
+        "leg_front_left": {"name": "Front Left Leg", "category": PartCategory.ARM_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_front_right": {"name": "Front Right Leg", "category": PartCategory.ARM_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_left": {"name": "Back Left Leg", "category": PartCategory.LEG_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_right": {"name": "Back Right Leg", "category": PartCategory.LEG_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        
+        # === TAIL ===
+        "tail": {"name": "Tail", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {}},
+    },
+    
+    "mutant_rat": {
+        # === HEAD (mutated) ===
+        "skull": {"name": "Skull", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "brain": {"name": "Mutated Brain", "category": PartCategory.HEAD, "is_vital": True, "is_internal": True, "parent": "skull", "stat_effects": {}},
+        "eye_left": {"name": "Left Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "eye_right": {"name": "Right Eye", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {"vision": -0.5}},
+        "whiskers": {"name": "Whiskers", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        "teeth": {"name": "Oversized Teeth", "category": PartCategory.HEAD, "is_vital": False, "is_internal": False, "parent": "skull", "stat_effects": {}},
+        
+        # === TORSO (mutated) ===
+        "chest": {"name": "Chest", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": None, "stat_effects": {}},
+        "heart": {"name": "Heart", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "lungs": {"name": "Lungs", "category": PartCategory.TORSO, "is_vital": True, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "stomach": {"name": "Stomach", "category": PartCategory.TORSO, "is_vital": False, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        "tumor": {"name": "Echo Tumor", "category": PartCategory.TORSO, "is_vital": False, "is_internal": True, "parent": "chest", "stat_effects": {}},
+        
+        # === LEGS (4 for mutant rats) ===
+        "leg_front_left": {"name": "Front Left Leg", "category": PartCategory.ARM_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_front_right": {"name": "Front Right Leg", "category": PartCategory.ARM_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_left": {"name": "Back Left Leg", "category": PartCategory.LEG_LEFT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        "leg_back_right": {"name": "Back Right Leg", "category": PartCategory.LEG_RIGHT, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {"walk_speed": -0.25}},
+        
+        # === TAIL (mutated) ===
+        "tail": {"name": "Spined Tail", "category": PartCategory.TORSO, "is_vital": False, "is_internal": False, "parent": "chest", "stat_effects": {}},
+    },
+}
+
+
+class Body:
+    """Complete body system for colonists and animals."""
+    
+    def __init__(self, template: str = "human"):
+        """Initialize body with specified template.
+        
+        Args:
+            template: "human", "rat", "bird", etc.
+        """
+        self.template = template
         self.parts: Dict[str, BodyPart] = {}
         self.combat_log: List[Tuple[float, str]] = []  # (game_time, message)
         self.blood_loss: float = 0.0  # 0-100, death at 100
@@ -451,7 +613,16 @@ class Body:
     
     def _init_body(self) -> None:
         """Initialize all body parts from template."""
-        for part_id, template in BODY_TEMPLATE.items():
+        # Select template
+        if self.template == "human":
+            template_data = BODY_TEMPLATE
+        elif self.template in ANIMAL_TEMPLATES:
+            template_data = ANIMAL_TEMPLATES[self.template]
+        else:
+            # Default to human if unknown
+            template_data = BODY_TEMPLATE
+        
+        for part_id, template in template_data.items():
             self.parts[part_id] = BodyPart(
                 name=template["name"],
                 category=template["category"],

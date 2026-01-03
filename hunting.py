@@ -23,11 +23,19 @@ def spawn_hunt_jobs(colonists: List) -> int:
     if not huntable:
         return 0
     
-    print(f"[Hunting] Found {len(huntable)} huntable animals")
+    # Check which animals already have hunt jobs (assigned or unassigned)
+    existing_hunt_jobs = set()
+    for job in jobs_module.JOB_QUEUE:
+        if job.category == "hunt" and hasattr(job, 'animal_uid'):
+            existing_hunt_jobs.add(job.animal_uid)
     
     jobs_created = 0
     
     for animal in huntable:
+        # Skip if job already exists for this animal
+        if animal.uid in existing_hunt_jobs:
+            continue
+        
         # Create hunt job - any available colonist can take it
         job = jobs_module.add_job(
             "hunt",
@@ -71,13 +79,11 @@ def process_hunt_job(colonist, animal, grid, game_tick: int) -> bool:
     
     # If within attack range (1 tile), attack
     if dist <= 1:
-        # Use combat system to attack animal
-        from combat import perform_attack
+        # Attack animal directly (animals have simple health system)
+        damage = 10  # Base damage per attack
+        died = animal.take_damage(damage)
         
-        # Colonist attacks animal
-        hit_success = perform_attack(colonist, None, grid, game_tick, target_animal=animal)
-        
-        if hit_success and not animal.is_alive():
+        if died:
             # Animal died - create corpse
             kill_animal(animal, grid, game_tick)
             print(f"[Hunting] {colonist.name} killed {animal.species}_{animal.variant}")

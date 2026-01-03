@@ -19,6 +19,11 @@ class ColonistSprite(arcade.Sprite):
         self.bounce_offset_y = 0
         self.bounce_timer = 0
         
+        # Smooth movement interpolation
+        self.display_x = float(colonist.x)
+        self.display_y = float(colonist.y)
+        self.lerp_speed = 0.3  # How fast to interpolate (0.3 = 30% per frame)
+        
         # Load colonist sprite based on their style
         sprite_path = f"assets/colonists/colonist_{colonist.sprite_style}.png"
         
@@ -40,9 +45,24 @@ class ColonistSprite(arcade.Sprite):
         self.update_position()
     
     def update_position(self):
-        """Update sprite position from colonist data."""
-        base_x = self.colonist.x * TILE_SIZE + TILE_SIZE // 2
-        base_y = self.colonist.y * TILE_SIZE + TILE_SIZE // 2
+        """Update sprite position from colonist data with smooth interpolation."""
+        # Smoothly interpolate display position towards actual position
+        target_x = float(self.colonist.x)
+        target_y = float(self.colonist.y)
+        
+        # Lerp towards target (Rimworld-style smooth movement)
+        self.display_x += (target_x - self.display_x) * self.lerp_speed
+        self.display_y += (target_y - self.display_y) * self.lerp_speed
+        
+        # Snap if very close (avoid infinite tiny movements)
+        if abs(target_x - self.display_x) < 0.01:
+            self.display_x = target_x
+        if abs(target_y - self.display_y) < 0.01:
+            self.display_y = target_y
+        
+        # Convert to pixel coordinates
+        base_x = self.display_x * TILE_SIZE + TILE_SIZE // 2
+        base_y = self.display_y * TILE_SIZE + TILE_SIZE // 2
         
         # Apply bounce animation if active
         self.center_x = base_x + self.bounce_offset_x

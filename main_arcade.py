@@ -154,20 +154,23 @@ class FracturedCityWindow(arcade.Window):
         print(f"[Camera] Snapped to ({x}, {y}, {z})")
     
     def open_colonist_detail(self, colonist):
-        """Open colonist detail panel for a specific colonist."""
-        if colonist in self.colonists:
-            index = self.colonists.index(colonist)
-            self.colonist_detail_panel.open(self.colonists, index)
-            print(f"[UI] Opened detail panel for {colonist.name}")
+        """Open colonist detail popup for a specific colonist."""
+        from ui_arcade_colonist_popup import get_colonist_popup
+        popup = get_colonist_popup()
+        popup.set_colonists_list(self.colonists)
+        popup.open(colonist)
+        print(f"[UI] Opened detail popup for {colonist.name}")
     
     def open_animal_detail(self, animal):
-        """Open animal detail panel for a specific animal."""
+        """Open animal detail popup for a specific animal."""
         from animals import get_all_animals
+        from ui_arcade_animal_popup import get_animal_popup
         animals = get_all_animals()
         if animal in animals:
             index = animals.index(animal)
-            self.animal_detail_panel.open(animals, index)
-            print(f"[UI] Opened animal panel for {animal.species} #{animal.variant}")
+            popup = get_animal_popup()
+            popup.open(animals, index)
+            print(f"[UI] Opened animal popup for {animal.species_data['name']} #{animal.variant}")
         
     def setup(self):
         """Initialize game state."""
@@ -247,13 +250,10 @@ class FracturedCityWindow(arcade.Window):
         self.ui = ArcadeUI(self.current_width, self.current_height)
         
         # Initialize left sidebar with current window dimensions
-        from ui_arcade_panels import LeftSidebar, ColonistDetailPanel
+        from ui_arcade_panels import LeftSidebar
         self.left_sidebar = LeftSidebar(self.current_width, self.current_height)
-        self.colonist_detail_panel = ColonistDetailPanel(self.current_width, self.current_height)
         
-        # Initialize animal detail panel
-        from ui_arcade_animal_panel import get_animal_panel
-        self.animal_detail_panel = get_animal_panel(self.current_width, self.current_height)
+        # Animal popup is singleton, no need to store reference
         
         # Wire sidebar callbacks
         self.left_sidebar.on_colonist_locate = self.snap_camera_to_tile
@@ -268,27 +268,14 @@ class FracturedCityWindow(arcade.Window):
         # Initialize tile info panel
         self.tile_info_panel = get_tile_info_panel()
         
-        # Initialize right panel with colonists (always visible)
-        self.colonist_detail_panel.colonists = self.colonists
+        # Right panel removed - using center popups now
         
-        # TEMP: Spawn test animals for UI testing
-        from animals import spawn_animal
-        spawn_animal(self.grid, "rat", 10, 10, 0, variant=0)  # Feral rat
-        spawn_animal(self.grid, "rat", 12, 10, 0, variant=1)  # Different variant
-        spawn_animal(self.grid, "rat", 14, 10, 0, variant=2)  # Partially tamed
-        spawn_animal(self.grid, "bird", 15, 15, 1, variant=0)  # Bird on rooftop
-        
-        # Set different tame levels for testing progressive reveal
-        from animals import get_all_animals
-        test_animals = get_all_animals()
-        if len(test_animals) >= 3:
-            test_animals[2].tame_progress = 60  # Tier 2 unlock
-        if len(test_animals) >= 4:
-            test_animals[3].tame_progress = 100  # Fully tamed
-            test_animals[3].is_wild = False
+        # Spawn animals during worldgen
+        from animals import spawn_random_animals
+        animals_spawned = spawn_random_animals(self.grid, count=20)
         
         print(f"[Arcade] Setup complete! {len(self.colonists)} colonists spawned.")
-        print(f"[Arcade] Spawned {len(test_animals)} test animals")
+        print(f"[Arcade] Spawned {animals_spawned} animals")
         print("[Arcade] Use WASD or Arrow Keys to move camera")
         print("[Arcade] Use Mouse Wheel to zoom")
     
@@ -474,11 +461,17 @@ class FracturedCityWindow(arcade.Window):
             rooms={}   # TODO: Get from room system
         )
         
-        # Draw colonist detail panel (right side)
-        self.colonist_detail_panel.draw()
+        # Colonist detail now in center popup
         
-        # Draw animal detail panel (right side, overlays colonist panel if open)
-        self.animal_detail_panel.draw()
+        # Draw animal popup (center, over everything except other popups)
+        from ui_arcade_animal_popup import get_animal_popup
+        animal_popup = get_animal_popup()
+        animal_popup.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw colonist popup (center, over everything except other popups)
+        from ui_arcade_colonist_popup import get_colonist_popup
+        colonist_popup = get_colonist_popup()
+        colonist_popup.draw(self.mouse_x, self.mouse_y)
         
         # Draw native Arcade workstation panel
         from ui_arcade_workstation import get_workstation_panel
@@ -506,6 +499,7 @@ class FracturedCityWindow(arcade.Window):
         # Draw tile info panel (bottom-right)
         if self.tile_info_panel and self.hovered_tile:
             cam_x, cam_y = self.camera.position
+            self.tile_info_panel.game_tick = getattr(self, 'game_tick', 0)  # Pass game tick for item age calculation
             self.tile_info_panel.draw(
                 self.grid, 
                 self.colonists,
@@ -1192,15 +1186,25 @@ class FracturedCityWindow(arcade.Window):
             self.ui.on_resize(width, height)
         if hasattr(self, 'left_sidebar'):
             self.left_sidebar.on_resize(width, height)
-        if hasattr(self, 'colonist_detail_panel'):
-            self.colonist_detail_panel.on_resize(width, height)
-        if hasattr(self, 'animal_detail_panel'):
-            self.animal_detail_panel.on_resize(width, height)
+        # Colonist detail panel removed (using center popup)
+        # Animal popup doesn't need resize (centered)
         if hasattr(self, 'notification_panel'):
             self.notification_panel.on_resize(width, height)
     
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
         """Handle mouse wheel for zoom and UI scrolling."""
+        # Check if animal popup wants to handle scroll
+        from ui_arcade_animal_popup import get_animal_popup
+        animal_popup = get_animal_popup()
+        if animal_popup.handle_scroll(x, y, scroll_y):
+            return  # Popup consumed the scroll
+        
+        # Check if colonist popup wants to handle scroll
+        from ui_arcade_colonist_popup import get_colonist_popup
+        colonist_popup = get_colonist_popup()
+        if colonist_popup.handle_scroll(x, y, scroll_y):
+            return  # Popup consumed the scroll
+        
         # Check if bed assignment panel wants to handle scroll
         from ui_arcade_bed import get_bed_assignment_panel
         bed_panel = get_bed_assignment_panel()
@@ -1214,6 +1218,20 @@ class FracturedCityWindow(arcade.Window):
             if (ws_panel.panel_x <= x <= ws_panel.panel_x + ws_panel.panel_width and
                 ws_panel.panel_y <= y <= ws_panel.panel_y + ws_panel.panel_height):
                 return  # Don't zoom when over workstation panel
+        
+        # Check if left sidebar wants to handle scroll (for animal list)
+        if (self.left_sidebar.x <= x <= self.left_sidebar.x + self.left_sidebar.width and
+            self.left_sidebar.y <= y <= self.left_sidebar.y + self.left_sidebar.height):
+            # Scroll animal list if on ANIMALS tab
+            if self.left_sidebar.current_tab == 1:
+                scroll_amount = int(scroll_y * 30)  # 30 pixels per scroll tick
+                self.left_sidebar.animal_scroll = max(0, self.left_sidebar.animal_scroll - scroll_amount)
+                return  # Sidebar consumed the scroll
+            # Scroll colonist list if on COLONISTS tab
+            elif self.left_sidebar.current_tab == 0:
+                scroll_amount = int(scroll_y * 30)
+                self.left_sidebar.colonist_scroll = max(0, self.left_sidebar.colonist_scroll - scroll_amount)
+                return
         
         # Simple zoom: just change zoom level, don't move camera
         # This is the most basic zoom that won't cause drift
@@ -1279,7 +1297,13 @@ class FracturedCityWindow(arcade.Window):
                 self.snap_camera_to_tile(tile_x, tile_y, self.grid.current_z)
                 return
             
-            # Check visitor panel (highest priority popup)
+            # Check colonist popup (highest priority)
+            from ui_arcade_colonist_popup import get_colonist_popup
+            colonist_popup = get_colonist_popup()
+            if colonist_popup.visible and colonist_popup.handle_click(x, y):
+                return
+            
+            # Check visitor panel
             from ui_arcade_visitor import get_visitor_panel
             visitor_panel = get_visitor_panel()
             if visitor_panel.visible and visitor_panel.handle_click(x, y):
@@ -1304,13 +1328,13 @@ class FracturedCityWindow(arcade.Window):
                 return
             
             # UI elements use screen coordinates (not world coordinates)
-            # Check if click is on animal detail panel (check first since it overlays)
-            if self.animal_detail_panel.handle_click(x, y):
+            # Check animal popup (highest priority)
+            from ui_arcade_animal_popup import get_animal_popup
+            animal_popup = get_animal_popup()
+            if animal_popup.visible and animal_popup.handle_click(x, y):
                 return
             
-            # Check if click is on colonist detail panel
-            if self.colonist_detail_panel.handle_click(x, y):
-                return
+            # Colonist detail panel removed (using center popup)
             
             # Check if click is on left sidebar
             if self.left_sidebar.handle_click(x, y, self.colonists):
@@ -1405,8 +1429,8 @@ class FracturedCityWindow(arcade.Window):
                 if clicked_colonist:
                     self.selected_colonist = clicked_colonist
                     print(f"[Mouse] Selected colonist: {clicked_colonist.name}")
-                    # Open colonist detail panel
-                    self.colonist_detail_panel.open(self.colonists, self.colonists.index(clicked_colonist))
+                    # Open colonist popup
+                    self.open_colonist_detail(clicked_colonist)
                 else:
                     self.selected_colonist = None
                     

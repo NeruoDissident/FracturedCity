@@ -221,6 +221,7 @@ def create_resource_item(x: int, y: int, z: int, resource_type: str, amount: int
     Used for crafting outputs and salvage drops.
     """
     spawn_resource_item(x, y, z, resource_type, amount, auto_haul=True)
+    print(f"[DEBUG Resource] Created {amount}x {resource_type} at ({x},{y},{z}), stored in _RESOURCE_ITEMS: {(x,y,z) in _RESOURCE_ITEMS}")
 
 
 def get_all_resource_items() -> Dict[Coord3D, dict]:
@@ -233,7 +234,12 @@ def pickup_resource_item(x: int, y: int, z: int = 0) -> Optional[dict]:
     
     Returns the item dict if found, None otherwise.
     """
-    return _RESOURCE_ITEMS.pop((x, y, z), None)
+    item = _RESOURCE_ITEMS.pop((x, y, z), None)
+    if item:
+        print(f"[DEBUG Resource] Picked up {item.get('amount')}x {item.get('type')} from ({x},{y},{z})")
+    else:
+        print(f"[DEBUG Resource] No item found at ({x},{y},{z}) to pick up")
+    return item
 
 
 def collect_resource_item(x: int, y: int, z: int = 0) -> bool:

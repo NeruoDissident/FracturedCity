@@ -18,6 +18,11 @@ class AnimalSprite(arcade.Sprite):
         self.animal = animal
         self.uid = animal.uid
         
+        # Smooth movement interpolation
+        self.display_x = float(animal.x)
+        self.display_y = float(animal.y)
+        self.lerp_speed = 0.3  # How fast to interpolate (0.3 = 30% per frame)
+        
         # Load texture
         try:
             self.texture = arcade.load_texture(animal.get_sprite_path())
@@ -35,9 +40,24 @@ class AnimalSprite(arcade.Sprite):
         self.height = TILE_SIZE
     
     def update_position(self):
-        """Update sprite position from animal entity."""
-        self.center_x = self.animal.x * TILE_SIZE + TILE_SIZE / 2
-        self.center_y = self.animal.y * TILE_SIZE + TILE_SIZE / 2
+        """Update sprite position from animal entity with smooth interpolation."""
+        # Smoothly interpolate display position towards actual position
+        target_x = float(self.animal.x)
+        target_y = float(self.animal.y)
+        
+        # Lerp towards target (Rimworld-style smooth movement)
+        self.display_x += (target_x - self.display_x) * self.lerp_speed
+        self.display_y += (target_y - self.display_y) * self.lerp_speed
+        
+        # Snap if very close (avoid infinite tiny movements)
+        if abs(target_x - self.display_x) < 0.01:
+            self.display_x = target_x
+        if abs(target_y - self.display_y) < 0.01:
+            self.display_y = target_y
+        
+        # Convert to pixel coordinates
+        self.center_x = self.display_x * TILE_SIZE + TILE_SIZE / 2
+        self.center_y = self.display_y * TILE_SIZE + TILE_SIZE / 2
 
 
 class AnimalRenderer:

@@ -191,11 +191,14 @@ BUILDING_TYPES = {
         "multi_recipe": True,  # Supports multiple recipes
         "size": (2, 1),  # 2x1 tiles (width, height) - horizontal
         "recipes": [
-            {"id": "simple_meal", "name": "Simple Meal", "input_items": {"meat": 1}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
-            {"id": "fine_meal", "name": "Fine Meal", "input_items": {"meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 2}, "work_time": 90},
-            {"id": "meat_stew", "name": "Meat Stew", "input_items": {"meat": 6}, "input": {"power": 1}, "output": {"cooked_meal": 4}, "work_time": 120},
-            {"id": "poultry_roast", "name": "Poultry Roast", "input_items": {"meat+poultry": 4}, "input": {"power": 1}, "output": {"cooked_meal": 3}, "work_time": 100},
-            {"id": "rodent_skewers", "name": "Rodent Skewers", "input_items": {"meat+rodent": 3}, "input": {"power": 1}, "output": {"cooked_meal": 2}, "work_time": 80},
+            # Resource-based recipe (raw_food harvested from plants)
+            {"id": "simple_meal", "name": "Simple Meal", "input": {"raw_food": 2, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
+            
+            # Meat-based recipes (from hunting/butchering)
+            {"id": "grilled_scraps", "name": "Grilled Scraps", "input_items": {"scrap_meat": 1}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 50},
+            {"id": "meat_stew", "name": "Meat Stew", "input_items": {"scrap_meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 80},
+            {"id": "hearty_roast", "name": "Hearty Roast", "input_items": {"scrap_meat": 3}, "input": {"power": 2}, "output": {"cooked_meal": 1}, "work_time": 100},
+            {"id": "poultry_roast", "name": "Poultry Roast", "input_items": {"poultry_meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 70},
         ],
     },
     # === Item Crafting Stations ===
@@ -250,12 +253,9 @@ BUILDING_TYPES = {
         "walkable": False,
         "placement_rule": "floor_only",
         "workstation": True,
-        "multi_recipe": True,
+        "multi_recipe": False,
         "size": (2, 1),  # 2x1 horizontal like stove
-        "recipes": [
-            {"id": "butcher_rat", "name": "Butcher Rat Corpse", "input_items": {"rat_corpse": 1}, "output": {"rat_meat": 2, "rat_pelt": 1}, "work_time": 60},
-            {"id": "butcher_bird", "name": "Butcher Bird Corpse", "input_items": {"bird_corpse": 1}, "output": {"bird_meat": 3, "feathers": 2}, "work_time": 70},
-        ],
+        "recipe": {"id": "butcher", "name": "Butcher Corpse", "input_items": {"corpse": 1}, "output": {}, "work_time": 60},
         "description": "Cuts up rats and pigeons and shit.",
     },
     "cortex_spindle": {
@@ -300,8 +300,8 @@ BUILDING_TYPES = {
         "multi_recipe": True,
         "size": (2, 1),  # 2x1 horizontal
         "recipes": [
-            {"id": "butcher_rat", "name": "Butcher Rat", "input": {"rat_corpse": 1}, "output": {"rat_meat": 2, "rat_pelt": 1}, "work_time": 60},
-            {"id": "butcher_bird", "name": "Butcher Bird", "input": {"bird_corpse": 1}, "output": {"bird_meat": 3, "feathers": 2}, "work_time": 70},
+            {"id": "butcher_rat", "name": "Butcher Rat", "input": {"rat_corpse": 1}, "output": {"scrap_meat": 2, "rough_hide": 1}, "work_time": 60},
+            {"id": "butcher_bird", "name": "Butcher Bird", "input": {"bird_corpse": 1}, "output": {"poultry_meat": 3, "feathers": 2}, "work_time": 70},
         ],
     },
 }
@@ -390,12 +390,22 @@ def workstation_has_inputs(x: int, y: int, z: int = 0) -> bool:
     if recipe is None:
         return False
     
-    inputs_needed = recipe.get("input", {})
+    # Check resource inputs (power, wood, etc.)
+    resource_inputs_needed = recipe.get("input", {})
     inputs_have = ws.get("input_items", {})
     
-    for res_type, amount in inputs_needed.items():
+    for res_type, amount in resource_inputs_needed.items():
         if inputs_have.get(res_type, 0) < amount:
             return False
+    
+    # Check item inputs (meat, corpses, etc.) - stored in equipment_items
+    item_inputs_needed = recipe.get("input_items", {})
+    equipment_have = ws.get("equipment_items", {})
+    
+    for item_tag, amount in item_inputs_needed.items():
+        if equipment_have.get(item_tag, 0) < amount:
+            return False
+    
     return True
 
 
@@ -410,14 +420,28 @@ def consume_workstation_inputs(x: int, y: int, z: int = 0) -> bool:
     if recipe is None:
         return False
     
-    inputs_needed = recipe.get("input", {})
-    
-    # Consume inputs
-    for res_type, amount in inputs_needed.items():
+    # Consume resource inputs (power, wood, etc.)
+    resource_inputs_needed = recipe.get("input", {})
+    for res_type, amount in resource_inputs_needed.items():
         ws["input_items"][res_type] = ws["input_items"].get(res_type, 0) - amount
     
-    # Clear empty entries
+    # Clear empty resource entries
     ws["input_items"] = {k: v for k, v in ws["input_items"].items() if v > 0}
+    
+    # Consume item inputs (meat, corpses, etc.)
+    item_inputs_needed = recipe.get("input_items", {})
+    if "equipment_items" not in ws:
+        ws["equipment_items"] = {}
+    
+    for item_tag, amount in item_inputs_needed.items():
+        ws["equipment_items"][item_tag] = ws["equipment_items"].get(item_tag, 0) - amount
+    
+    # Clear empty equipment entries
+    ws["equipment_items"] = {k: v for k, v in ws["equipment_items"].items() if v > 0}
+    
+    # Clear corpse metadata after consumption
+    if "corpse_metadata" in ws and ws["corpse_metadata"]:
+        ws["corpse_metadata"].pop(0)
     
     return True
 
@@ -536,29 +560,23 @@ def place_building(grid: Grid, x: int, y: int, building_type: str, z: int = 0) -
     width, height = building_def.get("size", (1, 1))
     tile_type = building_def.get("tile_type", building_type)
     
-    # For multi-tile structures, set all tiles in footprint
+    # For multi-tile structures, only set origin tile
     # For workstations, preserve the floor layer
     is_workstation = building_def.get("workstation", False)
     
-    for dy in range(height):
-        for dx in range(width):
-            tile_x = x + dx
-            tile_y = y + dy
-            
-            # Store original floor tile for workstations (so they render on top)
-            if is_workstation:
-                original_tile = grid.get_tile(tile_x, tile_y, z)
-                if original_tile and original_tile in ("finished_floor", "floor", "roof_floor", "roof_access"):
-                    if not hasattr(grid, 'base_tiles'):
-                        grid.base_tiles = {}
-                    grid.base_tiles[(tile_x, tile_y, z)] = original_tile
-            
-            # Set tile_type on ALL tiles in footprint
-            # This is needed for construction completion to work properly
-            grid.set_tile(tile_x, tile_y, tile_type, z=z)
-            
-            # Keep multi-tile construction sites WALKABLE during construction
-            # Colonists need to access the site to deliver materials and build
+    # Store original floor tile for workstations (so they render on top)
+    if is_workstation:
+        original_tile = grid.get_tile(x, y, z)
+        if original_tile and original_tile in ("finished_floor", "floor", "roof_floor", "roof_access"):
+            if not hasattr(grid, 'base_tiles'):
+                grid.base_tiles = {}
+            grid.base_tiles[(x, y, z)] = original_tile
+    
+    # Set tile_type ONLY on origin tile
+    grid.set_tile(x, y, tile_type, z=z)
+    
+    # Keep multi-tile construction sites WALKABLE during construction
+    # Colonists need to access the site to deliver materials and build
             # Will be marked unwalkable when construction completes
     
     # Determine subtype for job priority
@@ -910,7 +928,17 @@ def get_workstation_recipes(x: int, y: int, z: int) -> list:
         return []
     
     building_def = BUILDING_TYPES.get(ws["type"], {})
-    return building_def.get("recipes", [])
+    
+    # For multi-recipe stations, return recipes list
+    if building_def.get("multi_recipe", False):
+        return building_def.get("recipes", [])
+    
+    # For single-recipe stations, return recipe as a list
+    recipe = building_def.get("recipe")
+    if recipe:
+        return [recipe]
+    
+    return []
 
 
 # Tiles that can be demolished

@@ -2566,6 +2566,14 @@ class Colonist:
                     orders[0]["in_progress"] = True
             self.state = "crafting_fetch"
             self._crafting_inputs_needed = None  # Will be set when we start fetching
+        elif job.category == "hunt":
+            # Set hunter_uid on animal when taking hunt job
+            if hasattr(job, 'animal_uid'):
+                from animals import get_animal
+                animal = get_animal(job.animal_uid)
+                if animal:
+                    animal.hunter_uid = self.uid
+            self.state = "moving_to_job"
         else:
             self.state = "moving_to_job"
     
@@ -2582,6 +2590,13 @@ class Colonist:
             set_node_state(job.x, job.y, NodeState.IDLE)
         elif job.type == "crafting":
             buildings.release_workstation(job.x, job.y, job.z)
+        elif job.category == "hunt":
+            # Clear hunter_uid when releasing hunt job
+            if hasattr(job, 'animal_uid'):
+                from animals import get_animal
+                animal = get_animal(job.animal_uid)
+                if animal:
+                    animal.hunter_uid = None
         
         self.current_job = None
         self.current_path = []
@@ -2661,8 +2676,10 @@ class Colonist:
             f_score, _, (cx, cy, cz), path = heapq.heappop(heap)
             current_g = g_scores[(cx, cy, cz)]
             
-            # Regular 2D movement on current z-level
-            for dx, dy in [(1, 0), (-1, 0), (0, 1), (0, -1)]:
+            # Regular 2D movement on current z-level (cardinal + diagonal)
+            # Diagonals cost 1.4 (sqrt(2)) vs 1.0 for cardinal to prefer straight paths
+            for dx, dy, move_cost in [(1, 0, 1.0), (-1, 0, 1.0), (0, 1, 1.0), (0, -1, 1.0),
+                                       (1, 1, 1.4), (1, -1, 1.4), (-1, 1, 1.4), (-1, -1, 1.4)]:
                 nx, ny, nz = cx + dx, cy + dy, cz
                 
                 if (nx, ny, nz) in visited:
@@ -2674,7 +2691,7 @@ class Colonist:
                 
                 if is_goal or is_walkable:
                     new_path = path + [(nx, ny, nz)]
-                    new_g = current_g + 1  # Cost to move one tile
+                    new_g = current_g + move_cost  # Cost to move (1.0 cardinal, 1.4 diagonal)
                     
                     if is_goal:
                         # Cache the full path before returning
@@ -2837,6 +2854,47 @@ class Colonist:
             return
 
         job = self.current_job
+        from jobs import remove_job
+        
+        # Handle hunt jobs
+        if job.category == "hunt":
+            if hasattr(job, 'animal_uid'):
+                from animals import get_animal
+                from hunting import process_hunt_job
+                animal = get_animal(job.animal_uid)
+                
+                if animal is None or not animal.is_alive():
+                    # Animal is dead or gone - job complete
+                    remove_job(job)
+                    self.current_job = None
+                    self.state = "idle"
+                    return
+                
+                # Process hunting
+                hunt_complete = process_hunt_job(self, animal, grid, self._game_tick)
+                
+                if hunt_complete:
+                    # Hunt successful - remove job and unmark animal
+                    from animals import unmark_for_hunt
+                    unmark_for_hunt(animal)
+                    remove_job(job)
+                    self.current_job = None
+                    self.state = "idle"
+                    return
+                else:
+                    # Still hunting - update target position to follow animal
+                    job.x = animal.x
+                    job.y = animal.y
+                    job.z = animal.z
+                    self.state = "moving_to_job"
+                    self.current_path = []  # Recalculate path to new position
+                    return
+            else:
+                # Invalid hunt job - no animal UID
+                remove_job(job)
+                self.current_job = None
+                self.state = "idle"
+                return
         
         # Double-check construction has materials (shouldn't happen but safety)
         if job.type == "construction":
@@ -2941,11 +2999,11 @@ class Colonist:
                     # Register as workstation
                     buildings.register_workstation(job.x, job.y, job.z, "generator")
                 elif current_tile == "stove":
-                    # Set ALL tiles in footprint to finished
+                    grid.set_tile(job.x, job.y, "finished_stove", z=job.z)
+                    # Mark multi-tile footprint as unwalkable
                     width, height = buildings.get_building_size("stove")
                     for dy in range(height):
                         for dx in range(width):
-                            grid.set_tile(job.x + dx, job.y + dy, "finished_stove", z=job.z)
                             grid.walkable[job.z][job.y + dy][job.x + dx] = False
                     # Register as workstation
                     buildings.register_workstation(job.x, job.y, job.z, "stove")
@@ -2962,11 +3020,11 @@ class Colonist:
                     grid.set_tile(job.x, job.y, "finished_barracks", z=job.z)
                     buildings.register_workstation(job.x, job.y, job.z, "barracks")
                 elif current_tile == "bio_matter_salvage_station":
-                    # Set ALL tiles in footprint to finished
+                    grid.set_tile(job.x, job.y, "finished_bio_matter_salvage_station", z=job.z)
+                    # Mark multi-tile footprint as unwalkable
                     width, height = buildings.get_building_size("bio_matter_salvage_station")
                     for dy in range(height):
                         for dx in range(width):
-                            grid.set_tile(job.x + dx, job.y + dy, "finished_bio_matter_salvage_station", z=job.z)
                             grid.walkable[job.z][job.y + dy][job.x + dx] = False
                     buildings.register_workstation(job.x, job.y, job.z, "bio_matter_salvage_station")
                 elif current_tile == "gutter_still":
@@ -3040,7 +3098,7 @@ class Colonist:
             elif job.type == "haul":
                 # Pickup phase complete - pick up the item and start hauling
                 # Check if this is an equipment haul or resource haul
-                if job.resource_type == "equipment" or job.resource_type == "furniture" or job.resource_type == "components" or job.resource_type == "instruments" or job.resource_type == "consumables":
+                if job.resource_type in ("equipment", "furniture", "components", "instruments", "consumables", "corpses", "raw_food", "materials"):
                     # Equipment/furniture/etc haul - pick up from world items
                     from items import pickup_world_item
                     print(f"[DEBUG Haul] {self.name} picking up {job.resource_type} at ({job.x},{job.y},{job.z})")
@@ -3324,7 +3382,7 @@ class Colonist:
                     mark_supply_job_completed(dest_x, dest_y, dest_z, job.resource_type)
             elif job.type == "haul":
                 # Deliver to stockpile
-                if resource_type in ("equipment", "furniture", "components", "instruments", "consumables"):
+                if resource_type in ("equipment", "furniture", "components", "instruments", "consumables", "corpses", "raw_food", "materials"):
                     # Equipment/furniture/etc delivery - store the item data
                     item_data = self.carrying.get("item", {})
                     item_name = item_data.get("name", resource_type)
@@ -3588,6 +3646,14 @@ class Colonist:
             if node is None or node.get("amount", 0) <= 0:
                 return False
         
+        # For hunt jobs, check if animal is still alive
+        if job.category == "hunt":
+            if hasattr(job, 'animal_uid'):
+                from animals import get_animal
+                animal = get_animal(job.animal_uid)
+                if animal is None or not animal.is_alive():
+                    return False
+        
         return True
 
     def _check_path_still_valid(self, grid: Grid) -> bool:
@@ -3645,7 +3711,28 @@ class Colonist:
                 # Deliver to workstation
                 res_type = self.carrying.get("type", "")
                 amount = self.carrying.get("amount", 1)
-                buildings.add_input_to_workstation(job.x, job.y, job.z, res_type, amount)
+                
+                # Check if this is an item input (corpse, meat, etc.) or regular resource
+                recipe = buildings.get_workstation_recipe(job.x, job.y, job.z)
+                is_item_input = recipe and res_type in recipe.get("input_items", {})
+                
+                if is_item_input:
+                    # Store in equipment_items for item inputs
+                    ws = buildings.get_workstation(job.x, job.y, job.z)
+                    if ws:
+                        if "equipment_items" not in ws:
+                            ws["equipment_items"] = {}
+                        ws["equipment_items"][res_type] = ws["equipment_items"].get(res_type, 0) + amount
+                        
+                        # For corpses, also store metadata
+                        if res_type == "corpse" and "item" in self.carrying:
+                            if "corpse_metadata" not in ws:
+                                ws["corpse_metadata"] = []
+                            ws["corpse_metadata"].append(self.carrying["item"])
+                else:
+                    # Store in input_items for regular resources
+                    buildings.add_input_to_workstation(job.x, job.y, job.z, res_type, amount)
+                
                 self.drop_item(self.carrying)
                 self.carrying = None
                 
@@ -3681,17 +3768,22 @@ class Colonist:
             return
         
         # Need to fetch materials
-        inputs_needed = recipe.get("input", {})
         ws = buildings.get_workstation(job.x, job.y, job.z)
-        inputs_have = ws.get("input_items", {}) if ws else {}
+        
+        # Check both regular inputs (resources) and item inputs (equipment)
+        resource_inputs_needed = recipe.get("input", {})
+        item_inputs_needed = recipe.get("input_items", {})
+        
+        resource_inputs_have = ws.get("input_items", {}) if ws else {}
+        item_inputs_have = ws.get("equipment_items", {}) if ws else {}
         
         # Track how long we've been waiting for materials
         if not hasattr(self, '_crafting_wait_time'):
             self._crafting_wait_time = 0
         
-        # Find what we still need
-        for res_type, amount_needed in inputs_needed.items():
-            have = inputs_have.get(res_type, 0)
+        # First, fetch regular resource inputs (wood, power, etc.)
+        for res_type, amount_needed in resource_inputs_needed.items():
+            have = resource_inputs_have.get(res_type, 0)
             if have < amount_needed:
                 # Find stockpile with this resource
                 source = zones.find_stockpile_with_resource(res_type, z=job.z)
@@ -3701,6 +3793,7 @@ class Colonist:
                     if self._crafting_wait_time > 300:
                         # Timeout - cancel job and release workstation
                         print(f"[Crafting] {self.name} cancelled crafting job - missing {res_type}")
+                        print(f"[Crafting DEBUG] Recipe: {recipe.get('name', 'unknown')}, Looking for: {res_type}")
                         buildings.release_workstation(job.x, job.y, job.z)
                         buildings.mark_crafting_job_completed(job.x, job.y, job.z)
                         remove_job(job)
@@ -3729,26 +3822,72 @@ class Colonist:
                     
                     item = zones.remove_from_tile_storage(source_x, source_y, source_z, pickup_amount)
                     
-                    # If not found in tile storage, try equipment storage (components)
-                    if item is None:
-                        # Check if this is a component item
-                        equipment_items = zones.get_equipment_at_tile(source_x, source_y, source_z)
-                        for eq_item in equipment_items:
-                            if eq_item.get("id") == res_type:
-                                # Remove this component item
-                                item = zones.remove_equipment_from_tile(source_x, source_y, source_z)
-                                if item:
-                                    # Convert to carrying format (components are single items)
-                                    item = {"type": res_type, "amount": 1, "item": item}
-                                break
-                    
                     if item:
                         self.carrying = {"type": item["type"], "amount": item.get("amount", 1)}
-                        if "item" in item:
-                            self.carrying["item"] = item["item"]
                         self.pick_up_item(self.carrying)
                         spend_from_stockpile(item["type"], item.get("amount", 1))
                         self.current_path = []
+                    return
+                
+                # Move towards stockpile
+                if not self.current_path or self.current_path[-1] != (source_x, source_y, source_z):
+                    self.current_path = self._calculate_path(grid, source_x, source_y, source_z, game_tick)
+                
+                if self.current_path:
+                    next_pos = self.current_path[0]
+                    if grid.is_walkable(next_pos[0], next_pos[1], next_pos[2]):
+                        self.x, self.y, self.z = next_pos
+                        self.current_path.pop(0)
+                        self.move_cooldown = 3
+                return
+        
+        # Then, fetch item inputs (corpses, meat, etc. from equipment storage)
+        for item_type, amount_needed in item_inputs_needed.items():
+            have = item_inputs_have.get(item_type, 0)
+            if have < amount_needed:
+                # Find stockpile with this item in equipment storage
+                source = zones.find_stockpile_with_resource(item_type, z=job.z)
+                if source is None:
+                    # No item available - wait, but timeout after 300 ticks (~5 seconds)
+                    self._crafting_wait_time += 1
+                    if self._crafting_wait_time > 300:
+                        # Timeout - cancel job and release workstation
+                        print(f"[Crafting] {self.name} cancelled crafting job - missing {item_type}")
+                        print(f"[Crafting DEBUG] Recipe: {recipe.get('name', 'unknown')}, Looking for: {item_type}")
+                        print(f"[Crafting DEBUG] Equipment storage has: {list(zones._EQUIPMENT_STORAGE.keys())}")
+                        buildings.release_workstation(job.x, job.y, job.z)
+                        buildings.mark_crafting_job_completed(job.x, job.y, job.z)
+                        remove_job(job)
+                        self.current_job = None
+                        self.state = "idle"
+                        self._crafting_wait_time = 0
+                    return
+                
+                # Reset wait timer when materials are found
+                self._crafting_wait_time = 0
+                
+                source_x, source_y, source_z = source
+                
+                # Move to stockpile
+                if self.move_cooldown > 0:
+                    self.move_cooldown -= 1
+                    return
+                
+                # Check if at stockpile
+                if self.x == source_x and self.y == source_y and self.z == source_z:
+                    # Pick up from equipment storage (corpses, components, etc.)
+                    equipment_items = zones.get_equipment_at_tile(source_x, source_y, source_z)
+                    for eq_item in equipment_items:
+                        if eq_item.get("id") == item_type:
+                            # Remove this item
+                            item = zones.remove_equipment_from_tile(source_x, source_y, source_z)
+                            if item:
+                                # Convert to carrying format
+                                self.carrying = {"type": item_type, "amount": 1, "item": item}
+                                self.pick_up_item(self.carrying)
+                                spend_from_stockpile(item_type, 1)
+                                self.current_path = []
+                            return
                     return
                 
                 # Move towards stockpile
@@ -3852,20 +3991,128 @@ class Colonist:
                 for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
                     drop_x, drop_y = job.x + dx, job.y + dy
                     if grid.is_walkable(drop_x, drop_y, job.z):
+                        # Spawn item and add metadata if it's from butchery
+                        from items import add_item_metadata, get_world_items_at
                         spawn_world_item(drop_x, drop_y, job.z, output_item_id)
+                        
+                        # Add metadata for organic items (butchery outputs)
+                        if item_def and item_def.material_type in ["meat", "hide", "feather", "bone", "organ", "fat"]:
+                            # Get the spawned item and add metadata
+                            items_at_loc = get_world_items_at(drop_x, drop_y, job.z)
+                            if items_at_loc:
+                                latest_item = items_at_loc[-1]  # Get the just-spawned item
+                                
+                                # Get source species from the corpse that was butchered
+                                source_species = None
+                                if self.carrying and self.carrying.get("type") == "corpse":
+                                    corpse_item = self.carrying.get("item", {})
+                                    source_species = corpse_item.get("source_species")
+                                
+                                # Add metadata
+                                add_item_metadata(
+                                    latest_item,
+                                    source_species=source_species,
+                                    harvest_tick=game_tick,
+                                    harvested_by=self.uid
+                                )
+                        
                         # print(f"[Crafting] Produced {item_name} at ({drop_x},{drop_y})")
                         break
             else:
-                # Produce resource output (legacy behavior)
+                # Produce outputs from 'output' dict (can be items or resources)
                 outputs = recipe.get("output", {})
+                
+                # For butcher recipes with empty outputs, look up outputs from species data
+                if not outputs and recipe.get("id") == "butcher":
+                    # Get species from the workstation's stored corpse metadata
+                    ws = buildings.get_workstation(job.x, job.y, job.z)
+                    if ws and "corpse_metadata" in ws and ws["corpse_metadata"]:
+                        corpse_item = ws["corpse_metadata"][0]  # Get first corpse
+                        species = corpse_item.get("source_species")
+                        print(f"[Butcher DEBUG] Found corpse with species: {species}")
+                        
+                        if species:
+                            # Look up species data to get butcher outputs
+                            from animals import AnimalSpecies
+                            species_data = None
+                            if species == "rat":
+                                species_data = AnimalSpecies.RAT
+                            elif species == "bird":
+                                species_data = AnimalSpecies.BIRD
+                            elif species == "cat":
+                                species_data = AnimalSpecies.CAT
+                            elif species == "dog":
+                                species_data = AnimalSpecies.DOG
+                            elif species in ["raccoon", "racoon"]:
+                                species_data = AnimalSpecies.RACCOON
+                            elif species == "opossum":
+                                species_data = AnimalSpecies.OPOSSUM
+                            elif species == "mutant_rat":
+                                species_data = AnimalSpecies.MUTANT_RAT
+                            
+                            if species_data:
+                                # Build outputs from species data
+                                meat_min, meat_max = species_data.get("meat_yield", (1, 2))
+                                import random
+                                meat_amount = random.randint(meat_min, meat_max)
+                                
+                                # Determine meat type based on species
+                                if species == "bird":
+                                    outputs["poultry_meat"] = meat_amount
+                                else:
+                                    outputs["scrap_meat"] = meat_amount
+                                
+                                print(f"[Butcher DEBUG] Added meat: {meat_amount} ({'poultry_meat' if species == 'bird' else 'scrap_meat'})")
+                                
+                                # Add materials (pelts, feathers, etc.)
+                                materials = species_data.get("materials", {})
+                                for mat_type, (mat_min, mat_max) in materials.items():
+                                    mat_amount = random.randint(mat_min, mat_max)
+                                    if mat_amount > 0:
+                                        outputs[mat_type] = mat_amount
+                                        print(f"[Butcher DEBUG] Added material: {mat_amount} {mat_type}")
+                                
+                                print(f"[Butcher DEBUG] Final outputs dict: {outputs}")
+                
                 from resources import create_resource_item
+                from items import spawn_world_item, get_item_def, add_item_metadata, get_world_items_at
+                
                 for res_type, amount in outputs.items():
+                    # Check if this is an item (defined in items.py) or a resource
+                    item_def = get_item_def(res_type)
+                    
                     # Drop output adjacent to workstation
                     for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
                         drop_x, drop_y = job.x + dx, job.y + dy
                         if grid.is_walkable(drop_x, drop_y, job.z):
-                            create_resource_item(drop_x, drop_y, job.z, res_type, amount)
-                            # print(f"[Crafting] Produced {amount} {res_type} at ({drop_x},{drop_y})")
+                            if item_def:
+                                # This is an item - spawn as world items with metadata
+                                print(f"[Crafting] Spawning {amount}x {res_type} at ({drop_x},{drop_y})")
+                                for _ in range(amount):
+                                    spawn_world_item(drop_x, drop_y, job.z, res_type)
+                                    
+                                    # Add metadata for organic items (butchery outputs)
+                                    if item_def.material_type in ["meat", "hide", "feather", "bone", "organ", "fat"]:
+                                        items_at_loc = get_world_items_at(drop_x, drop_y, job.z)
+                                        if items_at_loc:
+                                            latest_item = items_at_loc[-1]
+                                            
+                                            # Get source species from the corpse that was butchered
+                                            source_species = None
+                                            if self.carrying and self.carrying.get("type") == "corpse":
+                                                corpse_item = self.carrying.get("item", {})
+                                                source_species = corpse_item.get("source_species")
+                                            
+                                            add_item_metadata(
+                                                latest_item,
+                                                source_species=source_species,
+                                                harvest_tick=game_tick,
+                                                harvested_by=self.uid
+                                            )
+                            else:
+                                # This is a resource - spawn as resource item
+                                print(f"[Crafting] Creating resource item: {amount}x {res_type} at ({drop_x},{drop_y},{job.z})")
+                                create_resource_item(drop_x, drop_y, job.z, res_type, amount)
                             break
             
             # Update order progress for new order system

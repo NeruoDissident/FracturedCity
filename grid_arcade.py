@@ -26,6 +26,14 @@ class GridRenderer:
             2: arcade.SpriteList(use_spatial_hash=True),
         }
         
+        # Tinted sprite lists for rendering Z-level below
+        # Pre-built with dark tint for performance
+        self.z_level_tinted_lists = {
+            0: arcade.SpriteList(use_spatial_hash=True),
+            1: arcade.SpriteList(use_spatial_hash=True),
+            2: arcade.SpriteList(use_spatial_hash=True),
+        }
+        
         # Track which Z-levels have been built
         self.z_levels_built = set()
         
@@ -301,6 +309,9 @@ class GridRenderer:
         # Build sprites for this Z-level
         self._build_z_level_sprites(z_level, sprite_list)
         
+        # Build tinted version for depth effect (only once when first built)
+        self._build_tinted_version(z_level, sprite_list)
+        
         # Mark as built
         self.z_levels_built.add(z_level)
         
@@ -311,11 +322,14 @@ class GridRenderer:
         
         Creates new sprite instances for each tile on this Z-level.
         Textures are shared via cache, but sprite objects are unique.
+        Also builds a tinted version for rendering below other levels.
         
         Args:
             z_level: Z-level to build
             sprite_list: SpriteList to add sprites to
         """
+        # Initialize tracking set for multi-tile structures
+        self._rendered_multitile_tiles = set()
         
         # Determine if this is ground level or rooftop
         walkable_roof_tiles = {
@@ -415,7 +429,8 @@ class GridRenderer:
                 if tile_type and not ("street" in tile_type or "road" in tile_type or "ground_" in tile_type or "floor" in tile_type or tile_type == "resource_node" or tile_type == "salvage_object"):
                     if z_level > 0 and tile_type not in walkable_roof_tiles:
                         continue
-                    add_to_cache(x, y, z_level, tile_type)
+                    # Use _add_structure_sprite for proper multi-tile handling
+                    self._add_structure_sprite(x, y, z_level, tile_type, 255, sprite_list)
         
         # Pass 7: Construction footprint highlighting
         # (Now drawn as outlines in _draw_construction_footprints() method)
@@ -883,13 +898,37 @@ class GridRenderer:
             if (x, y, z) in self._rendered_multitile_tiles:
                 return
             
+            # Find the origin tile (bottom-left corner) of this multi-tile structure
+            # Check tiles to the left and below to find the origin
+            origin_x, origin_y = x, y
+            
+            # For horizontal structures (2x1), check left
+            if width > 1:
+                for check_x in range(x - width + 1, x):
+                    if check_x >= 0 and self.grid.get_tile(check_x, y, z) == tile_type:
+                        origin_x = check_x
+                        break
+            
+            # For vertical structures (1x2), check below
+            if height > 1:
+                for check_y in range(y - height + 1, y):
+                    if check_y >= 0 and self.grid.get_tile(x, check_y, z) == tile_type:
+                        origin_y = check_y
+                        break
+            
+            # Only render if we're at the origin tile
+            if (x, y) != (origin_x, origin_y):
+                # Mark this tile as part of the structure and skip rendering
+                self._rendered_multitile_tiles.add((x, y, z))
+                return
+            
             # Multi-tile workstation - render all tiles from origin
-            self._render_multi_tile_structure(x, y, z, tile_type, width, height, opacity, is_construction, is_furniture=False, sprite_list=target_list)
+            self._render_multi_tile_structure(origin_x, origin_y, z, tile_type, width, height, opacity, is_construction, is_furniture=False, sprite_list=target_list)
             
             # Mark all tiles in footprint as rendered to avoid duplicates
             for dy in range(height):
                 for dx in range(width):
-                    self._rendered_multitile_tiles.add((x + dx, y + dy, z))
+                    self._rendered_multitile_tiles.add((origin_x + dx, origin_y + dy, z))
             return
         
         # Single-tile structure - render workstation sprite on top
@@ -1085,11 +1124,44 @@ class GridRenderer:
         # Mark this specific tile as dirty
         self.dirty_tiles.add((x, y, z))
     
+    def _build_tinted_version(self, z_level: int, sprite_list: arcade.SpriteList):
+        """Build a tinted copy of sprite list for depth effect.
+        
+        Pre-builds tinted sprites so we don't modify colors every frame.
+        
+        Args:
+            z_level: Z-level to build tinted version for
+            sprite_list: Source sprite list to copy
+        """
+        tinted_list = self.z_level_tinted_lists.get(z_level)
+        if tinted_list is None:
+            tinted_list = arcade.SpriteList(use_spatial_hash=True)
+            self.z_level_tinted_lists[z_level] = tinted_list
+        
+        # Clear existing tinted sprites
+        tinted_list.clear()
+        
+        # Create tinted copies of all sprites
+        for sprite in sprite_list:
+            tinted_sprite = arcade.Sprite()
+            tinted_sprite.texture = sprite.texture
+            tinted_sprite.center_x = sprite.center_x
+            tinted_sprite.center_y = sprite.center_y
+            tinted_sprite.width = sprite.width
+            tinted_sprite.height = sprite.height
+            # Apply dark tint (40% brightness)
+            tinted_sprite.color = (80, 80, 90)  # Dark blue-gray
+            tinted_list.append(tinted_sprite)
+        
+        print(f"[GridRenderer] Built {len(tinted_list)} tinted sprites for Z={z_level}")
+    
     def draw(self):
-        """Draw sprites for current Z-level only.
+        """Draw sprites for current Z-level with Z-1 below (tinted).
         
         Rebuilds only dirty tiles since last frame.
         This ensures we only rebuild changed tiles, not entire Z-level.
+        
+        Performance: Uses pre-built tinted sprite list for Z-1.
         """
         # Build entire Z-level if never built
         if self.current_z not in self.z_levels_built:
@@ -1099,7 +1171,20 @@ class GridRenderer:
         if self.dirty_tiles:
             self._rebuild_dirty_tiles()
         
-        # Draw current Z-level
+        # Draw Z-level below (if exists) with pre-built tinted sprites
+        if self.current_z > 0:
+            z_below = self.current_z - 1
+            
+            # Build Z-1 if not built yet
+            if z_below not in self.z_levels_built:
+                self.build_tile_sprites(z_below, force_rebuild=False)
+            
+            # Draw pre-tinted sprite list (no per-frame color changes)
+            tinted_list = self.z_level_tinted_lists.get(z_below)
+            if tinted_list:
+                tinted_list.draw()
+        
+        # Draw current Z-level (full brightness)
         current_list = self.z_level_sprite_lists.get(self.current_z)
         if current_list:
             current_list.draw()

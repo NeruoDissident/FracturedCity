@@ -227,9 +227,12 @@ class TileInfoPanel:
                     else:
                         item_display = f"  • {item_name}"
                 else:
-                    # World item (corpse, equipment, etc.)
-                    item_name = item.get("name", item.get("id", "Unknown"))
-                    item_display = f"  • {item_name}"
+                    # World item (corpse, equipment, etc.) - show metadata if available
+                    from items import get_item_display_name
+                    # Get current game tick for age calculation
+                    game_tick = getattr(self, 'game_tick', 0)
+                    item_display_name = get_item_display_name(item, game_tick)
+                    item_display = f"  • {item_display_name}"
                 
                 arcade.draw_text(
                     item_display,

@@ -1,47 +1,67 @@
 # Fractured City - Development Session Notes
 
-**Last Updated:** Dec 31, 2025
+**Last Updated:** Jan 1, 2026
 
 ---
 
-## 🐛 CURRENT BUG: Multi-Tile Workstation Rendering
+## ✅ COMPLETED: Material System Foundation
 
-**Status:** IN PROGRESS
+**Status:** IMPLEMENTED (Jan 1, 2026)
 
-### Problem:
-2x1 horizontal workstations (stove, bio-matter salvage station) are not rendering correctly:
-- **Stove**: Only showing left tile
-- **Bio-Matter Station**: Random/inconsistent rendering
-- Should render exactly 2 tiles each
+### What Was Implemented:
 
-### Root Cause Found:
-`add_to_cache()` in `grid_arcade.py` was creating sprites for every tile in multi-tile footprints, then `_add_structure_sprite()` was ALSO rendering the full structure. This caused duplicate sprites.
+**1. Extended ItemDef Structure (`items.py`)**
+Added 8 new fields for material categorization:
+- `size_class` - "tiny", "small", "medium", "large", "huge"
+- `material_type` - "meat", "hide", "bone", "feather", "fat", "organ", etc.
+- `processing_state` - "raw", "cleaned", "tanned", "cooked", "preserved"
+- `quality` - 0-5 scale (terrible → excellent)
+- `spoilage_rate` - How fast items rot (0=never, 1.0=1 day)
+- `stack_size` - Inventory stacking
+- `weight` / `volume` - For future hauling/storage
 
-### Fixes Applied:
-1. Modified `add_to_cache()` (line 327-332) to skip multi-tile structures
-2. Renamed sprite files to match code expectations:
-   - Changed `_e` suffix → `_right` suffix for 2x1 structures
-   - Changed `bio-matter_salvage_station` (hyphens) → `bio_matter_salvage_station` (underscores)
-3. Updated construction completion in `colonist.py` to set ALL footprint tiles to finished state
+**2. Updated All Organic Items**
+Categorized existing items with proper metadata:
+- **Corpses:** `rat_corpse`, `bird_corpse` (spoil in 1 day)
+- **Meat:** `rat_meat` (quality=1), `bird_meat` (quality=2) - spoil in 2 days
+- **Materials:** `rat_pelt` (hide, quality=1), `feathers` (quality=2, never spoil)
 
-### Current Issue:
-After applying fixes, stove only shows left tile, bio-matter station still renders randomly. Right tile not appearing.
+**3. Flavor Text System**
+Created `get_item_display_name()` that generates:
+- `"Poor Rat Meat (Rat) - 12h old"`
+- `"Bird Meat (Bird) - just harvested"`
+- `"Excellent Bird Meat (Bird) - 2d old"`
+
+**4. Butchery Metadata (`colonist.py`)**
+When items are crafted from corpses, they now get:
+- `source_species` - "rat" or "bird"
+- `harvest_tick` - When butchered
+- `harvested_by` - Colonist UID
+
+**5. UI Integration (`ui_arcade_tile_info.py`, `main_arcade.py`)**
+Tile info tooltips now show full item metadata:
+- Source species in parentheses
+- Age ("just harvested", "12h old", "2d old")
+- Quality descriptor for notable items
+
+**6. Fixed Stove Recipes (`buildings.py`)**
+Corrected power requirements (were all 1, now scale with complexity):
+- Simple Meal: 1 power
+- Fine Meal: 2 power
+- Meat Stew: 3 power
+- Poultry Roast: 2 power
+- Rodent Skewers: 2 power
 
 ### Files Modified:
-- `grid_arcade.py`: Added multi-tile skip in add_to_cache, added debug logging
-- `colonist.py`: Updated stove and bio-matter completion to set all footprint tiles
-- Sprite files in `assets/workstations/`: Renamed to use `_right` suffix
+- `items.py`: Extended ItemDef, updated organic items, added flavor text helpers
+- `colonist.py`: Added metadata when spawning butchered items
+- `buildings.py`: Fixed stove recipe power costs
+- `ui_arcade_tile_info.py`: Display item metadata in tooltips
+- `main_arcade.py`: Pass game_tick to tile info panel
 
-### Next Steps for Debugging:
-1. Verify sprite files exist and are named correctly:
-   - `stove.png` and `stove_right.png`
-   - `bio_matter_salvage_station.png` and `bio_matter_salvage_station_right.png`
-   - `finished_stove.png` and `finished_stove_right.png`
-   - `finished_bio_matter_salvage_station.png` and `finished_bio_matter_salvage_station_right.png`
-2. Check `_get_multi_tile_texture()` is finding the files
-3. Review debug logs to see what's happening during rendering
-4. Test both stations render correctly (2 tiles each)
-5. Remove debug logging once fixed
+### Test Files Created:
+- `test_item_metadata.py`: Validates code structure (all tests passed ✓)
+- `ITEM_AUDIT.md`: Full breakdown of all 60+ items and their purposes
 
 ---
 
@@ -79,9 +99,9 @@ After applying fixes, stove only shows left tile, bio-matter station still rende
 
 ---
 
-## 📋 NEXT STEPS: Workstation & Recipe Development
+## 📋 NEXT STEPS: Material Processing Expansion
 
-**Priority:** After fixing rendering bug, continue expanding crafting system
+**Priority:** Fix dead-end items (pelts/feathers need uses)
 
 ### Existing Workstations:
 - **Salvagers Bench**: Basic salvaging/crafting

@@ -462,10 +462,21 @@ class WorkstationPanel:
                 font_name=UI_FONT
             )
             
-            # Inputs - check both "input" and "inputs" keys
+            # Inputs - combine input_items (meat, corpses, etc.) and input (resources like power)
+            input_parts = []
+            
+            # Add input_items (items like meat, corpses)
+            input_items = recipe.get("input_items", {})
+            for item, amt in input_items.items():
+                input_parts.append(f"{amt} {item}")
+            
+            # Add input (resources like power, metal)
             inputs = recipe.get("inputs", recipe.get("input", {}))
-            if inputs:
-                input_text = ", ".join(f"{amt} {res}" for res, amt in inputs.items())
+            for res, amt in inputs.items():
+                input_parts.append(f"{amt} {res}")
+            
+            if input_parts:
+                input_text = ", ".join(input_parts)
                 arcade.draw_text(
                     f"→ {input_text}",
                     self.panel_x + 14,
@@ -581,10 +592,17 @@ class WorkstationPanel:
                 materials.append(f"{amount}x {resource.replace('_', ' ').title()}")
             description_parts.append("Requires: " + ", ".join(materials))
         
-        # Output
+        # Output - handle both output_item (single) and output (multiple)
         output_item = recipe.get("output_item")
+        output_dict = recipe.get("output", {})
+        
         if output_item:
             description_parts.append(f"Produces: {output_item.replace('_', ' ').title()}")
+        elif output_dict:
+            outputs = []
+            for item_id, amount in output_dict.items():
+                outputs.append(f"{amount}x {item_id.replace('_', ' ').title()}")
+            description_parts.append("Produces: " + ", ".join(outputs))
         
         # Craft time
         craft_time = recipe.get("work_time", 0)

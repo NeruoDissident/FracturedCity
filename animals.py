@@ -43,7 +43,7 @@ class AnimalSpecies:
         "aggression": 0.1,  # 10% chance to fight back
         "flee_distance": 8,
         "tame_difficulty": 30,  # Easy to tame
-        "corpse_item": "rat_corpse",
+        "corpse_item": "corpse",
         "meat_yield": (1, 2),
         "materials": {"rat_pelt": (1, 1)},
         "spawn_weight": 0.4,  # 40% of spawns
@@ -62,12 +62,129 @@ class AnimalSpecies:
         "aggression": 0.0,  # Never fights back
         "flee_distance": 12,
         "tame_difficulty": 40,  # Medium difficulty
-        "corpse_item": "bird_corpse",
+        "corpse_item": "corpse",
         "meat_yield": (2, 3),
         "materials": {"feathers": (1, 2)},
         "spawn_weight": 0.6,  # 60% of spawns
         "spawn_locations": ["rooftop", "ledge", "open"],
+        "meat_quality": "normal",  # No psychological effects
     }
+    
+    # Cats - ground level hunters
+    CAT = {
+        "id": "cat",
+        "name": "Cat",
+        "variants": 2,  # cat_0, cat_1
+        "z_levels": [0, 1],  # Ground and rooftops
+        "size": 1,
+        "speed": 1.8,  # Fast and agile
+        "health": 25,
+        "aggression": 0.3,  # Will fight back
+        "flee_distance": 10,
+        "tame_difficulty": 60,  # Hard to tame
+        "corpse_item": "corpse",
+        "meat_yield": (2, 3),
+        "materials": {"cat_pelt": (1, 1)},
+        "spawn_weight": 0.15,  # Rare
+        "spawn_locations": ["ruins", "rooftop", "alley"],
+        "meat_quality": "taboo",  # Psychological penalty
+        "taboo_thought": "Ate cat meat... that feels wrong.",
+    }
+    
+    # Dogs - ground level, loyal
+    DOG = {
+        "id": "dog",
+        "name": "Dog",
+        "variants": 2,  # dobermann, mutt
+        "variant_names": ["dobermann", "mutt"],  # Breed names for sprites
+        "z_levels": [0],  # Ground only
+        "size": 1,
+        "speed": 1.6,
+        "health": 40,
+        "aggression": 0.5,  # Defensive
+        "flee_distance": 6,
+        "tame_difficulty": 50,  # Medium-hard
+        "corpse_item": "corpse",
+        "meat_yield": (3, 5),
+        "materials": {"dog_pelt": (1, 2)},
+        "spawn_weight": 0.1,  # Rare
+        "spawn_locations": ["ruins", "street"],
+        "meat_quality": "taboo",  # Strong psychological penalty
+        "taboo_thought": "Ate dog meat. Man's best friend... I feel sick.",
+    }
+    
+    # Raccoons - ground level scavengers (sprite has typo: racoon)
+    RACCOON = {
+        "id": "racoon",  # Matches sprite filename typo
+        "name": "Raccoon",
+        "variants": 1,  # racoon_0
+        "z_levels": [0],  # Ground only
+        "size": 1,
+        "speed": 1.3,
+        "health": 30,
+        "aggression": 0.4,  # Will fight if cornered
+        "flee_distance": 8,
+        "tame_difficulty": 55,  # Medium-hard
+        "corpse_item": "corpse",
+        "meat_yield": (3, 4),
+        "materials": {"raccoon_pelt": (1, 1)},
+        "spawn_weight": 0.2,  # Uncommon
+        "spawn_locations": ["ruins", "trash", "alley"],
+        "meat_quality": "normal",  # No psychological effects
+    }
+    
+    # Opossums - ground level scavengers
+    OPOSSUM = {
+        "id": "opossum",
+        "name": "Opossum",
+        "variants": 1,  # opossum_0
+        "z_levels": [0],  # Ground only
+        "size": 1,
+        "speed": 1.1,
+        "health": 20,
+        "aggression": 0.2,  # Mostly plays dead
+        "flee_distance": 8,
+        "tame_difficulty": 45,  # Medium
+        "corpse_item": "corpse",
+        "meat_yield": (2, 3),
+        "materials": {"opossum_pelt": (1, 1)},
+        "spawn_weight": 0.15,  # Uncommon
+        "spawn_locations": ["ruins", "trash"],
+        "meat_quality": "normal",
+    }
+    
+    # Mutant Rat - Echo-tainted variant (no sprite yet)
+    MUTANT_RAT = {
+        "id": "mutant_rat",
+        "name": "Mutant Rat",
+        "variants": 0,  # No sprite yet - won't spawn
+        "z_levels": [0],  # Ground only
+        "size": 1,
+        "speed": 1.2,
+        "health": 35,
+        "aggression": 0.6,  # More aggressive
+        "flee_distance": 5,
+        "tame_difficulty": 70,  # Hard to tame
+        "corpse_item": "corpse",
+        "meat_yield": (2, 3),
+        "materials": {"mutant_tissue": (1, 2), "echo_shard": (0, 1)},
+        "spawn_weight": 0.0,  # Disabled - no sprite
+        "spawn_locations": ["ruins", "contaminated"],
+        "meat_quality": "dangerous",  # Can cause sickness
+        "danger_thought": "Ate mutant meat. I don't feel right...",
+    }
+
+
+# Species registry for dynamic lookup
+SPECIES_REGISTRY = {
+    "rat": AnimalSpecies.RAT,
+    "bird": AnimalSpecies.BIRD,
+    "cat": AnimalSpecies.CAT,
+    "dog": AnimalSpecies.DOG,
+    "racoon": AnimalSpecies.RACCOON,  # Note: sprite has typo
+    "opossum": AnimalSpecies.OPOSSUM,
+    "mutant_rat": AnimalSpecies.MUTANT_RAT,  # Disabled - no sprite
+}
 
 
 class Animal:
@@ -86,12 +203,9 @@ class Animal:
         self.uid = Animal._next_uid
         Animal._next_uid += 1
         
-        # Get species data
-        if species_id == "rat":
-            self.species_data = AnimalSpecies.RAT
-        elif species_id == "bird":
-            self.species_data = AnimalSpecies.BIRD
-        else:
+        # Get species data from registry
+        self.species_data = SPECIES_REGISTRY.get(species_id)
+        if not self.species_data:
             raise ValueError(f"Unknown species: {species_id}")
         
         self.species = species_id
@@ -155,6 +269,34 @@ class Animal:
         # Hunting
         self.marked_for_hunt = False  # Designated for hunting
         self.hunter_uid = None  # UID of colonist hunting this animal
+        
+        # === FULL DETAIL SYSTEMS (Same as colonists) ===
+        # Body system with species-specific anatomy
+        from body import Body
+        self.body = Body(template=species_id)  # "rat", "bird", etc.
+        
+        # Relationships (bonds with colonists and other animals)
+        self.relationships = {}  # {entity_uid: relationship_data}
+        
+        # Job tags (unlocked when tamed)
+        self.job_tags = {
+            "can_haul": False,  # Can carry items (raccoons, rats when trained)
+            "can_hunt": False,  # Can hunt other animals (cats, dogs)
+            "can_guard": False,  # Can alert to threats (dogs, birds)
+        }
+        
+        # Thoughts/personality (like colonists)
+        self.thoughts = []  # List of recent thoughts
+        self.personality_traits = []  # Species + individual traits
+        
+        # Drives/needs (hunger, comfort, social)
+        self.drives = {
+            "hunger": 0,
+            "thirst": 0,
+            "sleep": 0,
+            "comfort": 50,
+            "social": 50,  # Pack animals need companionship
+        }
     
     def _generate_food_preferences(self) -> Dict[str, float]:
         """Generate food preferences for this animal.
@@ -231,7 +373,15 @@ class Animal:
             # Use perched only when PERCHED state, otherwise flight
             state = "perched" if self.state == AnimalState.PERCHED else "flight"
             return f"assets/animals/{self.species}_{self.variant}_{state}.png"
-        # For simple animals (rats, etc)
+        
+        # For dogs with breed names
+        if self.species == "dog":
+            variant_names = self.species_data.get("variant_names", [])
+            if variant_names and self.variant < len(variant_names):
+                breed = variant_names[self.variant]
+                return f"assets/animals/{self.species}_{breed}_{0}.png"
+        
+        # For simple animals (rats, cats, etc)
         return f"assets/animals/{self.species}_{self.variant}.png"
     
     def is_alive(self) -> bool:
@@ -427,12 +577,9 @@ def can_spawn_animal_at(grid, x: int, y: int, z: int, species_id: str) -> bool:
     if not grid.in_bounds(x, y, z):
         return False
     
-    # Get species data
-    if species_id == "rat":
-        species_data = AnimalSpecies.RAT
-    elif species_id == "bird":
-        species_data = AnimalSpecies.BIRD
-    else:
+    # Get species data from registry
+    species_data = SPECIES_REGISTRY.get(species_id)
+    if not species_data:
         return False
     
     # Check Z-level
@@ -469,12 +616,9 @@ def spawn_animal(grid, species_id: str, x: int, y: int, z: int, variant: int = N
     if not can_spawn_animal_at(grid, x, y, z, species_id):
         return None
     
-    # Get species data for variant count
-    if species_id == "rat":
-        species_data = AnimalSpecies.RAT
-    elif species_id == "bird":
-        species_data = AnimalSpecies.BIRD
-    else:
+    # Get species data from registry
+    species_data = SPECIES_REGISTRY.get(species_id)
+    if not species_data:
         return None
     
     # Random variant if not specified
@@ -489,13 +633,14 @@ def spawn_animal(grid, species_id: str, x: int, y: int, z: int, variant: int = N
     return animal
 
 
-def spawn_random_animals(grid, count: int = 1, z_level: int = None) -> int:
+def spawn_random_animals(grid, count: int = 1, z_level: int = None, species_filter: List[str] = None) -> int:
     """Spawn random animals in valid locations.
     
     Args:
         grid: Game grid
         count: Number of animals to spawn
         z_level: Specific Z-level or None for any
+        species_filter: List of species IDs to spawn from, or None for all
     
     Returns:
         Number of animals successfully spawned
@@ -504,23 +649,34 @@ def spawn_random_animals(grid, count: int = 1, z_level: int = None) -> int:
     attempts = 0
     max_attempts = count * 10  # Prevent infinite loop
     
+    # Build weighted species pool
+    species_pool = []
+    for species_id, species_data in SPECIES_REGISTRY.items():
+        # Apply species filter if provided
+        if species_filter and species_id not in species_filter:
+            continue
+        
+        # Add species to pool based on spawn weight
+        weight = species_data.get("spawn_weight", 0.1)
+        species_pool.extend([species_id] * int(weight * 100))
+    
+    if not species_pool:
+        print("[Animals] No valid species in pool")
+        return 0
+    
     while spawned < count and attempts < max_attempts:
         attempts += 1
         
-        # Random species based on spawn weights
-        roll = random.random()
-        if roll < 0.4:
-            species_id = "rat"
-            valid_z = [0]
-        else:
-            species_id = "bird"
-            valid_z = [1, 2]
+        # Pick random species from weighted pool
+        species_id = random.choice(species_pool)
+        species_data = SPECIES_REGISTRY[species_id]
         
         # Pick Z-level
+        valid_z = species_data["z_levels"]
         if z_level is not None:
-            z = z_level
-            if z not in valid_z:
+            if z_level not in valid_z:
                 continue
+            z = z_level
         else:
             z = random.choice(valid_z)
         
@@ -580,17 +736,34 @@ def _update_idle(animal: Animal, grid, game_tick: int) -> None:
     
     # Species-specific wander rates
     if animal.species == "rat":
-        wander_chance = 0.03  # 3% - reduced from 8%, rats move less often
-        wander_distance = 3  # Reduced from 5, shorter jumps
-        cooldown = 40  # Increased from 20, longer wait between moves
+        wander_chance = 0.03  # 3% - fast, twitchy
+        wander_distance = 3  # Short jumps
+        cooldown = 40  # Moderate wait
     elif animal.species == "bird":
         wander_chance = 0.03  # 3% - birds are calmer, perch more
         wander_distance = 8  # Longer flights when they do move
         cooldown = 60  # Longer cooldown between flights
+    elif animal.species == "cat":
+        wander_chance = 0.02  # 2% - stealthy, deliberate
+        wander_distance = 4  # Medium stalking distance
+        cooldown = 80  # Long pauses between moves
+    elif animal.species == "dog":
+        wander_chance = 0.025  # 2.5% - patrol-like
+        wander_distance = 5  # Moderate patrol range
+        cooldown = 60  # Medium pauses
+    elif animal.species in ["racoon", "raccoon"]:
+        wander_chance = 0.03  # 3% - scavenger behavior
+        wander_distance = 4  # Medium scavenging range
+        cooldown = 50  # Moderate pauses
+    elif animal.species == "opossum":
+        wander_chance = 0.02  # 2% - slow, cautious
+        wander_distance = 3  # Short cautious moves
+        cooldown = 90  # Very long pauses (slowest)
     else:
-        wander_chance = 0.05
-        wander_distance = 5
-        cooldown = 30
+        # Fallback for any future species
+        wander_chance = 0.03
+        wander_distance = 4
+        cooldown = 50
     
     # Random chance to start wandering
     if animal.wander_cooldown <= 0 and random.random() < wander_chance:
@@ -629,7 +802,23 @@ def _update_wandering(animal: Animal, grid, game_tick: int) -> None:
         # Birds move every other tick (smoother, slower flight)
         if game_tick % 2 != 0:
             return
-    # Rats move every tick (fast and twitchy)
+    elif animal.species == "cat":
+        # Cats move every 3 ticks (stealthy, deliberate)
+        if game_tick % 3 != 0:
+            return
+    elif animal.species == "dog":
+        # Dogs move every 2 ticks (patrol speed)
+        if game_tick % 2 != 0:
+            return
+    elif animal.species in ["racoon", "raccoon"]:
+        # Raccoons move every 2 ticks (scavenger speed)
+        if game_tick % 2 != 0:
+            return
+    elif animal.species == "opossum":
+        # Opossums move every 4 ticks (slowest, most cautious)
+        if game_tick % 4 != 0:
+            return
+    # Rats move every tick (fast and twitchy) - no skip
     
     # Move one step
     move_x = 0 if dx == 0 else (1 if dx > 0 else -1)
@@ -889,18 +1078,27 @@ def kill_animal(animal: Animal, grid, game_tick: int) -> Optional[dict]:
     animal.health = 0
     
     # Create corpse as a world item (uses items system, not resources system)
-    from items import spawn_world_item
+    from items import spawn_world_item, add_item_metadata, get_world_items_at
     
-    # Use the corpse_item type from species data (e.g., "rat_corpse")
-    corpse_type = animal.species_data.get("corpse_item", f"{animal.species}_corpse")
+    # Use generic corpse item type
+    corpse_type = animal.species_data.get("corpse_item", "corpse")
     
     # Spawn corpse at animal's location (auto-marked for hauling)
     success = spawn_world_item(animal.x, animal.y, animal.z, corpse_type, count=1)
     
     if success:
-        print(f"[Animals] Created {corpse_type} at ({animal.x}, {animal.y}, z={animal.z})")
+        # Add source species metadata to the corpse
+        items_at_loc = get_world_items_at(animal.x, animal.y, animal.z)
+        if items_at_loc:
+            corpse_item = items_at_loc[-1]  # Get the just-spawned corpse
+            add_item_metadata(
+                corpse_item,
+                source_species=animal.species,
+                harvest_tick=game_tick,
+            )
+        print(f"[Animals] Created corpse ({animal.species}) at ({animal.x}, {animal.y}, z={animal.z})")
     else:
-        print(f"[Animals] WARNING: Failed to create corpse {corpse_type} - item not registered?")
+        print(f"[Animals] WARNING: Failed to create corpse - item not registered?")
     
     # Remove from registry
     unregister_animal(animal.uid)
@@ -910,6 +1108,7 @@ def kill_animal(animal: Animal, grid, game_tick: int) -> Optional[dict]:
     # Return corpse info for logging
     return {
         "type": corpse_type,
+        "species": animal.species,
         "x": animal.x,
         "y": animal.y,
         "z": animal.z,

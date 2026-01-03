@@ -523,15 +523,16 @@ def get_all_zones() -> Dict[int, dict]:
     return _ZONES.copy()
 
 
-def find_stockpile_with_resource(resource_type: str, z: int = None) -> Optional[Coord3D]:
+def find_stockpile_with_resource(resource_type: str, z: int = None, required_species: str = None) -> Optional[Coord3D]:
     """Find a stockpile tile that has the specified resource.
     
     Used for construction supply - colonists need to fetch materials.
     Also checks equipment storage for component items (wire, chip, etc.)
     
     Args:
-        resource_type: Type of resource to find (e.g., 'wood', 'wire', 'chip')
+        resource_type: Type of resource to find (e.g., 'wood', 'wire', 'chip', 'corpse')
         z: If specified, prefer tiles on this Z-level
+        required_species: For corpses, filter by source_species metadata
     
     Returns coordinates (x, y, z) of a tile with the resource, or None.
     """
@@ -553,7 +554,12 @@ def find_stockpile_with_resource(resource_type: str, z: int = None) -> Optional[
     # Components like wire, chip, resistor, etc. are stored as item objects
     for coord, items in _EQUIPMENT_STORAGE.items():
         for item in items:
+            # Match by item ID
             if item.get("id") == resource_type:
+                # If species filter specified (for corpses), check metadata
+                if required_species and item.get("source_species") != required_species:
+                    continue
+                
                 if z is not None and coord[2] == z:
                     preferred = coord
                 elif fallback is None:
