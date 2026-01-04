@@ -4286,15 +4286,40 @@ class Colonist:
             # Calculate sleep quality
             quality = calculate_sleep_quality(self, all_colonists)
             
-            # Reduce tiredness based on quality
-            self.tiredness = max(0, self.tiredness - (0.05 * quality))
+            # Reduce tiredness based on quality (minimum 0.02 per tick to prevent infinite sleep)
+            tiredness_reduction = max(0.02, 0.05 * quality)
+            self.tiredness = max(0, self.tiredness - tiredness_reduction)
+            
+            # Debug output every 60 ticks (1 second)
+            if game_tick % 60 == 0:
+                print(f"[Sleep Debug] {self.name}: tiredness={self.tiredness:.1f}, quality={quality:.2f}, reduction={tiredness_reduction:.3f}, will_wake={self.tiredness <= 10}")
             
             # Slowly restore health while sleeping
             if self.health < 100:
                 self.health = min(100, self.health + 0.01 * quality)
             
-            # Wake up when rested
+            # Wake up based on tiredness AND personality
+            from time_system import is_sleep_time
+            should_wake = False
+            wake_reason = ""
+            
+            # Always wake if fully rested
             if self.tiredness <= 10:
+                should_wake = True
+                wake_reason = "rested"
+            # Personality-driven wake threshold during work hours
+            elif not is_sleep_time():
+                # Collectivists wake for work even if tired, individualists sleep in
+                needs_modifier = self.needs_of_the_many - 0.5  # Range: -0.5 to +0.5
+                wake_threshold = 50 - (needs_modifier * 30)  # Range: 35-65
+                # High needs_of_many (collectivist) = wake at 35 tiredness (gets up for work)
+                # Low needs_of_many (individualist) = wake at 65 tiredness (sleeps in)
+                
+                if self.tiredness <= wake_threshold:
+                    should_wake = True
+                    wake_reason = "morning" if self.needs_of_the_many > 0.5 else "eventually"
+            
+            if should_wake:
                 self.is_sleeping = False
                 self.sleep_target = None
                 self.state = "idle"
@@ -4304,13 +4329,36 @@ class Colonist:
                 for thought_text, mood_effect in get_sleep_thoughts(self, all_colonists):
                     self.add_thought("need", thought_text, mood_effect, game_tick=game_tick)
                 
-                # print(f"[Sleep] {self.name} woke up feeling {'rested' if quality > 1 else 'okay' if quality > 0.5 else 'tired'}")
+                print(f"[Sleep] {self.name} woke up ({wake_reason}): tiredness={self.tiredness:.1f}, quality={quality:.2f}")
+            return
+        
+        # Pass out at complete exhaustion (no bed required)
+        if self.tiredness >= 100 and not self.is_sleeping:
+            self.is_sleeping = True
+            self.state = "sleeping"
+            self.sleep_target = None  # No bed, sleeping on floor
+            self.add_thought("need", "I passed out from exhaustion...", -0.3, game_tick=game_tick)
+            print(f"[Sleep] {self.name} passed out from exhaustion at ({self.x}, {self.y})")
             return
         
         # Very tired and idle - try to sleep
-        # Lower threshold at night (colonists want to sleep when it's dark)
+        # Threshold adjusted by "needs of the many" stat
         from time_system import is_sleep_time
-        sleep_threshold = 50 if is_sleep_time() else 80
+        
+        # Base threshold: lower at night, higher during day
+        base_threshold = 50 if is_sleep_time() else 80
+        
+        # Adjust by needs_of_the_many (0.0 to 1.0)
+        # High needs_of_many (collectivist) = follows schedule more strictly
+        # Low needs_of_many (individualist) = only sleeps when very tired
+        needs_modifier = self.needs_of_the_many - 0.5  # Range: -0.5 to +0.5
+        
+        if is_sleep_time():
+            # During sleep hours: collectivists sleep easier, individualists resist
+            sleep_threshold = base_threshold - (needs_modifier * 30)  # Range: 35-65
+        else:
+            # During work hours: collectivists resist sleep, individualists sleep when tired
+            sleep_threshold = base_threshold + (needs_modifier * 20)  # Range: 70-90
         
         if self.tiredness > sleep_threshold and self.state == "idle" and not self.in_combat:
             self._try_go_to_sleep(grid, all_colonists, game_tick)
@@ -4441,12 +4489,12 @@ class Colonist:
                         self.state = "moving_to_sleep"
                         return
         
-        # No bed available - sleep on ground (with penalty)
-        if self.tiredness > 85:
-            self.is_sleeping = True
-            self.state = "sleeping"
-            self.add_thought("need", "Sleeping on the cold ground...", -0.2, game_tick=game_tick)
-            # print(f"[Sleep] {self.name} collapsed to sleep on the ground (no bed)")
+        # No bed available - sleep on ground (controlled by personality-driven threshold)
+        # This is reached when _try_go_to_sleep is called but no beds exist
+        self.is_sleeping = True
+        self.state = "sleeping"
+        self.add_thought("need", "Sleeping on the cold ground...", -0.2, game_tick=game_tick)
+        # print(f"[Sleep] {self.name} sleeping on the ground (no bed available)")
 
     def _heal_body(self, game_tick: int = 0) -> None:
         """Natural healing of body parts over time."""
