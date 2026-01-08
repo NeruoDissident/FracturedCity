@@ -380,9 +380,13 @@ class GridRenderer:
                     if overlay_type:
                         add_to_cache(x, y, z_level, overlay_type)
         
-        # Pass 3: Roads (Z0 only) - COARSE GRID 2x2 rendering
+        # Pass 3: Roads (Z0 only)
         if z_level == 0:
-            self._render_coarse_roads(z_level, sprite_list)
+            for y in range(self.grid.height):
+                for x in range(self.grid.width):
+                    tile_type = self.grid.get_tile(x, y, z_level)
+                    if tile_type and ("street" in tile_type or "road" in tile_type):
+                        add_to_cache(x, y, z_level, tile_type)
         
         # Pass 4: Floors
         floor_count = 0
@@ -435,111 +439,6 @@ class GridRenderer:
         
         # Index all sprites by position for fast lookup
         self._index_sprites(z_level, sprite_list)
-    
-    def _render_coarse_roads(self, z_level: int, sprite_list: arcade.SpriteList):
-        """Render roads on a coarse 2×2 grid using 128×128 sprites.
-        
-        Each coarse grid cell corresponds to a 2×2 block of fine tiles.
-        Autotiling logic runs on the coarse grid, selecting one of 13 variants.
-        Each road sprite is 128×128 and covers a 2×2 fine tile footprint.
-        
-        Args:
-            z_level: Z-level to render (should be 0 for roads)
-            sprite_list: SpriteList to add road sprites to
-        """
-        # Iterate coarse grid (every 2 tiles)
-        for coarse_y in range(0, self.grid.height, 2):
-            for coarse_x in range(0, self.grid.width, 2):
-                # Check if any tile in this 2×2 block is a road
-                has_road = False
-                for dy in range(2):
-                    for dx in range(2):
-                        fine_x = coarse_x + dx
-                        fine_y = coarse_y + dy
-                        if not self.grid.in_bounds(fine_x, fine_y, z_level):
-                            continue
-                        tile_type = self.grid.get_tile(fine_x, fine_y, z_level)
-                        if tile_type and ("street" in tile_type or "road" in tile_type):
-                            has_road = True
-                            break
-                    if has_road:
-                        break
-                
-                if not has_road:
-                    continue
-                
-                # Run autotiling on coarse grid neighbors
-                variant = self._get_coarse_road_variant(coarse_x, coarse_y, z_level)
-                
-                # Load 128×128 road sprite
-                sprite_path = f"assets/tiles/roads/street_autotile_{variant}.png"
-                try:
-                    texture = arcade.load_texture(sprite_path)
-                    
-                    # Create sprite covering 2×2 fine tiles
-                    sprite = arcade.Sprite()
-                    sprite.texture = texture
-                    
-                    # Scale sprite to 2× to cover 128×128 area (2×2 tiles of 64×64)
-                    sprite.scale = 2.0
-                    
-                    # Position sprite at center of 2×2 block
-                    # Coarse position (0,0) covers fine tiles (0,0), (1,0), (0,1), (1,1)
-                    # Center is at (1 * TILE_SIZE, 1 * TILE_SIZE) in world coords
-                    sprite.center_x = coarse_x * TILE_SIZE + TILE_SIZE
-                    sprite.center_y = coarse_y * TILE_SIZE + TILE_SIZE
-                    
-                    sprite_list.append(sprite)
-                    
-                except Exception as e:
-                    # Sprite not found - skip this coarse tile
-                    if not hasattr(self, '_coarse_road_error_logged'):
-                        self._coarse_road_error_logged = True
-                        print(f"[GridRenderer] Coarse road sprite not found: {sprite_path}, error: {e}")
-    
-    def _get_coarse_road_variant(self, coarse_x: int, coarse_y: int, z: int) -> int:
-        """Calculate road autotile variant on coarse grid.
-        
-        Checks 4 cardinal neighbors on the coarse grid (±2 tiles in fine grid).
-        Returns variant 0-12 using standard path autotiling.
-        
-        Args:
-            coarse_x, coarse_y: Coarse grid coordinates (multiples of 2)
-            z: Z-level
-            
-        Returns:
-            Variant index 0-12
-        """
-        # Check coarse neighbors (±2 in fine grid)
-        n = self._has_coarse_road(coarse_x, coarse_y - 2, z)
-        s = self._has_coarse_road(coarse_x, coarse_y + 2, z)
-        e = self._has_coarse_road(coarse_x + 2, coarse_y, z)
-        w = self._has_coarse_road(coarse_x - 2, coarse_y, z)
-        
-        # Use standard path variant logic
-        from autotiling import _get_path_variant
-        return _get_path_variant(n, s, e, w)
-    
-    def _has_coarse_road(self, coarse_x: int, coarse_y: int, z: int) -> bool:
-        """Check if a coarse grid cell contains any road tiles.
-        
-        Args:
-            coarse_x, coarse_y: Coarse grid coordinates
-            z: Z-level
-            
-        Returns:
-            True if any tile in the 2×2 block is a road
-        """
-        for dy in range(2):
-            for dx in range(2):
-                fine_x = coarse_x + dx
-                fine_y = coarse_y + dy
-                if not self.grid.in_bounds(fine_x, fine_y, z):
-                    continue
-                tile_type = self.grid.get_tile(fine_x, fine_y, z)
-                if tile_type and ("street" in tile_type or "road" in tile_type):
-                    return True
-        return False
     
     def _index_sprites(self, z_level: int, sprite_list: arcade.SpriteList):
         """Index sprites by tile position for fast lookup."""
