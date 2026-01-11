@@ -100,9 +100,23 @@ class AnimalRenderer:
         Args:
             current_z: Current Z-level being viewed
         """
+        # Draw shadows first
+        for sprite in self.sprite_list:
+            if sprite.animal.z == current_z:
+                # Draw ellipse shadow slightly below sprite
+                shadow_offset_y = -6  # Pixels below sprite (smaller than colonist)
+                shadow_width = TILE_SIZE * 0.5
+                shadow_height = TILE_SIZE * 0.2
+                
+                arcade.draw_ellipse_filled(
+                    sprite.center_x,
+                    sprite.center_y + shadow_offset_y,
+                    shadow_width,
+                    shadow_height,
+                    (0, 0, 0, 70)  # Semi-transparent black (lighter than colonist)
+                )
+        
         # Draw all sprites on current Z-level
-        # Note: We draw the whole sprite list, but only sprites on current_z are visible
-        # because we filter during update_sprites or we can filter here
         for sprite in self.sprite_list:
             if sprite.animal.z == current_z:
                 # Use arcade's draw method for sprites

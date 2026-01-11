@@ -300,14 +300,43 @@ class FracturedCityWindow(arcade.Window):
         if self.grid_renderer:
             self.grid_renderer.draw()
         
-        # Draw colonists using GPU batching (existing system)
+        # Draw shadows AFTER grid but BEFORE entities
+        current_z = self.grid.current_z
         if self.colonist_renderer:
-            self.colonist_renderer.draw(current_z=self.grid.current_z)
-        
-        # Draw animals using GPU batching
+            self.colonist_renderer._draw_shadows(current_z)
         if self.animal_renderer:
             self.animal_renderer.update_sprites()
-            self.animal_renderer.draw(current_z=self.grid.current_z)
+            # Draw animal shadows
+            for sprite in self.animal_renderer.sprite_list:
+                if sprite.animal.z == current_z:
+                    from config import TILE_SIZE
+                    shadow_offset_y = -6
+                    shadow_width = TILE_SIZE * 0.5
+                    shadow_height = TILE_SIZE * 0.2
+                    arcade.draw_ellipse_filled(
+                        sprite.center_x,
+                        sprite.center_y + shadow_offset_y,
+                        shadow_width,
+                        shadow_height,
+                        (0, 0, 0, 70)
+                    )
+        
+        # Draw colonists with layered sprites (body, head, hair)
+        if self.colonist_renderer:
+            self.colonist_renderer.draw(current_z)
+        
+        # Draw animals using GPU batching with Y-sorting for depth
+        if self.animal_renderer:
+            # Sort animals by Y coordinate (higher Y = further back = draw first, lower Y = closer = draw last)
+            animals_on_z = [sprite for sprite in self.animal_renderer.sprite_list 
+                           if sprite.animal.z == current_z]
+            animals_on_z.sort(key=lambda s: s.animal.y, reverse=True)
+            
+            for sprite in animals_on_z:
+                arcade.draw_sprite(sprite)
+        
+        # Draw bed covers over sleeping colonists
+        self._draw_bed_covers(current_z)
         
         # Draw construction overlays (material icons + progress bars)
         self._draw_construction_overlays()
@@ -899,6 +928,9 @@ class FracturedCityWindow(arcade.Window):
                 self.tick_count += 1
                 self._run_game_tick()
         
+        # Update animations (trees swaying, particles, etc.) - always runs even when paused
+        if self.grid_renderer:
+            self.grid_renderer.update_animations(delta_time)
     
     def _run_game_tick(self):
         """Run a single game tick - called multiple times per frame based on game_speed."""
@@ -1752,6 +1784,73 @@ class FracturedCityWindow(arcade.Window):
         cam_y = max(0, min(cam_y, max_y))
         
         self.camera.position = (cam_x, cam_y)
+    
+    def _draw_bed_covers(self, current_z: int):
+        """Draw bed cover sprites over sleeping colonists.
+        
+        Only draws covers when colonists are actually sleeping in beds.
+        Handles both single and shared beds (2 colonists).
+        """
+        from beds import get_all_beds, get_bed_occupants
+        
+        # Get all beds
+        all_beds = get_all_beds()
+        
+        for bed_pos, bed_data in all_beds:
+            bx, by, bz = bed_pos
+            
+            # Only draw on current Z-level
+            if bz != current_z:
+                continue
+            
+            # Check if any colonists are sleeping in this bed
+            occupant_ids = bed_data.get("assigned", [])
+            if not occupant_ids:
+                continue
+            
+            # Check if any occupants are currently sleeping at this bed
+            # Colonists sleep on bottom tile (by) of the 1x2 vertical bed
+            sleep_y = by
+            sleeping_count = 0
+            for colonist in self.colonists:
+                if id(colonist) in occupant_ids:
+                    if colonist.is_sleeping and colonist.x == bx and colonist.y == sleep_y and colonist.z == bz:
+                        sleeping_count += 1
+            
+            # Only draw covers if someone is sleeping
+            if sleeping_count == 0:
+                continue
+            
+            # Bed is 1x2 vertical - draw covers on BOTH tiles
+            # Bottom tile cover
+            try:
+                bottom_cover = arcade.load_texture("assets/furniture/crash_bed_cover.png")
+                sprite = arcade.Sprite()
+                sprite.texture = bottom_cover
+                sprite.center_x = bx * TILE_SIZE + TILE_SIZE // 2
+                sprite.center_y = by * TILE_SIZE + TILE_SIZE // 2  # Bottom tile
+                sprite.width = TILE_SIZE
+                sprite.height = TILE_SIZE
+                arcade.draw_sprite(sprite)
+            except Exception as e:
+                if not hasattr(self, '_bed_cover_bottom_error_logged'):
+                    self._bed_cover_bottom_error_logged = True
+                    print(f"[BedCovers] Failed to load bottom cover: {e}")
+            
+            # Top tile cover
+            try:
+                top_cover = arcade.load_texture("assets/furniture/crash_bed_top_cover.png")
+                sprite = arcade.Sprite()
+                sprite.texture = top_cover
+                sprite.center_x = bx * TILE_SIZE + TILE_SIZE // 2
+                sprite.center_y = sleep_y * TILE_SIZE + TILE_SIZE // 2  # Top tile (by+1)
+                sprite.width = TILE_SIZE
+                sprite.height = TILE_SIZE
+                arcade.draw_sprite(sprite)
+            except Exception as e:
+                if not hasattr(self, '_bed_cover_top_error_logged'):
+                    self._bed_cover_top_error_logged = True
+                    print(f"[BedCovers] Failed to load top cover: {e}")
     
     def _draw_construction_overlays(self):
         """Draw material icons and progress bars for all construction sites.

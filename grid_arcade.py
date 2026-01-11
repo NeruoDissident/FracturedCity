@@ -49,6 +49,54 @@ class GridRenderer:
         # Sprite position index for fast lookup: {(x, y, z): [sprite1, sprite2, ...]}
         self.sprite_index = {}
         
+        # Animated sprites tracking
+        self.tree_sprites = []  # List of (sprite, time_offset) tuples for swaying trees
+        self.animation_time = 0.0  # Global animation timer
+        
+        # Trash particle system
+        self.trash_particles = []  # List of (sprite, velocity_x, velocity_y, rotation_speed) tuples
+        self.trash_textures = []  # Cache of trash sprite textures
+        self.trash_spawn_timer = 0.0  # Timer for spawning new trash
+        self.trash_spawn_interval = 2.0  # Spawn trash every 2 seconds
+        self.max_trash_particles = 30  # Cap for performance
+        self._load_trash_textures()
+        self._spawn_initial_trash()
+    
+    def _load_trash_textures(self):
+        """Load all trash sprite textures from assets/world_objects/trash/."""
+        import os
+        import glob
+        
+        trash_dir = "assets/world_objects/trash"
+        pattern = os.path.join(trash_dir, "recycle_items_*.png")
+        trash_files = sorted(glob.glob(pattern))
+        
+        for trash_file in trash_files:
+            try:
+                texture = arcade.load_texture(trash_file)
+                self.trash_textures.append(texture)
+            except Exception as e:
+                print(f"[GridRenderer] Failed to load trash texture: {trash_file}, error: {e}")
+        
+        if self.trash_textures:
+            print(f"[GridRenderer] Loaded {len(self.trash_textures)} trash particle textures")
+        else:
+            print(f"[GridRenderer] Warning: No trash textures found in {trash_dir}")
+    
+    def _spawn_initial_trash(self):
+        """Spawn initial trash particles across the map when game loads."""
+        import random
+        
+        if not self.trash_textures:
+            return
+        
+        # Spawn 15-20 initial particles scattered across the map
+        initial_count = random.randint(15, 20)
+        for _ in range(initial_count):
+            self._spawn_trash_particle(initial_spawn=True)
+        
+        print(f"[GridRenderer] Spawned {initial_count} initial trash particles")
+        
     def get_tile_texture(self, tile_type: str, x: int, y: int, z: int):
         """Get or load texture for a tile type.
         
@@ -352,6 +400,21 @@ class GridRenderer:
                 sprite.center_x = x * TILE_SIZE + TILE_SIZE // 2
                 sprite.center_y = y * TILE_SIZE + TILE_SIZE // 2
                 sprite.alpha = opacity
+                
+                # Track wood_node sprites for swaying animation
+                # Check if this is a tree (resource_node with wood type)
+                is_tree = False
+                if tile_type == "resource_node":
+                    import resources
+                    node = resources.get_node_at(x, y)
+                    if node and node.get("resource") == "wood":
+                        is_tree = True
+                
+                if is_tree:
+                    import random
+                    # Random time offset for natural variation (0-2π)
+                    time_offset = random.uniform(0, 6.28)
+                    self.tree_sprites.append((sprite, time_offset))
                 
                 # Debug: Log first few resource sprite additions (AFTER all properties set)
                 if tile_type in ["wood_node", "mineral_node", "raw_food_node", "scrap_node", "resource_node", "salvage_object"]:
@@ -1292,3 +1355,156 @@ class GridRenderer:
         
         # Draw construction footprint outlines on top
         self._draw_construction_footprints()
+    
+    def update_animations(self, delta_time: float):
+        """Update animated sprites (trees swaying, particles, etc.).
+        
+        Call this every frame from main game loop.
+        
+        Args:
+            delta_time: Time elapsed since last frame in seconds
+        """
+        import math
+        import random
+        
+        # Update global animation timer
+        self.animation_time += delta_time
+        
+        # Animate tree swaying
+        for sprite, time_offset in self.tree_sprites:
+            # Sine wave for smooth swaying motion
+            # Frequency: 0.8 Hz (1.25 second period) for moderate breeze
+            # Amplitude: 8 degrees max rotation for noticeable sway
+            sway_angle = math.sin(self.animation_time * 0.8 + time_offset) * 8.0
+            
+            # Apply rotation (Arcade rotates around sprite center by default)
+            sprite.angle = sway_angle
+        
+        # Spawn trash particles (only if under cap)
+        if self.trash_textures and len(self.trash_particles) < self.max_trash_particles:
+            self.trash_spawn_timer += delta_time
+            if self.trash_spawn_timer >= self.trash_spawn_interval:
+                self.trash_spawn_timer = 0.0
+                self._spawn_trash_particle(initial_spawn=False)
+        
+        # Update trash particles
+        particles_to_remove = []
+        for i, (sprite, vel_x, vel_y, rot_speed) in enumerate(self.trash_particles):
+            # Calculate new position
+            new_x = sprite.center_x + vel_x * delta_time
+            new_y = sprite.center_y + vel_y * delta_time
+            
+            # Convert to tile coordinates to check walkability
+            tile_x = int(new_x / TILE_SIZE)
+            tile_y = int(new_y / TILE_SIZE)
+            
+            # Check if new position is walkable (only on Z=0 for ground trash)
+            if self.grid.in_bounds(tile_x, tile_y, 0) and self.grid.is_walkable(tile_x, tile_y, 0):
+                # Update position if walkable
+                sprite.center_x = new_x
+                sprite.center_y = new_y
+            else:
+                # Hit a wall - reverse direction and bounce
+                vel_x = -vel_x * 0.8  # Reverse and lose some energy
+                vel_y = -vel_y * 0.8
+                # Update particle velocity
+                self.trash_particles[i] = (sprite, vel_x, vel_y, rot_speed)
+            
+            # Update rotation (tumbling effect)
+            sprite.angle += rot_speed * delta_time
+            
+            # Mark for removal only if off-screen (no lifetime limit)
+            if sprite.center_x < -100 or sprite.center_x > (self.grid.width * TILE_SIZE + 100):
+                particles_to_remove.append(i)
+        
+        # Remove off-screen particles (reverse order to maintain indices)
+        for i in reversed(particles_to_remove):
+            sprite, _, _, _ = self.trash_particles[i]
+            sprite.remove_from_sprite_lists()
+            del self.trash_particles[i]
+    
+    def _spawn_trash_particle(self, initial_spawn: bool = False):
+        """Spawn a single trash particle.
+        
+        Args:
+            initial_spawn: If True, spawn randomly across map. If False, spawn from edges.
+        """
+        import random
+        from config import TILE_SIZE
+        
+        if not self.trash_textures:
+            return
+        
+        # Pick random trash texture
+        texture = random.choice(self.trash_textures)
+        
+        # Create sprite
+        sprite = arcade.Sprite()
+        sprite.texture = texture
+        
+        if initial_spawn:
+            # Spawn randomly across the map for initial load
+            # Try up to 10 times to find a walkable spot
+            for attempt in range(10):
+                spawn_x = random.uniform(0, self.grid.width * TILE_SIZE)
+                spawn_y = random.uniform(0, self.grid.height * TILE_SIZE)
+                tile_x = int(spawn_x / TILE_SIZE)
+                tile_y = int(spawn_y / TILE_SIZE)
+                
+                # Check if walkable
+                if self.grid.in_bounds(tile_x, tile_y, 0) and self.grid.is_walkable(tile_x, tile_y, 0):
+                    sprite.center_x = spawn_x
+                    sprite.center_y = spawn_y
+                    break
+            else:
+                # Failed to find walkable spot, don't spawn
+                return
+            
+            # Random direction for initial particles
+            vel_x = random.uniform(-80, 80)
+        else:
+            # Spawn from edges for continuous spawning
+            # Find walkable Y position
+            for attempt in range(10):
+                spawn_y = random.uniform(0, self.grid.height * TILE_SIZE)
+                tile_y = int(spawn_y / TILE_SIZE)
+                
+                if random.random() < 0.5:
+                    # Spawn from left edge
+                    tile_x = 0
+                    spawn_x = -50
+                    vel_x = random.uniform(30, 80)  # Blow right
+                else:
+                    # Spawn from right edge
+                    tile_x = self.grid.width - 1
+                    spawn_x = self.grid.width * TILE_SIZE + 50
+                    vel_x = random.uniform(-80, -30)  # Blow left
+                
+                # Check if spawn Y is near a walkable area
+                if self.grid.in_bounds(tile_x, tile_y, 0) and self.grid.is_walkable(tile_x, tile_y, 0):
+                    sprite.center_x = spawn_x
+                    sprite.center_y = spawn_y
+                    break
+            else:
+                # Failed to find walkable spot, don't spawn
+                return
+        
+        # Random vertical drift (slight up/down movement)
+        vel_y = random.uniform(-10, 10)
+        
+        # Random rotation speed (tumbling)
+        rot_speed = random.uniform(-180, 180)  # degrees per second
+        
+        # Random initial rotation
+        sprite.angle = random.uniform(0, 360)
+        
+        # Random scale (0.5 to 1.0 for variety)
+        sprite.scale = random.uniform(0.5, 1.0)
+        
+        # Add to appropriate sprite list based on current Z-level
+        current_list = self.z_level_sprite_lists.get(self.current_z)
+        if current_list:
+            current_list.append(sprite)
+        
+        # Track particle (no lifetime - only despawns when off-screen)
+        self.trash_particles.append((sprite, vel_x, vel_y, rot_speed))

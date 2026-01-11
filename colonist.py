@@ -563,6 +563,9 @@ class Colonist:
 
     _uid_counter: int = 1
 
+    # Class-level cache for discovered sprite variants (shared across all colonists)
+    _sprite_cache = None
+    
     def __init__(self, x: int, y: int, color: tuple[int, int, int] | None = None):
         self.x = x
         self.y = y
@@ -574,12 +577,66 @@ class Colonist:
             self.uid = Colonist._uid_counter
             Colonist._uid_counter += 1
 
-        # Sprite style - randomly assigned from available styles
-        if not hasattr(self, "sprite_style"):
+        # Layered appearance system - randomly generate character look
+        if not hasattr(self, "appearance"):
             import random
-            # Use numbered sprites for easy prototyping: colonist_1.png, colonist_2.png, etc.
-            available_styles = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
-            self.sprite_style = random.choice(available_styles)
+            from pathlib import Path
+            
+            # Use cached sprite variants (scan once, reuse for all colonists)
+            if Colonist._sprite_cache is None:
+                bodies = []
+                heads = []
+                hairs = []
+                
+                # Scan bodies folder for body_*_0.png files
+                body_dir = Path("assets/colonists/bodies")
+                if body_dir.exists():
+                    for f in body_dir.glob("body_*_0.png"):
+                        # Extract body type (e.g., "slim" from "body_slim_0.png")
+                        body_type = f.stem.replace("body_", "").replace("_0", "")
+                        bodies.append(body_type)
+                
+                # Scan heads folder for head_*.png files
+                head_dir = Path("assets/colonists/heads")
+                if head_dir.exists():
+                    for f in head_dir.glob("head_*.png"):
+                        # Extract head number (e.g., 0 from "head_0.png")
+                        try:
+                            head_num = int(f.stem.replace("head_", ""))
+                            heads.append(head_num)
+                        except ValueError:
+                            pass
+                
+                # Scan hair folder for hair_*.png files
+                hair_dir = Path("assets/colonists/hair")
+                if hair_dir.exists():
+                    for f in hair_dir.glob("hair_*.png"):
+                        # Extract hair style (e.g., "short_0" from "hair_short_0.png")
+                        hair_style = f.stem.replace("hair_", "")
+                        hairs.append(hair_style)
+                
+                # Fallback to defaults if no sprites found
+                if not bodies:
+                    bodies = ["slim"]
+                if not heads:
+                    heads = [0]
+                if not hairs:
+                    hairs = ["short_0"]
+                
+                # Cache results
+                Colonist._sprite_cache = {
+                    "bodies": bodies,
+                    "heads": heads,
+                    "hairs": hairs,
+                }
+                print(f"[Colonist] Discovered sprite variants: {len(bodies)} bodies, {len(heads)} heads, {len(hairs)} hairs")
+            
+            # Generate random appearance from cached variants
+            self.appearance = {
+                "body": random.choice(Colonist._sprite_cache["bodies"]),
+                "head": random.choice(Colonist._sprite_cache["heads"]),
+                "hair": random.choice(Colonist._sprite_cache["hairs"]),
+            }
 
         self.state: str = "idle"
         self.current_job: Job | None = None
@@ -4374,20 +4431,22 @@ class Colonist:
         
         if bed_pos:
             bx, by, bz = bed_pos
-            # Check if we're at the bed
-            dist = abs(self.x - bx) + abs(self.y - by)
-            if dist <= 1 and self.z == bz:
+            # Bed is 1x2 vertical - sleep on bottom tile (crash_bed)
+            sleep_x, sleep_y = bx, by
+            # Check if we're at the bed (on the bottom tile)
+            dist = abs(self.x - sleep_x) + abs(self.y - sleep_y)
+            if dist == 0 and self.z == bz:
                 # Sleep!
                 self.is_sleeping = True
                 self.state = "sleeping"
                 self.add_thought("need", "Time to rest.", 0.05, game_tick=game_tick)
-                # print(f"[Sleep] {self.name} went to sleep in their bed")
+                print(f"[Sleep] {self.name} went to sleep in their bed at ({self.x}, {self.y})")
                 return
             else:
-                # Walk to bed
-                self.current_path = self._calculate_path(grid, bx, by, bz, game_tick)
+                # Walk to bed (bottom tile)
+                self.current_path = self._calculate_path(grid, sleep_x, sleep_y, bz, game_tick)
                 if self.current_path:
-                    self.sleep_target = bed_pos
+                    self.sleep_target = (sleep_x, sleep_y, bz)
                     self.state = "moving_to_sleep"
                     return
         
@@ -4483,9 +4542,11 @@ class Colonist:
             if best_bed and best_score > -10:
                 if assign_colonist_to_bed(id(self), *best_bed):
                     bx, by, bz = best_bed
-                    self.current_path = self._calculate_path(grid, bx, by, bz, game_tick)
+                    # Bed is 1x2 vertical - sleep on bottom tile (crash_bed)
+                    sleep_x, sleep_y = bx, by
+                    self.current_path = self._calculate_path(grid, sleep_x, sleep_y, bz, game_tick)
                     if self.current_path:
-                        self.sleep_target = best_bed
+                        self.sleep_target = (sleep_x, sleep_y, bz)
                         self.state = "moving_to_sleep"
                         return
         
@@ -4550,14 +4611,14 @@ class Colonist:
         
         bx, by, bz = self.sleep_target
         
-        # Check if we've arrived (adjacent to bed)
+        # Check if we've arrived (on the sleep target tile)
         dist = abs(self.x - bx) + abs(self.y - by)
-        if dist <= 1 and self.z == bz:
+        if dist == 0 and self.z == bz:
             # Arrived at bed - go to sleep
             self.is_sleeping = True
             self.state = "sleeping"
             self.add_thought("need", "Time to rest.", 0.05, game_tick=self._game_tick)
-            print(f"[Sleep] {self.name} went to sleep in their bed")
+            print(f"[Sleep] {self.name} went to sleep in their bed at ({self.x}, {self.y})")
             return
         
         # Move along path

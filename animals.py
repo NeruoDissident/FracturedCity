@@ -586,9 +586,8 @@ def can_spawn_animal_at(grid, x: int, y: int, z: int, species_id: str) -> bool:
     if z not in species_data["z_levels"]:
         return False
     
-    # Check tile is passable
-    tile = grid.get_tile(x, y, z)
-    if tile in ["void", "wall", "window"]:
+    # Check tile is walkable (uses grid's comprehensive walkability system)
+    if not grid.is_walkable(x, y, z):
         return False
     
     # Check no other animal already here

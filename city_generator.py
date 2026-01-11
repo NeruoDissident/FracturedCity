@@ -24,10 +24,11 @@ class RoadNetwork:
         self.main_streets: List[Dict] = []  # Major roads
         self.side_streets: List[Dict] = []  # Minor roads
         
-    def generate_arterial_roads(self, num_horizontal: int = 3, num_vertical: int = 3):
+    def generate_arterial_roads(self, num_horizontal: int = 2, num_vertical: int = 2):
         """Generate main arterial roads that divide the city into districts.
         
         These are the primary roads - wider spacing, run full length.
+        Reduced to 2x2 grid for larger districts and longer road stretches.
         """
         # Horizontal arterials
         h_spacing = self.height // (num_horizontal + 1)
@@ -67,10 +68,11 @@ class RoadNetwork:
                 intersection = (v_road["x"], h_road["y"])
                 self.intersections.append(intersection)
     
-    def generate_local_streets(self, block_size_range: Tuple[int, int] = (12, 20)):
+    def generate_local_streets(self, block_size_range: Tuple[int, int] = (20, 35)):
         """Generate local streets within districts created by arterials.
         
         These create the actual city blocks where buildings sit.
+        Increased block size for longer road stretches and bigger buildings.
         """
         min_block, max_block = block_size_range
         
@@ -372,16 +374,16 @@ class CityGenerator:
         
         # Step 1: Generate road network (FEWER roads = BIGGER blocks = BIGGER buildings)
         print("[CityGen] Creating road network...")
-        self.road_network.generate_arterial_roads(num_horizontal=3, num_vertical=3)
-        self.road_network.generate_local_streets(block_size_range=(15, 25))
+        self.road_network.generate_arterial_roads(num_horizontal=2, num_vertical=2)
+        self.road_network.generate_local_streets(block_size_range=(20, 35))
         
         # Step 2: Add curved connector roads for organic feel (FEWER for bigger blocks)
         print("[CityGen] Adding curved roads...")
-        self.road_network.add_curved_roads(num_curves=3)
+        self.road_network.add_curved_roads(num_curves=2)
         
-        # Step 3: Add alleys through blocks (FEWER for bigger blocks)
+        # Step 3: Add alleys through blocks (MINIMAL for bigger blocks)
         print("[CityGen] Adding alleys...")
-        self.road_network.add_alleys(probability=0.1)
+        self.road_network.add_alleys(probability=0.05)
         
         # Step 4: Identify city blocks (before placing roads, so we know zones)
         blocks = self.road_network.get_city_blocks()
@@ -412,7 +414,8 @@ class CityGenerator:
             
             # MAXIMUM DENSITY: Fill each block with building(s) sized to fit
             # Calculate building size based on block size
-            margin = 1
+            # 2-tile margin for 2-tile-wide roads (1 tile padding on each side)
+            margin = 2
             available_width = block["width"] - margin * 2
             available_height = block["height"] - margin * 2
             
@@ -969,38 +972,38 @@ class CityGenerator:
                 # Rural: Mostly trees, minimal other resources
                 tree_rate = 0.35  # Heavy tree coverage
                 mineral_rate = 0.03  # Very few minerals
-                food_rate = 0.05  # Minimal canned food
-                scrap_rate = 0.04  # Very little scrap
+                food_rate = 0.02  # Minimal canned food (reduced from 0.05)
+                scrap_rate = 0.015  # Very little scrap (reduced from 0.04)
             elif zone_type == "suburban":
                 # Suburban: Heavy trees, moderate resources
                 tree_rate = 0.25  # Lots of trees
                 mineral_rate = 0.08  # Some minerals
-                food_rate = 0.12  # Moderate canned food
-                scrap_rate = 0.10  # Some scrap
+                food_rate = 0.04  # Moderate canned food (reduced from 0.12)
+                scrap_rate = 0.03  # Some scrap (reduced from 0.10)
             elif zone_type == "abandoned":
                 # Abandoned: Heavy resources, lots of scrap and minerals
                 tree_rate = 0.15  # Trees growing through ruins
                 mineral_rate = 0.20  # Rubble piles
-                food_rate = 0.18  # Canned food in ruins
-                scrap_rate = 0.25  # Salvage everywhere
+                food_rate = 0.06  # Canned food in ruins (reduced from 0.18)
+                scrap_rate = 0.08  # Salvage everywhere (reduced from 0.25)
             elif zone_type == "industrial":
                 # Industrial: Minerals and scrap, few trees
                 tree_rate = 0.05
                 mineral_rate = 0.18
-                food_rate = 0.08  # Some canned food in warehouses
-                scrap_rate = 0.22
+                food_rate = 0.025  # Some canned food in warehouses (reduced from 0.08)
+                scrap_rate = 0.07  # (reduced from 0.22)
             elif zone_type == "residential":
                 # Residential: Trees, food, moderate scrap
                 tree_rate = 0.12
                 mineral_rate = 0.08
-                food_rate = 0.15  # Canned food in homes
-                scrap_rate = 0.12
+                food_rate = 0.05  # Canned food in homes (reduced from 0.15)
+                scrap_rate = 0.04  # (reduced from 0.12)
             else:  # commercial
                 # Commercial: Least resources, some food/scrap
                 tree_rate = 0.03
                 mineral_rate = 0.05
-                food_rate = 0.10  # Canned food in stores
-                scrap_rate = 0.10
+                food_rate = 0.03  # Canned food in stores (reduced from 0.10)
+                scrap_rate = 0.03  # (reduced from 0.10)
             
             # Spawn resources in this block
             for dy in range(height):
