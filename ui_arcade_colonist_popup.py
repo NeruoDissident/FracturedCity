@@ -19,6 +19,7 @@ from ui_arcade import (
 )
 
 # Equipment category definitions
+# These match the actual slots in colonist.equipment
 EQUIPMENT_CATEGORIES = {
     "head": {
         "name": "HEAD",
@@ -26,61 +27,51 @@ EQUIPMENT_CATEGORIES = {
         "icon_color": (200, 200, 255),
         "description": "Helmets, hats, hoods"
     },
-    "eyes": {
-        "name": "EYES",
-        "slots": ["eyes"],
-        "icon_color": (150, 200, 255),
-        "description": "Glasses, goggles, eyepatches, monocles"
-    },
-    "chest": {
-        "name": "CHEST",
-        "slots": ["chest_layer1", "chest_layer2", "chest_layer3"],
-        "layer_names": ["Underwear", "Shirt/Vest", "Jacket/Coat"],
+    "body": {
+        "name": "BODY",
+        "slots": ["body"],
         "icon_color": (255, 200, 150),
-        "description": "Layered torso clothing"
+        "description": "Vests, jackets, armor"
     },
     "hands": {
         "name": "HANDS",
-        "slots": ["hand_left", "hand_right"],
-        "slot_names": ["Left Hand", "Right Hand"],
+        "slots": ["hands"],
         "icon_color": (200, 255, 200),
-        "description": "Gloves, tools, weapons"
+        "description": "Gloves, gauntlets, work tools"
     },
-    "waist": {
-        "name": "WAIST",
-        "slots": ["belt", "pocket_watch", "holster"],
-        "slot_names": ["Belt", "Pocket", "Holster"],
-        "icon_color": (255, 255, 150),
-        "description": "Belts, pouches, holsters"
-    },
-    "legs": {
-        "name": "LEGS",
-        "slots": ["legs_layer1", "legs_layer2"],
-        "layer_names": ["Underwear", "Pants/Skirt"],
-        "icon_color": (200, 150, 255),
-        "description": "Layered leg clothing"
+    "weapon": {
+        "name": "WEAPON",
+        "slots": ["weapon"],
+        "icon_color": (255, 100, 100),
+        "description": "Melee weapons, tools for combat"
     },
     "feet": {
         "name": "FEET",
         "slots": ["feet"],
         "icon_color": (150, 150, 200),
-        "description": "Boots, shoes, sandals"
+        "description": "Boots, shoes"
     },
-    "accessories": {
-        "name": "ACCESSORIES",
-        "slots": ["necklace", "earring_left", "earring_right", "ring_left", "ring_right"],
-        "slot_names": ["Necklace", "Left Ear", "Right Ear", "Left Ring", "Right Ring"],
-        "icon_color": (255, 200, 255),
-        "description": "Jewelry, charms, trinkets"
-    },
-    "implants": {
-        "name": "IMPLANTS",
-        "slots": ["implant_neural", "implant_ocular", "implant_cardiac"],
-        "slot_names": ["Neural", "Ocular", "Cardiac"],
+    "implant": {
+        "name": "IMPLANT",
+        "slots": ["implant"],
         "icon_color": (100, 255, 255),
         "description": "Cybernetic implants"
+    },
+    "charm": {
+        "name": "CHARM",
+        "slots": ["charm"],
+        "icon_color": (255, 200, 255),
+        "description": "Trinkets, charms, accessories"
     }
 }
+
+# Future slots (not yet implemented in colonist.equipment):
+# "eyes": ["eyes"] - Glasses, goggles, eyepatches
+# "chest_layers": ["chest_layer1", "chest_layer2", "chest_layer3"] - Layered clothing
+# "waist": ["belt", "pocket_watch", "holster"] - Belts, pouches
+# "legs": ["legs_layer1", "legs_layer2"] - Layered leg clothing
+# "accessories": ["necklace", "earring_left", "earring_right", "ring_left", "ring_right"]
+# "implants_multi": ["implant_neural", "implant_ocular", "implant_cardiac"]
 
 
 class ColonistPopup:

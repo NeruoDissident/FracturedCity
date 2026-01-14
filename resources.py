@@ -1477,77 +1477,7 @@ def get_colonist_spawn_location() -> tuple[int, int]:
     return _COLONIST_SPAWN_LOCATION
 
 
-def spawn_resource_nodes(grid, count: int = 40) -> tuple[int, int]:
-    """Generate a procedural ruined cyberpunk city.
-    
-    NEW SYSTEM: Uses proper city generation with:
-    - Road networks with real intersections
-    - Varied city blocks
-    - Realistic building placement
-    - Organic urban structure
-    
-    Returns (spawn_x, spawn_y) for colonist placement.
-    """
-    global _COLONIST_SPAWN_LOCATION
-    
-    # Use new city generator
-    from city_generator import CityGenerator
-    
-    city_gen = CityGenerator(grid)
-    spawn_x, spawn_y = city_gen.generate_city()
-    
-    _COLONIST_SPAWN_LOCATION = (spawn_x, spawn_y)
-    
-    # Add resource nodes to buildings (integrate with existing resource system)
-    _spawn_resources_in_city(grid, city_gen)
-    
-    # Generate organic terrain patches on remaining empty tiles
-    # TODO: Re-enable when terrain_gen module is created
-    # from terrain_gen import generate_terrain_patches
-    # generate_terrain_patches(grid)
-    
-    # Create starter stockpile near spawn
-    _create_starter_stockpile(grid, (spawn_x, spawn_y))
-    
-    return spawn_x, spawn_y
-
-
-def _spawn_resources_in_city(grid, city_gen):
-    """Add resource nodes throughout the generated city."""
-    # Scan for buildings and add resources
-    wood_count = 0
-    scrap_count = 0
-    mineral_count = 0
-    food_count = 0
-    
-    # Add scattered resources in empty areas
-    for _ in range(100):
-        x = random.randint(10, GRID_W - 10)
-        y = random.randint(10, GRID_H - 10)
-        
-        tile = grid.get_tile(x, y, 0)
-        
-        # Add resources to appropriate tiles
-        if tile == "empty" and (x, y) not in _RESOURCE_NODES:
-            resource_type = random.choice(["tree", "mineral_node", "scrap_pile"])
-            if resource_type == "tree":
-                if _place_node(grid, x, y, "tree"):
-                    wood_count += 1
-            elif resource_type == "mineral_node":
-                if _place_node(grid, x, y, "mineral_node"):
-                    mineral_count += 1
-            elif resource_type == "scrap_pile":
-                if spawn_salvage_object(x, y, "salvage_pile"):
-                    grid.set_tile(x, y, "salvage_object", z=0)
-                    scrap_count += 1
-        
-        # Add food inside buildings
-        elif tile == "finished_floor" and (x, y) not in _RESOURCE_NODES:
-            if random.random() < 0.05:  # 5% chance
-                if _place_node(grid, x, y, "food_plant"):
-                    food_count += 1
-    
-    print(f"[WorldGen] Resources: {wood_count} wood, {scrap_count} scrap, {mineral_count} mineral, {food_count} food")
+# spawn_resource_nodes removed - Pygame-only worldgen, replaced by CityGenerator in main_arcade.py
 
 
 def _create_starter_stockpile(grid, colonist_spawn: tuple[int, int]) -> None:

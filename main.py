@@ -1,639 +1,1675 @@
-"""Game entry point and high-level orchestration.
+"""
+Arcade-based game entry point for Fractured City.
 
-This module wires together the core systems (grid, colonists, buildings) and
-hosts the Pygame event loop. All simulation and rendering behavior should live
-in dedicated modules so this file stays small and focused on flow control.
+This is the new main file using Python Arcade for GPU-accelerated rendering.
+Game logic from the original main.py will be integrated here.
 """
 
-import os
-import sys
-import subprocess
-import pygame
-
-from config import (
-    SCREEN_W,
-    SCREEN_H,
-    TILE_SIZE,
-    COLONIST_COUNT,
-    GRID_W,
-    GRID_H,
-    COLOR_BG_NORMAL,
-    COLOR_BG_ETHER,
-    COLOR_DRAG_PREVIEW,
-)
+import arcade
+from config import SCREEN_W, SCREEN_H, TILE_SIZE, GRID_W, GRID_H, COLONIST_COUNT
 from grid import Grid
-from colonist import create_colonists, update_colonists, draw_colonists
-from buildings import place_wall, place_wall_advanced, place_door, place_bar_door, place_floor, place_stage, place_stage_stairs, place_window, place_fire_escape, place_scrap_bar_counter, process_supply_jobs, update_doors, update_windows
-import buildings as buildings_module
-import jobs as jobs_module
-from resources import spawn_resource_nodes, create_gathering_job_for_node, get_stockpile, update_resource_nodes, get_resource_balance, process_auto_haul_jobs, mark_item_for_hauling, get_all_resource_items
-import resources as resources_module
-from ui import get_construction_ui
-from zones import create_stockpile_zone
-import zones as zones_module
-from debug_overlay import toggle_debug, draw_debug
-import rooms as rooms_module
-from rooms import update_rooms
+from grid_arcade import GridRenderer
+from colonist_arcade import ColonistRenderer
+from colonist import create_colonists, update_colonists
+from ui_arcade_tile_info import get_tile_info_panel
 
+# Note: pygame is initialized by audio.py for mixer only
 
-# Drag selection state
-_drag_start: tuple[int, int] | None = None
-_drag_mode: str | None = None  # "wall", "harvest", or "stockpile"
+# Window title
+WINDOW_TITLE = "Fractured City (Arcade)"
 
-
-def get_drag_line(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
-    """Return list of tiles in a 1-tile wide line from start to end.
+class FracturedCityWindow(arcade.Window):
+    """Main game window using Arcade."""
     
-    For walls, we only allow 1-tile wide drags (horizontal or vertical line).
-    If dragged diagonally, snaps to the longer axis.
-    """
-    x1, y1 = start
-    x2, y2 = end
-    
-    dx = abs(x2 - x1)
-    dy = abs(y2 - y1)
-    
-    tiles = []
-    
-    if dx >= dy:
-        # Horizontal line (or single tile)
-        min_x, max_x = min(x1, x2), max(x1, x2)
-        for x in range(min_x, max_x + 1):
-            tiles.append((x, y1))  # Use start y
-    else:
-        # Vertical line
-        min_y, max_y = min(y1, y2), max(y1, y2)
-        for y in range(min_y, max_y + 1):
-            tiles.append((x1, y))  # Use start x
-    
-    return tiles
-
-
-def get_drag_rect(start: tuple[int, int], end: tuple[int, int]) -> list[tuple[int, int]]:
-    """Return list of all tiles in a rectangle from start to end."""
-    x1, y1 = start
-    x2, y2 = end
-    
-    min_x, max_x = min(x1, x2), max(x1, x2)
-    min_y, max_y = min(y1, y2), max(y1, y2)
-    
-    tiles = []
-    for x in range(min_x, max_x + 1):
-        for y in range(min_y, max_y + 1):
-            tiles.append((x, y))
-    
-    return tiles
-
-
-def handle_mouse_down(grid: Grid, event: pygame.event.Event, colonists: list) -> None:
-    """Handle mouse button press."""
-    global _drag_start, _drag_mode
-    
-    mx, my = pygame.mouse.get_pos()
-    ui = get_construction_ui()
-    
-    # Check new UI layout first (sidebar clicks)
-    from ui_layout import get_ui_layout
-    ui_layout = get_ui_layout()
-    sidebar_action = ui_layout.handle_click((mx, my))
-    if sidebar_action:
-        # Direct tool selection - set the tool directly
-        ui.action_bar.current_tool = sidebar_action
-        ui.action_bar._close_all_menus()
-        return
-    
-    # Check workstation panel FIRST (highest priority for clicks)
-    from ui_workstation_new import get_workstation_order_panel
-    ws_panel = get_workstation_order_panel()
-    if ws_panel.handle_click((mx, my)):
-        return
-    
-    # Check colonist management panel (only if visible)
-    from ui import get_colonist_management_panel
-    mgmt_panel = get_colonist_management_panel()
-    if mgmt_panel.visible and mgmt_panel.handle_click((mx, my)):
-        return
-    
-    # Check if click was in sidebar or bottom bar area (consumed but no action)
-    if ui_layout.left_sidebar.rect.collidepoint(mx, my):
-        return
-    if ui_layout.bottom_bar.rect.collidepoint(mx, my):
-        return
-    
-    # If click is in UI panels, don't process as map click
-    if ui_layout.is_point_in_ui(mx, my):
-        # Still let existing UI handle it for bottom bar
-        if ui.handle_click((mx, my), event.button):
-            return
-        return
-    
-    # Check colonist panel
-    from ui import get_colonist_panel
-    colonist_panel = get_colonist_panel()
-    if colonist_panel.handle_click((mx, my)):
-        return
-    
-    # Check stockpile filter panel
-    from ui import get_stockpile_filter_panel
-    filter_panel = get_stockpile_filter_panel()
-    if filter_panel.handle_click((mx, my)):
-        return
-    
-    # Check bed assignment panel
-    from ui import get_bed_assignment_panel
-    bed_panel = get_bed_assignment_panel()
-    if bed_panel.handle_click((mx, my), colonists):
-        return
-    
-    # Check fixer trade panel
-    from ui import get_fixer_trade_panel
-    trade_panel = get_fixer_trade_panel()
-    if trade_panel.handle_click((mx, my), zones_module):
-        return
-    
-    # Check visitor panel
-    from ui import get_visitor_panel
-    visitor_panel = get_visitor_panel()
-    if visitor_panel.handle_click((mx, my)):
-        return
-    
-    # Check notification clicks (jump camera to location)
-    from notifications import handle_notification_click
-    click_loc = handle_notification_click((mx, my))
-    if click_loc:
-        grid.center_camera_on(click_loc[0], click_loc[1])
-        return
-    
-    # Let UI handle click first
-    if ui.handle_click((mx, my), event.button):
-        return
-    
-    # Convert screen coordinates to world tile coordinates
-    gx, gy = grid.screen_to_world(mx, my)
-    
-    if not (0 <= gx < GRID_W and 0 <= gy < GRID_H):
-        return
-
-    if event.button == 1:  # left click
-        build_mode = ui.get_build_mode()
-        current_z = grid.current_z
+    def __init__(self):
+        # Set background color BEFORE creating window to prevent white flash
+        super().__init__(SCREEN_W, SCREEN_H, WINDOW_TITLE, resizable=True)
         
-        # Handle "allow" mode - start drag for roof access on any Z > 0
-        if build_mode == "allow":
-            if current_z == 0:
-                print(f"[Allow] Cannot use Allow on ground level - only on rooftops (Z > 0)")
-                return
-            _drag_start = (gx, gy)
-            _drag_mode = "allow"
-            return
+        # Set dark background color
+        arcade.set_background_color((12, 14, 18))  # Dark cyberpunk background
         
-        # Building modes - allow on both Z levels (individual tile checks happen on placement)
-        if build_mode in ("wall", "wall_advanced", "door", "bar_door", "window", "scrap_bar_counter"):
-            # Start drag for structure construction (line)
-            _drag_start = (gx, gy)
-            _drag_mode = build_mode
-        elif build_mode == "floor":
-            # Start drag for floor construction (rectangle)
-            _drag_start = (gx, gy)
-            _drag_mode = "floor"
-        elif build_mode == "stage":
-            # Start drag for stage construction (rectangle)
-            _drag_start = (gx, gy)
-            _drag_mode = "stage"
-        elif build_mode == "stage_stairs":
-            # Click-place stage stairs
-            if place_stage_stairs(grid, gx, gy, current_z):
-                print(f"Designated stage stairs for construction at ({gx},{gy},z={current_z})")
-        elif build_mode == "roof":
-            # Start drag for roof placement (rectangle) - requires 4 corner walls
-            _drag_start = (gx, gy)
-            _drag_mode = "roof"
-        elif build_mode == "fire_escape":
-            # Fire escape - single click placement on finished walls (any Z level)
-            if place_fire_escape(grid, gx, gy, current_z):
-                z_info = f" on Z={current_z}" if current_z > 0 else ""
-                print(f"[Build] Fire escape placed at ({gx}, {gy}){z_info}")
-            else:
-                print(f"[Build] Cannot place fire escape at ({gx}, {gy}) - needs finished wall with exterior space")
-        elif build_mode == "bridge":
-            # Bridge - single click placement, must be adjacent to fire escape platform or another bridge
-            from buildings import place_bridge
-            if place_bridge(grid, gx, gy, current_z):
-                pass  # Success message printed by place_bridge
-            else:
-                print(f"[Build] Cannot place bridge at ({gx}, {gy}) - must be adjacent to fire escape platform or bridge")
-        elif build_mode == "salvagers_bench":
-            # Salvager's Bench - single click placement on floor inside room
-            from buildings import place_salvagers_bench
-            if place_salvagers_bench(grid, gx, gy, current_z):
-                print(f"[Build] Salvager's Bench placed at ({gx}, {gy})")
-            else:
-                print(f"[Build] Cannot place Salvager's Bench at ({gx}, {gy}) - needs floor inside room")
-        elif build_mode == "generator":
-            # Generator - single click placement on floor inside room
-            from buildings import place_generator
-            if place_generator(grid, gx, gy, current_z):
-                print(f"[Build] Generator placed at ({gx}, {gy})")
-            else:
-                print(f"[Build] Cannot place Generator at ({gx}, {gy}) - needs floor inside room")
-        elif build_mode == "stove":
-            # Stove - single click placement on floor inside room
-            from buildings import place_stove
-            if place_stove(grid, gx, gy, current_z):
-                print(f"[Build] Stove placed at ({gx}, {gy})")
-            else:
-                print(f"[Build] Cannot place Stove at ({gx}, {gy}) - needs floor inside room")
-        elif build_mode == "gutter_forge":
-            # Gutter Forge - single click placement on floor inside room
-            from buildings import place_gutter_forge
-            if place_gutter_forge(grid, gx, gy, current_z):
-                print(f"[Build] Gutter Forge placed at ({gx}, {gy})")
-            else:
-                print(f"[Build] Cannot place Gutter Forge at ({gx}, {gy}) - needs floor inside room")
-        elif build_mode == "skinshop_loom":
-            # Skinshop Loom - single click placement on floor inside room
-            from buildings import place_skinshop_loom
-            if place_skinshop_loom(grid, gx, gy, current_z):
-                print(f"[Build] Skinshop Loom placed at ({gx}, {gy})")
-            else:
-                print(f"[Build] Cannot place Skinshop Loom at ({gx}, {gy}) - needs floor inside room")
-        elif build_mode == "cortex_spindle":
-            # Cortex Spindle - single click placement on floor inside room
-            from buildings import place_cortex_spindle
-            if place_cortex_spindle(grid, gx, gy, current_z):
-                print(f"[Build] Cortex Spindle placed at ({gx}, {gy})")
-            else:
-                print(f"[Build] Cannot place Cortex Spindle at ({gx}, {gy}) - needs floor inside room")
-        elif build_mode in buildings_module.BUILDING_TYPES and buildings_module.BUILDING_TYPES[build_mode].get("workstation"):
-            # Generic workstation placement using shared rules (floor + roofed room)
-            from buildings import place_workstation_generic
-            ws_def = buildings_module.BUILDING_TYPES[build_mode]
-            ws_name = ws_def.get("name", build_mode).replace("_", " ")
-            if place_workstation_generic(grid, gx, gy, build_mode, current_z):
-                print(f"[Build] {ws_name} placed at ({gx}, {gy})")
-            else:
-                print(f"[Build] Cannot place {ws_name} at ({gx}, {gy}) - needs floor inside room")
-        elif build_mode and build_mode.startswith("furn_"):
-            # Generic furniture placement - install crafted furniture from stockpiles
-            from buildings import request_furniture_install
-            item_id = build_mode[len("furn_"):]
-            if request_furniture_install(grid, gx, gy, current_z, item_id):
-                print(f"[Build] Furniture install requested: {item_id} at ({gx}, {gy}, z={current_z})")
-            else:
-                print(f"[Build] Cannot install {item_id} at ({gx}, {gy}, z={current_z})")
-        elif build_mode == "stockpile":
-            # Start drag for stockpile zone (rectangle) - works on both Z levels
-            _drag_start = (gx, gy)
-            _drag_mode = "stockpile"
-        elif build_mode and build_mode.startswith("room_"):
-            # Room designation - drag to create room
-            _drag_start = (gx, gy)
-            _drag_mode = build_mode  # "room_bedroom", "room_kitchen", etc.
-        elif build_mode == "harvest":
-            # Combined harvest + haul tool - ground level only
-            if current_z != 0:
-                return
-            _drag_start = (gx, gy)
-            _drag_mode = "harvest"
-        elif build_mode == "demolish":
-            # Demolish tool - drag to select area
-            _drag_start = (gx, gy)
-            _drag_mode = "demolish"
-        elif build_mode == "salvage":
-            # Salvage tool - drag to designate salvage objects
-            _drag_start = (gx, gy)
-            _drag_mode = "salvage"
-        elif build_mode is None:
-            # No tool selected - check for wanderer, colonist, or stockpile zone
-            
-            # Check for fixer first (trader)
-            from wanderers import get_fixer_at
-            fixer = get_fixer_at(gx, gy, current_z)
-            if fixer is not None:
-                # Open trade panel
-                from ui import get_fixer_trade_panel
-                trade_panel = get_fixer_trade_panel()
-                trade_panel.open(fixer)
-                return
-            
-            # Check for wanderer (potential recruit) - open visitor panel
-            from wanderers import get_wanderer_at, recruit_wanderer, reject_wanderer
-            wanderer = get_wanderer_at(gx, gy, current_z)
-            if wanderer is not None:
-                # Open visitor panel instead of auto-recruiting
-                from ui import get_visitor_panel
-                visitor_panel = get_visitor_panel()
-                
-                def accept_visitor(w, cols=colonists):
-                    new_colonist = recruit_wanderer(w)
-                    if new_colonist:
-                        cols.append(new_colonist)
-                        from notifications import add_notification, NotificationType
-                        add_notification(NotificationType.ARRIVAL,
-                                       "// LINK ESTABLISHED //",
-                                       f"{new_colonist.name} has jacked in",
-                                       duration=360)
-                
-                def deny_visitor(w):
-                    reject_wanderer(w)
-                    from notifications import add_notification, NotificationType
-                    add_notification(NotificationType.INFO,
-                                   "// CONNECTION TERMINATED //",
-                                   f"{w['name']} flatlined",
-                                   duration=240)
-                
-                visitor_panel.on_accept = accept_visitor
-                visitor_panel.on_deny = deny_visitor
-                visitor_panel.open(wanderer)
-                return
-            
-            # Check if clicking on a colonist (within 1 tile radius)
-            clicked_colonist = None
-            for colonist in colonists:
-                if colonist.z == current_z:  # Same Z-level
-                    dx = abs(colonist.x - gx)
-                    dy = abs(colonist.y - gy)
-                    if dx <= 0 and dy <= 0:  # Exact tile
-                        clicked_colonist = colonist
+        # Clear to dark immediately
+        self.clear()
+        
+        # Track current window dimensions (updated on resize)
+        self.current_width = SCREEN_W
+        self.current_height = SCREEN_H
+        
+        # Game state
+        self.grid = None
+        self.grid_renderer = None
+        self.colonist_renderer = None
+        self.colonists = []
+        self.tick_count = 0
+        
+        # Camera for scrolling (Arcade 3.0 API)
+        self.camera = arcade.camera.Camera2D()
+        # GUI camera for UI rendering (no zoom, centered on window)
+        self.gui_camera = arcade.camera.Camera2D()
+        
+        # Sprite lists (GPU batching)
+        self.colonist_sprite_list = arcade.SpriteList()
+        
+        # Camera movement
+        self.camera_speed = 20  # Increased from 10 for faster panning
+        self.keys_pressed = set()
+        
+        # Zoom
+        self.zoom_level = 1.0
+        self.min_zoom = 0.25
+        self.max_zoom = 2.0
+        
+        # Game speed
+        self.game_speed = 3  # Default to 3x speed (1-5 range)
+        self.paused = False  # Pause state
+        
+        # Pygame surface for UI rendering (reuse existing UI code)
+        self.ui_surface = None
+        self.ui_texture = None
+        self.ui_sprite = None
+        self.ui_sprite_list = arcade.SpriteList()
+        
+        # Mouse state
+        self.mouse_x = 0
+        self.mouse_y = 0
+        self.hovered_tile = None  # (x, y, z) or None
+        self.selected_tile = None  # (x, y, z) or None
+        self.selected_colonist = None
+        
+        # Drag state for building (matches Pygame implementation)
+        self.drag_start = None  # (tile_x, tile_y) or None
+        self.drag_end = None  # (tile_x, tile_y) or None - updated during mouse motion
+        self.drag_mode = None  # "wall", "floor", "stockpile", etc.
+        
+        # Sprite cache for tiles and colonists (avoid reloading every frame)
+        self.texture_cache = {}
+        
+        # Track wanderer/fixer colonist UIDs in renderer
+        self.tracked_wanderer_uids = set()
+        self.tracked_fixer_uids = set()
+        
+        # Tile info panel
+        self.tile_info_panel = None
+    
+    def _sync_wanderers_with_renderer(self):
+        """Sync wanderers and fixers with colonist renderer."""
+        from wanderers import get_wanderers, get_fixers
+        
+        # Get current wanderers/fixers
+        wanderers = get_wanderers()
+        fixers = get_fixers()
+        
+        # Track current UIDs
+        current_wanderer_uids = {w["colonist"].uid for w in wanderers}
+        current_fixer_uids = {f["colonist"].uid for f in fixers}
+        
+        # Add new wanderers to renderer
+        for wanderer in wanderers:
+            colonist = wanderer["colonist"]
+            if colonist.uid not in self.tracked_wanderer_uids:
+                self.colonist_renderer.add_colonist(colonist)
+                self.tracked_wanderer_uids.add(colonist.uid)
+        
+        # Add new fixers to renderer
+        for fixer in fixers:
+            colonist = fixer["colonist"]
+            if colonist.uid not in self.tracked_fixer_uids:
+                self.colonist_renderer.add_colonist(colonist)
+                self.tracked_fixer_uids.add(colonist.uid)
+        
+        # Remove departed wanderers from renderer (but NOT recruited ones)
+        departed_wanderers = self.tracked_wanderer_uids - current_wanderer_uids
+        for uid in departed_wanderers:
+            # Check if this colonist was recruited (is now in main colonist list)
+            is_recruited = any(c.uid == uid for c in self.colonists)
+            if not is_recruited:
+                # Only remove if not recruited - rejected/left wanderers
+                for sprite_uid, sprite in list(self.colonist_renderer.colonist_sprites.items()):
+                    if sprite_uid == uid:
+                        self.colonist_renderer.remove_colonist(sprite.colonist)
                         break
+            self.tracked_wanderer_uids.discard(uid)
+        
+        # Remove departed fixers from renderer
+        departed_fixers = self.tracked_fixer_uids - current_fixer_uids
+        for uid in departed_fixers:
+            for sprite_uid, sprite in list(self.colonist_renderer.colonist_sprites.items()):
+                if sprite_uid == uid:
+                    self.colonist_renderer.remove_colonist(sprite.colonist)
+                    break
+            self.tracked_fixer_uids.discard(uid)
+    
+    def snap_camera_to_tile(self, x: int, y: int, z: int):
+        """Snap camera to a specific tile position."""
+        # Switch to target Z-level if different
+        if z != self.grid.current_z:
+            self.grid.current_z = z
+            self.grid_renderer.build_tile_sprites(z_level=z)
+            print(f"[Camera] Switched to Z={z}")
+        
+        # Move camera to tile (camera position is viewport center)
+        target_x = x * TILE_SIZE + TILE_SIZE // 2
+        target_y = y * TILE_SIZE + TILE_SIZE // 2
+        self.camera.position = (target_x, target_y)
+        print(f"[Camera] Snapped to ({x}, {y}, {z})")
+    
+    def open_colonist_detail(self, colonist):
+        """Open colonist detail popup for a specific colonist."""
+        from ui_arcade_colonist_popup import get_colonist_popup
+        popup = get_colonist_popup()
+        popup.set_colonists_list(self.colonists)
+        popup.open(colonist)
+        print(f"[UI] Opened detail popup for {colonist.name}")
+    
+    def open_animal_detail(self, animal):
+        """Open animal detail popup for a specific animal."""
+        from animals import get_all_animals
+        from ui_arcade_animal_popup import get_animal_popup
+        animals = get_all_animals()
+        if animal in animals:
+            index = animals.index(animal)
+            popup = get_animal_popup()
+            popup.open(animals, index)
+            print(f"[UI] Opened animal popup for {animal.species_data['name']} #{animal.variant}")
+        
+    def setup(self):
+        """Initialize game state."""
+        print("[Arcade] Setting up game...")
+        
+        # Show loading screen during setup
+        self.clear()
+        arcade.draw_text(
+            text="LOADING...",
+            x=SCREEN_W / 2,
+            y=SCREEN_H / 2,
+            color=(0, 220, 220),  # Neon cyan
+            font_size=32,
+            bold=True,
+            anchor_x="center",
+            anchor_y="center"
+        )
+        arcade.draw_text(
+            text="Generating world...",
+            x=SCREEN_W / 2,
+            y=SCREEN_H / 2 - 50,
+            color=(120, 130, 145),  # Dim gray
+            font_size=16,
+            anchor_x="center",
+            anchor_y="center"
+        )
+        self.flip()  # Show loading screen immediately
+        
+        # Initialize tileset system (must be done after Arcade window is created)
+        from tileset_loader import initialize_tilesets
+        initialize_tilesets()
+        
+        # Initialize audio system and start music
+        from audio import init_audio
+        init_audio()
+        
+        # Create grid (uses global config values)
+        self.grid = Grid()
+        
+        # Generate CITY WORLD (roads, buildings, dirt patches)
+        from city_generator import CityGenerator
+        worldgen = CityGenerator(self.grid)
+        spawn_x, spawn_y = worldgen.generate_city()
+        
+        print(f"[Arcade] World generated with colonist spawn at ({spawn_x}, {spawn_y})")
+        
+        # Create grid renderer and build tile sprites
+        self.grid_renderer = GridRenderer(self.grid)
+        self.grid_renderer.build_tile_sprites(z_level=0)
+        
+        # Wire grid tile changes to renderer updates (for construction, demolition, etc.)
+        self.grid.on_tile_change = self.grid_renderer.update_tile
+        
+        # Create colonists at spawn location (from worldgen)
+        self.colonists = create_colonists(COLONIST_COUNT, spawn_x, spawn_y)
+        
+        # Create starter stockpile with resources (uses existing system)
+        from resources import _create_starter_stockpile
+        _create_starter_stockpile(self.grid, (spawn_x, spawn_y))
+        
+        # Create colonist renderer and add all colonists
+        self.colonist_renderer = ColonistRenderer()
+        for colonist in self.colonists:
+            self.colonist_renderer.add_colonist(colonist)
+        
+        # Create animal renderer
+        from animals_arcade import get_animal_renderer
+        self.animal_renderer = get_animal_renderer()
+        
+        # Center camera on spawn (Camera2D position is viewport CENTER)
+        cam_x = spawn_x * TILE_SIZE
+        cam_y = spawn_y * TILE_SIZE
+        self.camera.position = (cam_x, cam_y)
+        
+        # Initialize native Arcade UI with current window dimensions
+        from ui_arcade import ArcadeUI
+        self.ui = ArcadeUI(self.current_width, self.current_height)
+        
+        # Initialize left sidebar with current window dimensions
+        from ui_arcade_panels import LeftSidebar
+        self.left_sidebar = LeftSidebar(self.current_width, self.current_height)
+        
+        # Animal popup is singleton, no need to store reference
+        
+        # Wire sidebar callbacks
+        self.left_sidebar.on_colonist_locate = self.snap_camera_to_tile
+        self.left_sidebar.on_colonist_click = self.open_colonist_detail
+        self.left_sidebar.on_animal_locate = self.snap_camera_to_tile
+        self.left_sidebar.on_animal_click = self.open_animal_detail
+        
+        # Initialize notification panel
+        from ui_arcade_notifications import get_notification_panel
+        self.notification_panel = get_notification_panel(self.current_width, self.current_height)
+        
+        # Initialize tile info panel
+        self.tile_info_panel = get_tile_info_panel()
+        
+        # Initialize stockpile filter panel
+        from ui_arcade_stockpile import get_stockpile_panel
+        self.stockpile_panel = get_stockpile_panel()
+        
+        # Right panel removed - using center popups now
+        
+        # Spawn animals during worldgen
+        from animals import spawn_random_animals
+        animals_spawned = spawn_random_animals(self.grid, count=20)
+        
+        print(f"[Arcade] Setup complete! {len(self.colonists)} colonists spawned.")
+        print(f"[Arcade] Spawned {animals_spawned} animals")
+        print("[Arcade] Use WASD or Arrow Keys to move camera")
+        print("[Arcade] Use Mouse Wheel to zoom")
+    
+    def on_show(self):
+        """Called when window is shown - clear to dark immediately."""
+        arcade.set_background_color((12, 14, 18))
+        self.clear()
+    
+    def on_draw(self):
+        """Render the game."""
+        self.clear()
+        
+        # Update current dimensions from actual window size every frame
+        # This ensures we always use the correct drawable area
+        self.current_width = self.width
+        self.current_height = self.height
+        
+        # Use game camera for world rendering
+        self.camera.use()
+        
+        # Draw tiles using GPU batching (existing system)
+        if self.grid_renderer:
+            self.grid_renderer.draw()
+        
+        # Draw shadows AFTER grid but BEFORE entities
+        current_z = self.grid.current_z
+        if self.colonist_renderer:
+            self.colonist_renderer._draw_shadows(current_z)
+        if self.animal_renderer:
+            self.animal_renderer.update_sprites()
+            # Draw animal shadows
+            for sprite in self.animal_renderer.sprite_list:
+                if sprite.animal.z == current_z:
+                    from config import TILE_SIZE
+                    shadow_offset_y = -6
+                    shadow_width = TILE_SIZE * 0.5
+                    shadow_height = TILE_SIZE * 0.2
+                    arcade.draw_ellipse_filled(
+                        sprite.center_x,
+                        sprite.center_y + shadow_offset_y,
+                        shadow_width,
+                        shadow_height,
+                        (0, 0, 0, 70)
+                    )
+        
+        # Draw colonists with layered sprites (body, head, hair)
+        if self.colonist_renderer:
+            self.colonist_renderer.draw(current_z)
+        
+        # Draw animals using GPU batching with Y-sorting for depth
+        if self.animal_renderer:
+            # Sort animals by Y coordinate (higher Y = further back = draw first, lower Y = closer = draw last)
+            animals_on_z = [sprite for sprite in self.animal_renderer.sprite_list 
+                           if sprite.animal.z == current_z]
+            animals_on_z.sort(key=lambda s: s.animal.y, reverse=True)
             
-            if clicked_colonist is not None:
-                # Open colonist management panel (includes job tags)
-                from ui import get_colonist_management_panel
-                mgmt_panel = get_colonist_management_panel()
-                mgmt_panel.open_for_colonist(colonists, clicked_colonist)
+            for sprite in animals_on_z:
+                arcade.draw_sprite(sprite)
+        
+        # Draw bed covers over sleeping colonists
+        self._draw_bed_covers(current_z)
+        
+        # Draw construction overlays (material icons + progress bars)
+        self._draw_construction_overlays()
+        
+        # Draw zones and designations (stockpiles, harvest highlights)
+        self._draw_zones_and_designations()
+        
+        # Draw stockpile storage (items in stockpiles)
+        self._draw_stockpile_storage()
+        
+        # Draw world items (items on ground waiting for pickup)
+        self._draw_world_items()
+        
+        # Draw tile highlights (still in world camera view)
+        # Draw selected tile first (under hover)
+        if self.selected_tile:
+            tile_x, tile_y, tile_z = self.selected_tile
+            # Semi-transparent pink fill
+            arcade.draw_lrbt_rectangle_filled(
+                left=tile_x * TILE_SIZE,
+                right=(tile_x + 1) * TILE_SIZE,
+                bottom=tile_y * TILE_SIZE,
+                top=(tile_y + 1) * TILE_SIZE,
+                color=(255, 50, 130, 60)  # Pink with alpha
+            )
+            # Thick pink border
+            arcade.draw_lrbt_rectangle_outline(
+                left=tile_x * TILE_SIZE,
+                right=(tile_x + 1) * TILE_SIZE,
+                bottom=tile_y * TILE_SIZE,
+                top=(tile_y + 1) * TILE_SIZE,
+                color=(255, 50, 130, 255),  # Bright pink
+                border_width=4
+            )
+        
+        # Draw drag preview (if dragging)
+        if self.drag_start and self.drag_end and self.drag_mode:
+            start_x, start_y = self.drag_start
+            end_x, end_y = self.drag_end
+            
+            # Get tiles that will be affected
+            if self.drag_mode in ("wall", "door"):
+                # Line drag
+                preview_tiles = self._get_drag_line(self.drag_start, self.drag_end)
+            elif self.drag_mode in ("floor", "stockpile", "roof", "harvest", "salvage") or self.drag_mode.startswith("room_"):
+                # Rectangle drag
+                preview_tiles = self._get_drag_rect(self.drag_start, self.drag_end)
             else:
-                # Check if clicking on a workstation (open recipe panel)
-                tile = grid.get_tile(gx, gy, current_z)
+                preview_tiles = [self.drag_end]
+            
+            # Draw highlighted tiles
+            for tx, ty in preview_tiles:
+                # Semi-transparent yellow fill
+                arcade.draw_lrbt_rectangle_filled(
+                    left=tx * TILE_SIZE,
+                    right=(tx + 1) * TILE_SIZE,
+                    bottom=ty * TILE_SIZE,
+                    top=(ty + 1) * TILE_SIZE,
+                    color=(255, 220, 0, 80)  # Yellow with alpha
+                )
+                # Yellow border
+                arcade.draw_lrbt_rectangle_outline(
+                    left=tx * TILE_SIZE,
+                    right=(tx + 1) * TILE_SIZE,
+                    bottom=ty * TILE_SIZE,
+                    top=(ty + 1) * TILE_SIZE,
+                    color=(255, 220, 0, 200),  # Bright yellow
+                    border_width=2
+                )
+        
+        # Draw hover highlight on top
+        if self.hovered_tile:
+            tile_x, tile_y, tile_z = self.hovered_tile
+            
+            # Check if we're placing a multi-tile structure
+            width, height = 1, 1
+            if self.drag_mode:
+                # Check for workstation
+                from buildings import BUILDING_TYPES, get_building_size
+                if self.drag_mode in BUILDING_TYPES:
+                    width, height = get_building_size(self.drag_mode)
+                # Check for furniture
+                elif self.drag_mode.startswith("furn_"):
+                    from furniture import get_furniture_size
+                    item_id = self.drag_mode[5:]
+                    width, height = get_furniture_size(item_id)
+            
+            # Draw footprint for all tiles that will be occupied
+            for dy in range(height):
+                for dx in range(width):
+                    footprint_x = tile_x + dx
+                    footprint_y = tile_y + dy
+                    
+                    # Semi-transparent cyan fill
+                    arcade.draw_lrbt_rectangle_filled(
+                        left=footprint_x * TILE_SIZE,
+                        right=(footprint_x + 1) * TILE_SIZE,
+                        bottom=footprint_y * TILE_SIZE,
+                        top=(footprint_y + 1) * TILE_SIZE,
+                        color=(0, 220, 220, 40)  # Cyan with alpha
+                    )
+                    # Thick cyan border
+                    arcade.draw_lrbt_rectangle_outline(
+                        left=footprint_x * TILE_SIZE,
+                        right=(footprint_x + 1) * TILE_SIZE,
+                        bottom=footprint_y * TILE_SIZE,
+                        top=(footprint_y + 1) * TILE_SIZE,
+                        color=(0, 220, 220, 255),  # Bright cyan
+                        border_width=4
+                    )
+        
+        # Draw day/night cycle overlay (still in world camera)
+        self._draw_day_night_overlay()
+        
+        # Switch to GUI camera for UI rendering
+        # GUI camera uses default projection matching window size
+        self.gui_camera.use()
+        
+        # Draw native Arcade UI (top bar and bottom action bar)
+        from time_system import get_display_string
+        import zones as zones_module
+        import jobs as jobs_module
+        
+        # Gather game data for UI
+        game_data = {
+            "time_str": get_display_string(),
+            "z_level": 0,
+            "paused": False,
+            "game_speed": 1,
+            "resources": {
+                "wood": zones_module.get_total_stored("wood"),
+                "scrap": zones_module.get_total_stored("scrap"),
+                "metal": zones_module.get_total_stored("metal"),
+                "mineral": zones_module.get_total_stored("mineral"),
+                "power": zones_module.get_total_stored("power"),
+                "raw_food": zones_module.get_total_stored("raw_food"),
+                "cooked_meal": zones_module.get_total_stored("cooked_meal"),
+            },
+            "colonist_objects": [c for c in self.colonists if not c.is_dead],
+            "job_count": len(jobs_module.get_all_available_jobs()),
+        }
+        
+        # Draw top bar and bottom action bar
+        self.ui.draw(game_data)
+        
+        # Draw left sidebar with resources (also has items tab)
+        self.left_sidebar.draw(
+            colonists=self.colonists,
+            jobs=jobs_module.JOB_QUEUE,
+            items=game_data["resources"],  # Pass resources to items tab
+            rooms={}   # TODO: Get from room system
+        )
+        
+        # Colonist detail now in center popup
+        
+        # Draw animal popup (center, over everything except other popups)
+        from ui_arcade_animal_popup import get_animal_popup
+        animal_popup = get_animal_popup()
+        animal_popup.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw colonist popup (center, over everything except other popups)
+        from ui_arcade_colonist_popup import get_colonist_popup
+        colonist_popup = get_colonist_popup()
+        colonist_popup.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw native Arcade workstation panel
+        from ui_arcade_workstation import get_workstation_panel
+        ws_panel = get_workstation_panel()
+        ws_panel.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw native Arcade bed assignment panel
+        from ui_arcade_bed import get_bed_assignment_panel
+        bed_panel = get_bed_assignment_panel()
+        bed_panel.draw(self.colonists, self.mouse_x, self.mouse_y)
+        
+        # Draw visitor panel (popup over everything)
+        from ui_arcade_visitor import get_visitor_panel
+        visitor_panel = get_visitor_panel()
+        visitor_panel.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw trader panel (popup over everything)
+        from ui_arcade_trader import get_trader_panel
+        trader_panel = get_trader_panel()
+        trader_panel.draw(self.mouse_x, self.mouse_y)
+        
+        # Draw stockpile filter panel (popup)
+        self.stockpile_panel.draw()
+        
+        # Draw notification panel (top-right, above everything)
+        self.notification_panel.draw()
+        
+        # Draw tile info panel (bottom-right)
+        if self.tile_info_panel and self.hovered_tile:
+            cam_x, cam_y = self.camera.position
+            self.tile_info_panel.game_tick = getattr(self, 'game_tick', 0)  # Pass game tick for item age calculation
+            self.tile_info_panel.draw(
+                self.grid, 
+                self.colonists,
+                cam_x, 
+                cam_y, 
+                self.grid.current_z
+            )
+        
+        # Draw PAUSED indicator
+        if self.paused:
+            # Center of screen
+            center_x = self.width / 2
+            center_y = self.height / 2
+            
+            # Semi-transparent dark background
+            arcade.draw_lrbt_rectangle_filled(
+                center_x - 150,
+                center_x + 150,
+                center_y - 40,
+                center_y + 40,
+                (0, 0, 0, 180)
+            )
+            
+            # Cyan border
+            arcade.draw_lrbt_rectangle_outline(
+                center_x - 150,
+                center_x + 150,
+                center_y - 40,
+                center_y + 40,
+                (0, 220, 220, 255),
+                border_width=3
+            )
+            
+            # PAUSED text
+            arcade.draw_text(
+                "PAUSED",
+                center_x,
+                center_y,
+                (0, 220, 220),
+                font_size=32,
+                bold=True,
+                anchor_x="center",
+                anchor_y="center",
+                font_name="Arial"
+            )
+            
+            # Subtitle
+            arcade.draw_text(
+                "Press SPACE to resume",
+                center_x,
+                center_y - 20,
+                (150, 150, 150),
+                font_size=12,
+                anchor_x="center",
+                anchor_y="center",
+                font_name="Arial"
+            )
+        
+        # Draw selected colonist info (if any)
+        if self.selected_colonist:
+            info_y = 100
+            arcade.draw_text(
+                text=f"Selected: {self.selected_colonist.name}",
+                x=10,
+                y=info_y,
+                color=(255, 50, 130),  # Neon pink
+                font_size=14,
+                bold=True
+            )
+            status = self.selected_colonist.current_job.type if self.selected_colonist.current_job else "Idle"
+            arcade.draw_text(
+                text=f"Status: {status}",
+                x=10,
+                y=info_y - 20,
+                color=(230, 240, 250),
+                font_size=12
+            )
+    
+    def _draw_stockpile_storage(self):
+        """Draw items stored in stockpiles (resources + equipment/furniture)."""
+        import zones as zones_module
+        
+        # Cache for loaded item textures
+        if not hasattr(self, '_item_texture_cache'):
+            self._item_texture_cache = {}
+        
+        # Draw resource storage (wood, metal, food, etc.)
+        tile_storage = zones_module.get_all_tile_storage()
+        
+        for (x, y, z), storage in tile_storage.items():
+            if z != self.grid.current_z or not storage:
+                continue
+            
+            resource_type = storage.get("type", "")
+            amount = storage.get("amount", 0)
+            
+            if amount <= 0:
+                continue
+            
+            self._draw_stockpile_item(x, y, resource_type, amount)
+        
+        # Draw equipment/furniture storage (separate system)
+        equipment_storage = zones_module.get_all_stored_equipment()
+        
+        for (x, y, z), items in equipment_storage.items():
+            if z != self.grid.current_z or not items:
+                continue
+            
+            # Group items by ID to show stack count
+            item_counts = {}
+            for item in items:
+                item_id = item.get("id", item.get("name", "item"))
+                item_counts[item_id] = item_counts.get(item_id, 0) + 1
+            
+            # Draw first item type (if multiple types, show the first one)
+            if item_counts:
+                item_id = list(item_counts.keys())[0]
+                count = item_counts[item_id]
+                self._draw_stockpile_item(x, y, item_id, count)
+    
+    def _draw_day_night_overlay(self):
+        """Draw day/night cycle tint overlay over the entire world."""
+        from time_system import get_game_time
+        
+        game_time = get_game_time()
+        if not game_time:
+            return
+        
+        # Get current tint color (RGBA)
+        r, g, b, a = game_time.get_tint()
+        
+        # Only draw if there's visible alpha
+        if a > 0:
+            # Get camera viewport bounds using current window dimensions
+            cam_x, cam_y = self.camera.position
+            viewport_width = self.current_width / self.zoom_level
+            viewport_height = self.current_height / self.zoom_level
+            
+            # Draw overlay covering visible area
+            left = cam_x - viewport_width / 2
+            right = cam_x + viewport_width / 2
+            bottom = cam_y - viewport_height / 2
+            top = cam_y + viewport_height / 2
+            
+            arcade.draw_lrbt_rectangle_filled(
+                left=left,
+                right=right,
+                bottom=bottom,
+                top=top,
+                color=(r, g, b, a)
+            )
+    
+    def _draw_stockpile_item(self, x: int, y: int, item_type: str, amount: int):
+        """Draw a single item in a stockpile tile."""
+        center_x = (x + 0.5) * TILE_SIZE
+        center_y = (y + 0.5) * TILE_SIZE
+        
+        # Try to load item sprite
+        texture = None
+        if item_type not in self._item_texture_cache:
+            sprite_paths = [
+                f"assets/items/{item_type}.png",
+                f"assets/furniture/{item_type}.png",
+                f"assets/furniture/{item_type}_placed.png",
+            ]
+            
+            for sprite_path in sprite_paths:
+                try:
+                    texture = arcade.load_texture(sprite_path)
+                    self._item_texture_cache[item_type] = texture
+                    break
+                except:
+                    continue
+            
+            if texture is None:
+                self._item_texture_cache[item_type] = None
+        else:
+            texture = self._item_texture_cache[item_type]
+        
+        # Draw sprite or fallback
+        if texture:
+            sprite_size = TILE_SIZE * 0.6
+            arcade.draw_texture_rect(
+                texture,
+                arcade.LRBT(
+                    center_x - sprite_size / 2,
+                    center_x + sprite_size / 2,
+                    center_y - sprite_size / 2,
+                    center_y + sprite_size / 2
+                )
+            )
+        else:
+            # Fallback: colored square
+            if "wood" in item_type:
+                color = (139, 90, 43)
+            elif "scrap" in item_type or "metal" in item_type:
+                color = (120, 120, 140)
+            elif "mineral" in item_type:
+                color = (100, 100, 120)
+            elif "food" in item_type or "meal" in item_type:
+                color = (100, 200, 100)
+            elif "power" in item_type or "cell" in item_type:
+                color = (255, 220, 0)
+            elif "bed" in item_type or "chair" in item_type or "stool" in item_type:
+                color = (180, 140, 100)  # Brown for furniture
+            else:
+                color = (150, 150, 200)
+            
+            square_size = 12
+            arcade.draw_lrbt_rectangle_filled(
+                center_x - square_size / 2,
+                center_x + square_size / 2,
+                center_y - square_size / 2,
+                center_y + square_size / 2,
+                color
+            )
+            arcade.draw_lrbt_rectangle_outline(
+                center_x - square_size / 2,
+                center_x + square_size / 2,
+                center_y - square_size / 2,
+                center_y + square_size / 2,
+                (255, 255, 255), 1
+            )
+        
+        # Draw stack count
+        if amount > 1:
+            text_width = len(str(amount)) * 6 + 4
+            arcade.draw_lrbt_rectangle_filled(
+                center_x + 6, center_x + 6 + text_width,
+                center_y + 4, center_y + 12,
+                (0, 0, 0, 200)
+            )
+            arcade.draw_text(
+                str(amount),
+                center_x + 8,
+                center_y + 8,
+                (255, 255, 255),
+                font_size=10,
+                bold=True,
+                anchor_x="left",
+                anchor_y="center",
+                font_name="Arial"
+            )
+    
+    def _draw_world_items(self):
+        """Draw items on the ground (in stockpiles) with stack quantities."""
+        from items import get_all_world_items
+        
+        world_items = get_all_world_items()
+        
+        # Debug: Print world items on first call
+        if not hasattr(self, '_debug_items_printed'):
+            self._debug_items_printed = True
+            print(f"[Debug] World items count: {len(world_items)}")
+            for coord, items in list(world_items.items())[:3]:  # Show first 3
+                print(f"  {coord}: {len(items)} items - {[i.get('id', 'unknown') for i in items]}")
+        
+        # Cache for loaded item textures
+        if not hasattr(self, '_item_texture_cache'):
+            self._item_texture_cache = {}
+        
+        for (x, y, z), items in world_items.items():
+            if z != self.grid.current_z or not items:
+                continue
+            
+            # Group items by ID to show stack count
+            item_stacks = {}
+            for item in items:
+                item_id = item.get("id", "unknown")
+                if item_id not in item_stacks:
+                    item_stacks[item_id] = 0
+                item_stacks[item_id] += 1
+            
+            # Draw first item type with stack count
+            if item_stacks:
+                first_item_id = list(item_stacks.keys())[0]
+                stack_count = item_stacks[first_item_id]
                 
-                # Check for bed first
+                center_x = (x + 0.5) * TILE_SIZE
+                center_y = (y + 0.5) * TILE_SIZE
+                
+                # Try to load item sprite
+                texture = None
+                if first_item_id not in self._item_texture_cache:
+                    # Try multiple sprite locations
+                    sprite_paths = [
+                        f"assets/items/{first_item_id}.png",
+                        f"assets/furniture/{first_item_id}.png",
+                        f"assets/furniture/{first_item_id}_placed.png",
+                    ]
+                    
+                    for sprite_path in sprite_paths:
+                        try:
+                            texture = arcade.load_texture(sprite_path)
+                            self._item_texture_cache[first_item_id] = texture
+                            break
+                        except:
+                            continue
+                    
+                    # If no sprite found, cache None
+                    if texture is None:
+                        self._item_texture_cache[first_item_id] = None
+                else:
+                    texture = self._item_texture_cache[first_item_id]
+                
+                # Draw sprite or fallback
+                if texture:
+                    # Draw item sprite (scaled to fit tile)
+                    sprite_size = TILE_SIZE * 0.6  # 60% of tile size
+                    arcade.draw_texture_rect(
+                        texture,
+                        arcade.LRBT(
+                            center_x - sprite_size / 2,
+                            center_x + sprite_size / 2,
+                            center_y - sprite_size / 2,
+                            center_y + sprite_size / 2
+                        )
+                    )
+                else:
+                    # Fallback: colored square based on item type
+                    if "wood" in first_item_id:
+                        color = (139, 90, 43)  # Wood brown
+                    elif "scrap" in first_item_id or "metal" in first_item_id:
+                        color = (120, 120, 140)  # Metal gray
+                    elif "mineral" in first_item_id:
+                        color = (100, 100, 120)  # Stone gray
+                    elif "food" in first_item_id or "meal" in first_item_id:
+                        color = (100, 200, 100)  # Green
+                    elif "power" in first_item_id or "cell" in first_item_id:
+                        color = (255, 220, 0)  # Yellow
+                    else:
+                        color = (150, 150, 200)  # Blue-gray for equipment
+                    
+                    # Draw colored square
+                    square_size = 10
+                    arcade.draw_lrbt_rectangle_filled(
+                        center_x - square_size / 2,
+                        center_x + square_size / 2,
+                        center_y - square_size / 2,
+                        center_y + square_size / 2,
+                        color
+                    )
+                    arcade.draw_lrbt_rectangle_outline(
+                        center_x - square_size / 2,
+                        center_x + square_size / 2,
+                        center_y - square_size / 2,
+                        center_y + square_size / 2,
+                        (255, 255, 255), 1
+                    )
+                
+                # Draw stack count if > 1
+                if stack_count > 1:
+                    # Background for text
+                    text_width = len(str(stack_count)) * 6 + 4
+                    arcade.draw_lrbt_rectangle_filled(
+                        center_x + 6, center_x + 6 + text_width,
+                        center_y + 4, center_y + 12,
+                        (0, 0, 0, 200)
+                    )
+                    arcade.draw_text(
+                        str(stack_count),
+                        center_x + 8,
+                        center_y + 8,
+                        (255, 255, 255),
+                        font_size=10,
+                        bold=True,
+                        anchor_x="left",
+                        anchor_y="center",
+                        font_name="Arial"
+                    )
+    
+    def on_update(self, delta_time):
+        """Update game logic."""
+        # Camera movement
+        cam_x, cam_y = self.camera.position
+        
+        if arcade.key.W in self.keys_pressed or arcade.key.UP in self.keys_pressed:
+            cam_y += self.camera_speed
+        if arcade.key.S in self.keys_pressed or arcade.key.DOWN in self.keys_pressed:
+            cam_y -= self.camera_speed
+        if arcade.key.A in self.keys_pressed or arcade.key.LEFT in self.keys_pressed:
+            cam_x -= self.camera_speed
+        if arcade.key.D in self.keys_pressed or arcade.key.RIGHT in self.keys_pressed:
+            cam_x += self.camera_speed
+        
+        # Clamp camera to world bounds
+        max_x = GRID_W * TILE_SIZE - SCREEN_W
+        max_y = GRID_H * TILE_SIZE - SCREEN_H
+        cam_x = max(0, min(cam_x, max_x))
+        cam_y = max(0, min(cam_y, max_y))
+        
+        self.camera.position = (cam_x, cam_y)
+        
+        # Update game logic at current speed (skip if paused)
+        if not self.paused:
+            for _ in range(self.game_speed):
+                self.tick_count += 1
+                self._run_game_tick()
+        
+        # Update animations (trees swaying, particles, etc.) - always runs even when paused
+        if self.grid_renderer:
+            self.grid_renderer.update_animations(delta_time)
+    
+    def _run_game_tick(self):
+        """Run a single game tick - called multiple times per frame based on game_speed."""
+        # Import all game systems
+        from resources import update_resource_nodes, process_auto_haul_jobs
+        from buildings import update_doors, update_windows, process_crafting_jobs, process_supply_jobs
+        from items import process_equipment_haul_jobs, process_auto_equip
+        from recreation import spawn_recreation_jobs
+        from training import spawn_training_jobs
+        from time_system import tick_time
+        from notifications import update_notifications
+        import jobs as jobs_module
+        import zones as zones_module
+        import rooms as rooms_module
+        
+        # Update notifications (always, even when paused)
+        update_notifications()
+        
+        # Game simulation (not paused for now - will add pause later)
+        tick_time()  # Advance game time
+        
+        # Update colonists
+        update_colonists(self.colonists, self.grid, self.tick_count)
+        
+        # Update sprite positions after colonist logic
+        if self.colonist_renderer:
+            self.colonist_renderer.update_positions()
+        
+        # Update animals
+        from animals import update_animals
+        update_animals(self.grid, self.tick_count)
+        
+        # Update resource nodes
+        update_resource_nodes(self.grid)
+        
+        # Update doors and windows
+        update_doors()
+        update_windows()
+        
+        # Process room updates
+        rooms_module.process_dirty_rooms(self.grid)
+        
+        # Update job timers
+        jobs_module.update_job_timers()
+        
+        # Process auto-haul jobs
+        process_auto_haul_jobs(jobs_module, zones_module)
+        
+        # Process supply jobs for construction
+        process_supply_jobs(jobs_module, zones_module)
+        
+        # Process crafting jobs
+        process_crafting_jobs(jobs_module, zones_module)
+        
+        # Throttled systems (every 10 ticks)
+        if self.tick_count % 10 == 0:
+            process_equipment_haul_jobs(jobs_module, zones_module)
+            zones_module.process_stockpile_relocation(jobs_module)
+            zones_module.process_filter_mismatch_relocation(jobs_module)
+        
+        # Throttled systems (every 60 ticks / once per second)
+        if self.tick_count % 60 == 0:
+            process_auto_equip(self.colonists, zones_module, jobs_module)
+            spawn_recreation_jobs(self.colonists, self.grid, self.tick_count)
+            spawn_training_jobs(self.colonists, self.grid, self.tick_count)
+            
+            # Spawn hunt jobs for marked animals
+            from hunting import spawn_hunt_jobs
+            jobs_created = spawn_hunt_jobs(self.colonists)
+            if jobs_created > 0:
+                print(f"[Main] Created {jobs_created} hunt jobs")
+        
+        # Update wanderers and traders
+        if self.tick_count % 60 == 0:
+            from wanderers import spawn_wanderer_check, update_wanderers, spawn_fixer_check, update_fixers, process_trade_jobs, get_wanderers, get_fixers
+            from resources import get_colonist_spawn_location
+            from time_system import get_game_time
+            
+            colony_center = get_colonist_spawn_location()
+            current_day = get_game_time().day
+            
+            spawn_wanderer_check(current_day, colony_center, self.grid)
+            update_wanderers(self.grid, colony_center, self.tick_count)
+            spawn_fixer_check(current_day, colony_center, self.grid)
+            update_fixers(self.grid, colony_center, self.tick_count)
+            process_trade_jobs(jobs_module, zones_module)
+            
+            # Sync wanderers/fixers with renderer (add new ones, remove departed)
+            self._sync_wanderers_with_renderer()
+        
+        # Update audio
+        if self.tick_count % 60 == 0:
+            from audio import get_audio_manager
+            audio_manager = get_audio_manager()
+            audio_manager.update()
+    
+    def on_key_press(self, key, modifiers):
+        """Handle key press."""
+        self.keys_pressed.add(key)
+        
+        # Pause toggle with SPACE
+        if key == arcade.key.SPACE:
+            self.paused = not self.paused
+            if self.paused:
+                print("[Game] PAUSED")
+            else:
+                print("[Game] RESUMED")
+            return
+        
+        # Game speed controls (1-5 keys)
+        if key == arcade.key.KEY_1:
+            self.game_speed = 1
+            print(f"[Speed] Game speed: 1x")
+        elif key == arcade.key.KEY_2:
+            self.game_speed = 2
+            print(f"[Speed] Game speed: 2x")
+        elif key == arcade.key.KEY_3:
+            self.game_speed = 3
+            print(f"[Speed] Game speed: 3x")
+        elif key == arcade.key.KEY_4:
+            self.game_speed = 4
+            print(f"[Speed] Game speed: 4x")
+        elif key == arcade.key.KEY_5:
+            self.game_speed = 5
+            print(f"[Speed] Game speed: 5x")
+        
+        # Z-level controls
+        if key == arcade.key.PAGEUP:
+            if self.grid.current_z < self.grid.depth - 1:
+                self.grid.current_z += 1
+                self.grid_renderer.build_tile_sprites(z_level=self.grid.current_z)
+                print(f"[Z-Level] Moved up to Z={self.grid.current_z}")
+        elif key == arcade.key.PAGEDOWN:
+            if self.grid.current_z > 0:
+                self.grid.current_z -= 1
+                self.grid_renderer.build_tile_sprites(z_level=self.grid.current_z)
+                print(f"[Z-Level] Moved down to Z={self.grid.current_z}")
+        
+        if key == arcade.key.ESCAPE:
+            arcade.close_window()
+        
+        # Debug keys
+        elif key == arcade.key.F4:
+            # Debug: Toggle free build mode (no material requirements)
+            from buildings import toggle_free_build_mode
+            new_state = toggle_free_build_mode()
+            status = "ENABLED" if new_state else "DISABLED"
+            print(f"[Debug] FREE BUILD MODE: {status}")
+            from notifications import add_notification, NotificationType
+            add_notification(NotificationType.INFO, 
+                           f"FREE BUILD MODE: {status}",
+                           "No material requirements" if new_state else "Normal building rules",
+                           duration=180)
+        
+        elif key == arcade.key.F7:
+            # Debug: Spawn wanderers (refugees) and fixer (trader)
+            from wanderers import _pick_group_spawn_location, _create_wanderer_at, _wanderers, _create_fixer, _fixers
+            from resources import get_colonist_spawn_location
+            from notifications import add_notification, NotificationType
+            import random
+            
+            colony_center = get_colonist_spawn_location()
+            
+            # Pick ONE spawn location for the group
+            group_spawn = _pick_group_spawn_location(self.grid)
+            if group_spawn:
+                # Spawn 1-3 wanderers around that point
+                num_wanderers = random.randint(1, 3)
+                spawned_names = []
+                for i in range(num_wanderers):
+                    offset_x = (i % 3) - 1
+                    offset_y = (i // 3) - 1
+                    spawn_x = group_spawn[0] + offset_x
+                    spawn_y = group_spawn[1] + offset_y
+                    if not self.grid.is_walkable(spawn_x, spawn_y, 0):
+                        spawn_x, spawn_y = group_spawn
+                    
+                    wanderer = _create_wanderer_at(spawn_x, spawn_y, colony_center, self.grid)
+                    if wanderer:
+                        _wanderers.append(wanderer)
+                        spawned_names.append(wanderer["name"])
+                
+                if spawned_names:
+                    print(f"[Debug] Spawned {len(spawned_names)} wanderer(s): {', '.join(spawned_names)}")
+                    add_notification(NotificationType.ARRIVAL,
+                                   f"// {len(spawned_names)} SIGNAL(S) DETECTED //",
+                                   ", ".join(spawned_names),
+                                   duration=480,
+                                   click_location=group_spawn)
+            
+            # Also spawn a fixer if none exists
+            if len(_fixers) == 0:
+                fixer = _create_fixer(colony_center, self.grid)
+                if fixer:
+                    _fixers.append(fixer)
+                    print(f"[Debug] Spawned fixer: {fixer['name']} from {fixer['origin'].name}")
+                    fixer_loc = (fixer["x"], fixer["y"])
+                    add_notification(NotificationType.INFO,
+                                   "// FIXER INBOUND //",
+                                   f"{fixer['name']} wants to trade",
+                                   duration=480,
+                                   click_location=fixer_loc)
+            else:
+                print("[Debug] Fixer already present, skipping")
+        
+        elif key == arcade.key.F8:
+            # Debug: Print construction site status
+            from buildings import get_all_construction_sites, get_missing_materials
+            import zones as zones_module
+            sites = get_all_construction_sites()
+            print(f"[Debug] Construction sites: {len(sites)}")
+            for (x, y, z), site in sites.items():
+                missing = get_missing_materials(x, y, z)
+                print(f"  ({x},{y},z={z}) type={site.get('type')} needed={site.get('materials_needed')} delivered={site.get('materials_delivered')} missing={missing}")
+            # Also print stockpile contents
+            print("[Debug] Stockpile contents:")
+            for res_type in ["wood", "scrap", "metal", "mineral", "power"]:
+                total = zones_module.get_total_stored(res_type)
+                print(f"  {res_type}: {total}")
+        
+        elif key == arcade.key.F9:
+            # Debug: Equip all colonists with random equipment (ensuring all items used at least once)
+            import random
+            from items import create_item_instance, get_items_for_slot
+            from notifications import add_notification, NotificationType
+            
+            # Get all available items for each slot
+            available_items = {
+                "head": [item.id for item in get_items_for_slot("head")],
+                "body": [item.id for item in get_items_for_slot("body")],
+                "hands": [item.id for item in get_items_for_slot("hands")],
+                "feet": [item.id for item in get_items_for_slot("feet")],
+                "weapon": [item.id for item in get_items_for_slot("weapon")],
+                "implant": [item.id for item in get_items_for_slot("implant")],
+                "charm": [item.id for item in get_items_for_slot("charm")]
+            }
+            
+            # Create pools for each slot ensuring each item appears at least once
+            alive_colonists = [c for c in self.colonists if not c.is_dead]
+            equipment_pools = {}
+            
+            for slot, items in available_items.items():
+                if not items:
+                    equipment_pools[slot] = []
+                    continue
+                
+                # Start with one of each item
+                pool = items.copy()
+                
+                # Fill remaining slots with random items
+                while len(pool) < len(alive_colonists):
+                    pool.append(random.choice(items))
+                
+                # Shuffle the pool
+                random.shuffle(pool)
+                equipment_pools[slot] = pool
+            
+            # Equip colonists
+            equipped_count = 0
+            for idx, colonist in enumerate(alive_colonists):
+                for slot, pool in equipment_pools.items():
+                    if pool and idx < len(pool):
+                        item_id = pool[idx]
+                        colonist.equipment[slot] = create_item_instance(item_id)
+                
+                equipped_count += 1
+                
+                # Reload equipment sprites if colonist has arcade sprite
+                if hasattr(colonist, '_arcade_sprite') and colonist._arcade_sprite:
+                    colonist._arcade_sprite.update_equipment()
+            
+            add_notification(NotificationType.INFO,
+                           f"Equipped {equipped_count} colonists with random equipment",
+                           duration=180)
+            print(f"[Debug] Equipped {equipped_count} colonists with randomized equipment (all items used at least once)")
+        
+        elif key == arcade.key.F11:
+            # Debug: Spawn a raider
+            from wanderers import spawn_raider
+            from notifications import add_notification, NotificationType
+            raider = spawn_raider(self.grid)
+            if raider:
+                self.colonists.append(raider)
+                self.colonist_renderer.add_colonist(raider)  # Add to renderer
+                add_notification(NotificationType.FIGHT_START, f"Raider: {raider.name}", 
+                               duration=180, click_location=(raider.x, raider.y))
+                print(f"[Debug] Spawned raider: {raider.name} at ({raider.x}, {raider.y})")
+        
+        elif key == arcade.key.F12:
+            # Debug: Toggle BERSERK MODE - everyone fights everyone
+            from notifications import add_notification, NotificationType
+            alive = [c for c in self.colonists if not c.is_dead]
+            if alive:
+                # Check if already berserk (toggle off)
+                if getattr(alive[0], '_debug_berserk', False):
+                    # Turn off berserk
+                    for c in alive:
+                        c._debug_berserk = False
+                        c.is_hostile = False
+                        c.in_combat = False
+                        c.combat_target = None
+                    print("[Debug] BERSERK MODE OFF - peace restored")
+                    add_notification(NotificationType.INFO,
+                                   "// PEACE PROTOCOL //",
+                                   "Combat systems disengaged",
+                                   duration=180)
+                else:
+                    # UNLEASH HELL
+                    for c in alive:
+                        c._debug_berserk = True
+                        c.is_hostile = True
+                        c.state = "idle"
+                        c.current_job = None
+                    print(f"[Debug] BERSERK MODE ON - {len(alive)} colonists going wild!")
+                    add_notification(NotificationType.FIGHT_START,
+                                   "// BERSERK PROTOCOL //",
+                                   f"All {len(alive)} colonists hostile!",
+                                   duration=300)
+    
+    def on_key_release(self, key, modifiers):
+        """Handle key release."""
+        self.keys_pressed.discard(key)
+    
+    def on_resize(self, width: int, height: int):
+        """Handle window resize - update all UI components."""
+        super().on_resize(width, height)
+        
+        # Update tracked dimensions
+        self.current_width = width
+        self.current_height = height
+        
+        print(f"[Window] Resized to {width}x{height}")
+        print(f"[Window] Window dimensions: {self.width}x{self.height}")
+        print(f"[Window] Updating UI components to new dimensions...")
+        
+        # Camera2D automatically handles viewport on resize in Arcade 3.0
+        # Just need to update UI component dimensions
+        
+        # Update UI components with new dimensions
+        if hasattr(self, 'ui'):
+            self.ui.on_resize(width, height)
+        if hasattr(self, 'left_sidebar'):
+            self.left_sidebar.on_resize(width, height)
+        # Colonist detail panel removed (using center popup)
+        # Animal popup doesn't need resize (centered)
+        if hasattr(self, 'notification_panel'):
+            self.notification_panel.on_resize(width, height)
+    
+    def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
+        """Handle mouse wheel for zoom and UI scrolling."""
+        # Check if animal popup wants to handle scroll
+        from ui_arcade_animal_popup import get_animal_popup
+        animal_popup = get_animal_popup()
+        if animal_popup.handle_scroll(x, y, scroll_y):
+            return  # Popup consumed the scroll
+        
+        # Check if colonist popup wants to handle scroll
+        from ui_arcade_colonist_popup import get_colonist_popup
+        colonist_popup = get_colonist_popup()
+        if colonist_popup.handle_scroll(x, y, scroll_y):
+            return  # Popup consumed the scroll
+        
+        # Check if bed assignment panel wants to handle scroll
+        from ui_arcade_bed import get_bed_assignment_panel
+        bed_panel = get_bed_assignment_panel()
+        if bed_panel.handle_scroll(x, y, scroll_y, self.colonists):
+            return  # Panel consumed the scroll
+        
+        # Check if workstation panel wants to handle scroll
+        from ui_arcade_workstation import get_workstation_panel
+        ws_panel = get_workstation_panel()
+        if ws_panel.visible:
+            if (ws_panel.panel_x <= x <= ws_panel.panel_x + ws_panel.panel_width and
+                ws_panel.panel_y <= y <= ws_panel.panel_y + ws_panel.panel_height):
+                return  # Don't zoom when over workstation panel
+        
+        # Check if left sidebar wants to handle scroll (for animal list)
+        if (self.left_sidebar.x <= x <= self.left_sidebar.x + self.left_sidebar.width and
+            self.left_sidebar.y <= y <= self.left_sidebar.y + self.left_sidebar.height):
+            # Scroll animal list if on ANIMALS tab
+            if self.left_sidebar.current_tab == 1:
+                scroll_amount = int(scroll_y * 30)  # 30 pixels per scroll tick
+                self.left_sidebar.animal_scroll = max(0, self.left_sidebar.animal_scroll - scroll_amount)
+                return  # Sidebar consumed the scroll
+            # Scroll colonist list if on COLONISTS tab
+            elif self.left_sidebar.current_tab == 0:
+                scroll_amount = int(scroll_y * 30)
+                self.left_sidebar.colonist_scroll = max(0, self.left_sidebar.colonist_scroll - scroll_amount)
+                return
+        
+        # Simple zoom: just change zoom level, don't move camera
+        # This is the most basic zoom that won't cause drift
+        if scroll_y > 0:
+            self.zoom_level = min(self.zoom_level * 1.1, self.max_zoom)
+        else:
+            self.zoom_level = max(self.zoom_level * 0.9, self.min_zoom)
+        
+        self.camera.zoom = self.zoom_level
+    
+    def on_mouse_motion(self, x, y, dx, dy):
+        """Handle mouse movement."""
+        self.mouse_x = x
+        self.mouse_y = y
+        
+        # Update action bar tooltip hover
+        self.ui.action_bar.update_hover(x, y)
+        
+        # Update left sidebar hover state
+        self.left_sidebar.update_hover(x, y, self.colonists)
+        
+        # Update tile info panel with hovered tile
+        if self.tile_info_panel and self.hovered_tile:
+            tile_x, tile_y, tile_z = self.hovered_tile
+            self.tile_info_panel.set_hover_tile(tile_x, tile_y, tile_z)
+        
+        # Convert screen coords to world coords
+        # Camera2D viewport is CENTERED on camera.position
+        cam_x, cam_y = self.camera.position
+        
+        # Screen coords relative to center, then account for zoom and camera
+        # Mouse (0,0) is bottom-left of screen, camera position is center of viewport
+        # Use self.width/height directly for accurate mouse coords (not cached values)
+        screen_center_x = self.width / 2
+        screen_center_y = self.height / 2
+        
+        # Offset from screen center, scaled by zoom, plus camera position
+        world_x = ((x - screen_center_x) / self.zoom_level) + cam_x
+        world_y = ((y - screen_center_y) / self.zoom_level) + cam_y
+        
+        # Convert world pixels to tile coordinates
+        tile_x = int(world_x // TILE_SIZE)
+        tile_y = int(world_y // TILE_SIZE)
+        
+        # Check if tile is in bounds
+        if 0 <= tile_x < GRID_W and 0 <= tile_y < GRID_H:
+            self.hovered_tile = (tile_x, tile_y, 0)
+            
+            # Update drag end position if dragging
+            if self.drag_start and self.drag_mode:
+                self.drag_end = (tile_x, tile_y)
+        else:
+            self.hovered_tile = None
+    
+    def on_mouse_press(self, x, y, button, modifiers):
+        """Handle mouse clicks - wire to existing game functions."""
+        if button == arcade.MOUSE_BUTTON_LEFT:
+            # Check notification panel first (click-to-snap)
+            click_location = self.notification_panel.handle_click(x, y)
+            if click_location:
+                # Snap camera to notification location
+                tile_x, tile_y = click_location
+                self.snap_camera_to_tile(tile_x, tile_y, self.grid.current_z)
+                return
+            
+            # Check stockpile filter panel
+            if self.stockpile_panel.handle_click(x, y):
+                return
+            
+            # Check colonist popup (highest priority)
+            from ui_arcade_colonist_popup import get_colonist_popup
+            colonist_popup = get_colonist_popup()
+            if colonist_popup.visible and colonist_popup.handle_click(x, y):
+                return
+            
+            # Check visitor panel
+            from ui_arcade_visitor import get_visitor_panel
+            visitor_panel = get_visitor_panel()
+            if visitor_panel.visible and visitor_panel.handle_click(x, y):
+                return
+            
+            # Check trader panel
+            from ui_arcade_trader import get_trader_panel
+            trader_panel = get_trader_panel()
+            if trader_panel.visible and trader_panel.handle_click(x, y):
+                return
+            
+            # Check native Arcade bed assignment panel
+            from ui_arcade_bed import get_bed_assignment_panel
+            bed_panel = get_bed_assignment_panel()
+            if bed_panel.visible and bed_panel.handle_click(x, y, self.colonists):
+                return
+            
+            # Check native Arcade workstation panel
+            from ui_arcade_workstation import get_workstation_panel
+            ws_panel = get_workstation_panel()
+            if ws_panel.visible and ws_panel.handle_click(x, y):
+                return
+            
+            # UI elements use screen coordinates (not world coordinates)
+            # Check animal popup (highest priority)
+            from ui_arcade_animal_popup import get_animal_popup
+            animal_popup = get_animal_popup()
+            if animal_popup.visible and animal_popup.handle_click(x, y):
+                return
+            
+            # Colonist detail panel removed (using center popup)
+            
+            # Check if click is on left sidebar
+            if self.left_sidebar.handle_click(x, y, self.colonists):
+                return
+            
+            # Check if click is on UI
+            if self.ui.handle_click(x, y):
+                return
+            
+            # Check if clicking on bed (no tool selected)
+            if self.ui.action_bar.active_tool is None:
+                # Convert screen to world coordinates
+                world_x, world_y = self.camera.position
+                viewport_width = self.current_width / self.zoom_level
+                viewport_height = self.current_height / self.zoom_level
+                view_left = world_x - viewport_width / 2
+                view_bottom = world_y - viewport_height / 2
+                
+                tile_x = int((view_left + x / self.zoom_level) // TILE_SIZE)
+                tile_y = int((view_bottom + y / self.zoom_level) // TILE_SIZE)
+                
+                tile = self.grid.get_tile(tile_x, tile_y, self.grid.current_z)
+                
+                # Check for bed click
                 if tile == "crash_bed":
                     from beds import get_bed_at
-                    from ui import get_bed_assignment_panel
-                    bed = get_bed_at(gx, gy, current_z)
-                    if bed is not None:
-                        bed_panel = get_bed_assignment_panel()
-                        bed_panel.open(gx, gy, current_z, mx, my)
-                elif tile and tile.startswith("finished_"):
-                    ws = buildings_module.get_workstation(gx, gy, current_z)
-                    if ws is not None:
-                        # Open workstation panel
-                        from ui_workstation_new import get_workstation_order_panel
-                        ws_panel = get_workstation_order_panel()
-                        ws_panel.open(gx, gy, current_z, mx, my)
-                    else:
-                        # Check if clicking on stockpile zone for filter UI
-                        from ui import get_stockpile_filter_panel
-                        zone_id = zones_module.get_zone_id_at(gx, gy, current_z)
-                        if zone_id is not None:
-                            panel = get_stockpile_filter_panel()
-                            panel.open(zone_id, mx, my)
+                    bed = get_bed_at(tile_x, tile_y, self.grid.current_z)
+                    if bed:
+                        bed_panel.open(tile_x, tile_y, self.grid.current_z, x, y)
+                        print(f"[Bed] Opened assignment panel for bed at ({tile_x}, {tile_y})")
+                        return
+            
+            # Check if clicking on stockpile zone (no tool selected)
+            if self.ui.action_bar.active_tool is None:
+                import zones as zones_module
+                # Convert screen to world coordinates
+                world_x, world_y = self.camera.position
+                viewport_width = self.current_width / self.zoom_level
+                viewport_height = self.current_height / self.zoom_level
+                view_left = world_x - viewport_width / 2
+                view_bottom = world_y - viewport_height / 2
+                
+                tile_x = int((view_left + x / self.zoom_level) // TILE_SIZE)
+                tile_y = int((view_bottom + y / self.zoom_level) // TILE_SIZE)
+                
+                zone_id = zones_module.get_zone_id_at(tile_x, tile_y, self.grid.current_z)
+                if zone_id is not None:
+                    # Open stockpile filter UI (Arcade native)
+                    from ui_arcade_stockpile import get_stockpile_panel
+                    panel = get_stockpile_panel()
+                    panel.open(zone_id, x, y)
+                    print(f"[Stockpile] Opened filter config for zone {zone_id}")
+                    return  # UI consumed the click
+            
+            # Check if we have an active tool (BUILD/ZONE mode)
+            active_tool = self.ui.action_bar.active_tool
+            
+            if active_tool and self.hovered_tile:
+                tile_x, tile_y, tile_z = self.hovered_tile
+                self.drag_start = (tile_x, tile_y)
+                self.drag_mode = active_tool
+                
+                # ALWAYS set drag_end immediately so single clicks work
+                # User can still drag for walls/floors/zones, but single clicks place immediately
+                self.drag_end = (tile_x, tile_y)
+                
+                from buildings import BUILDING_TYPES
+                is_workstation = active_tool in BUILDING_TYPES and BUILDING_TYPES[active_tool].get("workstation")
+                is_furniture = active_tool.startswith("furn_")
+                is_single_tile = active_tool in ("stage_stairs", "fire_escape", "bridge", "door", "window") or is_workstation or is_furniture
+                
+                if is_single_tile:
+                    print(f"[Build] Placing {active_tool} at ({tile_x}, {tile_y})")
                 else:
-                    # Check if clicking on stockpile zone for filter UI
-                    from ui import get_stockpile_filter_panel
-                    zone_id = zones_module.get_zone_id_at(gx, gy, current_z)
-                    if zone_id is not None:
-                        panel = get_stockpile_filter_panel()
-                        panel.open(zone_id, mx, my)
-
-
-def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
-    """Handle mouse button release."""
-    global _drag_start, _drag_mode
+                    print(f"[Build] Started {active_tool} at ({tile_x}, {tile_y}) - drag to extend")
+                return
+            
+            # Default: select tile or colonist
+            if self.hovered_tile:
+                self.selected_tile = self.hovered_tile
+                print(f"[Mouse] Selected tile: {self.selected_tile}")
+                
+                tile_x, tile_y, tile_z = self.hovered_tile
+                
+                # Check if clicked on a colonist first
+                clicked_colonist = None
+                for colonist in self.colonists:
+                    if colonist.x == tile_x and colonist.y == tile_y and not colonist.is_dead:
+                        clicked_colonist = colonist
+                        break
+                
+                if clicked_colonist:
+                    self.selected_colonist = clicked_colonist
+                    print(f"[Mouse] Selected colonist: {clicked_colonist.name}")
+                    # Open colonist popup
+                    self.open_colonist_detail(clicked_colonist)
+                else:
+                    self.selected_colonist = None
+                    
+                    # Check if clicking on a wanderer/visitor (open visitor panel)
+                    from wanderers import get_wanderer_at, get_fixer_at
+                    wanderer = get_wanderer_at(tile_x, tile_y, tile_z)
+                    if wanderer:
+                        from ui_arcade_visitor import get_visitor_panel
+                        visitor_panel = get_visitor_panel()
+                        
+                        # Set up callbacks
+                        def accept_visitor(w):
+                            from wanderers import recruit_wanderer
+                            from resources import get_colonist_spawn_location
+                            colonist = recruit_wanderer(w)
+                            if colonist:
+                                self.colonists.append(colonist)
+                                # Colonist already in renderer from wanderer tracking
+                                # Give them a path to walk to colony center
+                                colony_center = get_colonist_spawn_location()
+                                colonist.current_path = colonist._calculate_path(
+                                    self.grid, colony_center[0], colony_center[1], 0, self.tick_count
+                                )
+                                colonist.state = "idle"  # Let them take jobs or wander normally
+                                print(f"[Visitor] Accepted {colonist.name}! Pathfinding to colony center at {colony_center}")
+                        
+                        def deny_visitor(w):
+                            from wanderers import reject_wanderer
+                            reject_wanderer(w)
+                            print(f"[Visitor] Rejected {w['name']}")
+                        
+                        visitor_panel.on_accept = accept_visitor
+                        visitor_panel.on_deny = deny_visitor
+                        visitor_panel.open(wanderer)
+                        print(f"[Visitor] Opened panel for {wanderer['name']}")
+                        return
+                    
+                    # Check if clicking on a fixer/trader
+                    fixer = get_fixer_at(tile_x, tile_y, tile_z)
+                    if fixer:
+                        from ui_arcade_trader import get_trader_panel
+                        trader_panel = get_trader_panel()
+                        trader_panel.open(fixer)
+                        print(f"[Trader] Opened panel for {fixer['name']}")
+                        return
+                    
+                    # Check if clicking on a workstation (open recipe panel)
+                    tile = self.grid.get_tile(tile_x, tile_y, tile_z)
+                    if tile and tile.startswith("finished_"):
+                        import buildings
+                        ws = buildings.get_workstation(tile_x, tile_y, tile_z)
+                        if ws is not None:
+                            # Open native Arcade workstation panel
+                            from ui_arcade_workstation import get_workstation_panel
+                            ws_panel = get_workstation_panel()
+                            ws_panel.open(tile_x, tile_y, tile_z)
+                            print(f"[Workstation] Opened panel for {tile} at ({tile_x}, {tile_y}, {tile_z})")
+                        else:
+                            print(f"[Workstation] No workstation data found at ({tile_x}, {tile_y}, {tile_z}), tile: {tile}")
+        
+        elif button == arcade.MOUSE_BUTTON_RIGHT:
+            # Right click - cancel mode and drag
+            self.drag_start = None
+            self.drag_mode = None
+            if self.ui.action_bar.active_mode:
+                self.ui.action_bar.active_mode = None
+                self.ui.action_bar.active_tool = None
+                self.ui.action_bar.submenu_visible = False
+                print(f"[Mouse] Cancelled mode")
+            else:
+                print(f"[Mouse] Right click at tile: {self.hovered_tile}")
     
-    ui = get_construction_ui()
-    
-    if event.button == 1:  # left release
-        if _drag_start is not None:
-            mx, my = pygame.mouse.get_pos()
-            # Convert screen coordinates to world tile coordinates
-            gx, gy = grid.screen_to_world(mx, my)
-            gx = max(0, min(GRID_W - 1, gx))
-            gy = max(0, min(GRID_H - 1, gy))
-            current_z = grid.current_z
+    def on_mouse_release(self, x, y, button, modifiers):
+        """Handle mouse release - complete drag and call existing place_* functions."""
+        if button == arcade.MOUSE_BUTTON_LEFT and self.drag_start and self.drag_mode:
+            if not self.drag_end:
+                self.drag_start = None
+                self.drag_end = None
+                self.drag_mode = None
+                return
             
-            if _drag_mode in ("wall", "wall_advanced", "door", "bar_door", "window", "scrap_bar_counter"):
-                # Get all tiles in the line (structures are 1-tile wide)
-                tiles = get_drag_line(_drag_start, (gx, gy))
-                
-                # Place structures on all tiles in line
-                structures_placed = 0
-                for tx, ty in tiles:
-                    if _drag_mode == "wall":
-                        if place_wall(grid, tx, ty, current_z):
-                            structures_placed += 1
-                    elif _drag_mode == "wall_advanced":
-                        if place_wall_advanced(grid, tx, ty, current_z):
-                            structures_placed += 1
-                    elif _drag_mode == "door":
-                        if place_door(grid, tx, ty, current_z):
-                            structures_placed += 1
-                    elif _drag_mode == "bar_door":
-                        if place_bar_door(grid, tx, ty, current_z):
-                            structures_placed += 1
-                    elif _drag_mode == "window":
-                        if place_window(grid, tx, ty, current_z):
-                            structures_placed += 1
-                    elif _drag_mode == "scrap_bar_counter":
-                        if place_scrap_bar_counter(grid, tx, ty, current_z):
-                            structures_placed += 1
-                
-                if structures_placed > 0:
-                    name = {"wall": "wall", "wall_advanced": "reinforced wall", "door": "door", "bar_door": "bar door", "window": "window", "scrap_bar_counter": "bar counter"}[_drag_mode]
-                    z_info = f" on z={current_z}" if current_z > 0 else ""
-                    print(f"Designated {structures_placed} {name}(s) for construction{z_info}")
+            # Get drag end position
+            end_x, end_y = self.drag_end
+            start_x, start_y = self.drag_start
+            end_z = self.grid.current_z
             
-            elif _drag_mode == "floor":
-                # Get all tiles in rectangle
-                tiles = get_drag_rect(_drag_start, (gx, gy))
-                
-                # Place floors on all empty tiles in rectangle
-                floors_placed = 0
-                for tx, ty in tiles:
-                    if place_floor(grid, tx, ty, current_z):
-                        floors_placed += 1
-                
-                if floors_placed > 0:
-                    z_info = f" on z={current_z}" if current_z > 0 else ""
-                    print(f"Designated {floors_placed} floor(s) for construction{z_info}")
+            # Import existing game functions
+            from buildings import place_wall, place_floor, place_door
+            from zones import create_stockpile_zone
+            from rooms import place_roof_area
+            from resources import create_gathering_job_for_node
+            import jobs as jobs_module
             
-            elif _drag_mode == "stage":
-                # Get all tiles in rectangle
-                tiles = get_drag_rect(_drag_start, (gx, gy))
-                
-                # Place stage tiles on all empty tiles in rectangle
-                stages_placed = 0
-                for tx, ty in tiles:
-                    if place_stage(grid, tx, ty, current_z):
-                        stages_placed += 1
-                
-                if stages_placed > 0:
-                    z_info = f" on z={current_z}" if current_z > 0 else ""
-                    print(f"Designated {stages_placed} stage tile(s) for construction{z_info}")
+            current_z = self.grid.current_z
             
-            elif _drag_mode == "roof":
-                # Place roof over rectangular area - requires 4 corner walls
-                start_x, start_y = _drag_start
-                end_x, end_y = gx, gy
-                
-                try:
-                    from rooms import place_roof_area, can_place_roof_area
-                    can_place, reason = can_place_roof_area(grid, start_x, start_y, end_x, end_y, current_z)
-                    if can_place:
-                        if place_roof_area(grid, start_x, start_y, end_x, end_y, current_z):
-                            pass  # Success message printed by place_roof_area
-                    else:
-                        print(f"[Roof] Cannot place roof: {reason}")
-                except Exception as e:
-                    import traceback
-                    print(f"[Roof] ERROR: {e}")
-                    traceback.print_exc()
-            
-            elif _drag_mode == "stockpile":
-                # Get all tiles in rectangle
-                tiles = get_drag_rect(_drag_start, (gx, gy))
-                
-                # create_stockpile_zone handles validation internally based on Z-level
-                # It will automatically trim invalid tiles
+            # Handle different drag modes
+            if self.drag_mode == "stockpile":
+                # Stockpile zone - rectangle drag
+                tiles = self._get_drag_rect((start_x, start_y), (end_x, end_y))
                 tiles_3d = [(tx, ty, current_z) for tx, ty in tiles]
-                zone_id = create_stockpile_zone(tiles_3d, grid, z=current_z)
+                zone_id = create_stockpile_zone(tiles_3d, self.grid, z=current_z)
                 if zone_id > 0:
-                    zone_info = zones_module.get_zone_info(zone_id)
-                    tile_count = zone_info["tile_count"] if zone_info else len(tiles)
-                    z_info = f" on z={current_z}" if current_z > 0 else ""
-                    print(f"Created stockpile zone with {tile_count} tile(s){z_info}")
+                    print(f"[Zone] Created stockpile zone with {len(tiles)} tile(s)")
+                else:
+                    print(f"[Zone] Failed to create stockpile - no valid tiles")
             
-            elif _drag_mode and _drag_mode.startswith("room_"):
-                # Room designation - create room
-                import room_system
-                
-                # Extract room type from drag mode
-                room_type_map = {
-                    "room_bedroom": "Bedroom",
-                    "room_kitchen": "Kitchen",
-                    "room_workshop": "Workshop",
-                    "room_barracks": "Barracks",
-                    "room_prison": "Prison",
-                    "room_hospital": "Hospital",
-                    "room_social_venue": "Social Venue",
-                    "room_dining_hall": "Dining Hall",
-                }
-                room_type = room_type_map.get(_drag_mode)
-                
-                if room_type:
-                    # Get all tiles in rectangle
-                    tiles = get_drag_rect(_drag_start, (gx, gy))
-                    
-                    # Attempt to create room
-                    success, room_id, errors = room_system.create_room(grid, tiles, current_z, room_type)
-                    
-                    if success:
-                        room_data = room_system.get_room_data(room_id)
-                        quality = room_data.get("quality", 0)
-                        z_info = f" on z={current_z}" if current_z > 0 else ""
-                        print(f"[Room] Created {room_type} (ID {room_id}) with {len(tiles)} tiles, quality {quality}{z_info}")
-                    else:
-                        # Show validation errors
-                        print(f"[Room] Cannot create {room_type}:")
-                        for error in errors:
-                            print(f"  - {error}")
+            elif self.drag_mode == "roof":
+                # Roof area - rectangle drag
+                from rooms import can_place_roof_area
+                can_place, reason = can_place_roof_area(self.grid, start_x, start_y, end_x, end_y, current_z)
+                if can_place:
+                    if place_roof_area(self.grid, start_x, start_y, end_x, end_y, current_z):
+                        print(f"[Zone] Placed roof area")
+                else:
+                    print(f"[Zone] Cannot place roof: {reason}")
             
-            elif _drag_mode == "harvest":
-                # Combined harvest + haul tool
-                # Get all tiles in rectangle
-                tiles = get_drag_rect(_drag_start, (gx, gy))
-                
-                # Create gathering jobs for all resource nodes in selection
-                # Also add designations for persistent highlighting
+            elif self.drag_mode == "harvest":
+                # Harvest mode - rectangle drag for resource nodes
+                tiles = self._get_drag_rect((start_x, start_y), (end_x, end_y))
                 jobs_created = 0
-                streets_designated = 0
-                items_marked = 0
-                resource_items = get_all_resource_items()
                 
                 for tx, ty in tiles:
-                    tile = grid.get_tile(tx, ty, current_z)
-                    # Harvest resource nodes (only on ground level)
+                    tile = self.grid.get_tile(tx, ty, current_z)
+                    # Only harvest resource nodes on ground level
                     if current_z == 0 and tile == "resource_node":
-                        if create_gathering_job_for_node(jobs_module, grid, tx, ty):
+                        if create_gathering_job_for_node(jobs_module, self.grid, tx, ty):
                             jobs_created += 1
-                            # Add designation for persistent highlighting
                             jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
-                    # Harvest streets (converts to scorched, yields mineral)
-                    elif current_z == 0 and tile in ("street", "street_cracked", "street_scar", "street_ripped"):
-                        if resources_module.designate_street_for_harvest(grid, tx, ty, jobs_module):
-                            streets_designated += 1
-                            jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
-                    # Harvest sidewalks (converts to scorched, yields mineral)
-                    elif current_z == 0 and tile == "sidewalk":
-                        if resources_module.designate_sidewalk_for_harvest(grid, tx, ty, jobs_module):
-                            streets_designated += 1  # Count with streets
-                            jobs_module.add_designation(tx, ty, current_z, "harvest", "harvest")
-                    # Also mark any loose items for hauling (on current Z level)
-                    if (tx, ty, current_z) in resource_items:
-                        if mark_item_for_hauling(tx, ty, current_z):
-                            items_marked += 1
-                            # Add designation for persistent highlighting
-                            jobs_module.add_designation(tx, ty, current_z, "haul", "haul")
                 
-                if jobs_created > 0 or streets_designated > 0 or items_marked > 0:
-                    parts = []
-                    if jobs_created > 0:
-                        parts.append(f"{jobs_created} resource(s) for harvesting")
-                    if streets_designated > 0:
-                        parts.append(f"{streets_designated} street(s) for mining")
-                    if items_marked > 0:
-                        parts.append(f"{items_marked} item(s) for hauling")
-                    print(f"Designated {' and '.join(parts)}")
+                if jobs_created > 0:
+                    print(f"[Harvest] Designated {jobs_created} resource(s) for harvesting")
             
-            elif _drag_mode == "allow":
-                # Allow tool - convert roof tiles to walkable/buildable roof_access
-                # Works on any Z > 0
-                tiles = get_drag_rect(_drag_start, (gx, gy))
-                
-                allowed_count = 0
-                disallowed_count = 0
-                
-                for tx, ty in tiles:
-                    current_tile = grid.get_tile(tx, ty, z=current_z)
-                    if current_tile == "roof":
-                        # Convert roof to roof_access (walkable/buildable)
-                        grid.set_tile(tx, ty, "roof_access", z=current_z)
-                        allowed_count += 1
-                    elif current_tile == "roof_access":
-                        # Convert back to roof (non-walkable)
-                        grid.set_tile(tx, ty, "roof", z=current_z)
-                        disallowed_count += 1
-                
-                if allowed_count > 0 or disallowed_count > 0:
-                    parts = []
-                    if allowed_count > 0:
-                        parts.append(f"allowed {allowed_count} tile(s)")
-                    if disallowed_count > 0:
-                        parts.append(f"disallowed {disallowed_count} tile(s)")
-                    print(f"[Allow] {' and '.join(parts)} on Z={current_z}")
-            
-            elif _drag_mode == "demolish":
-                # Demolish tool - remove structures in selection
-                from buildings import demolish_tile
-                tiles = get_drag_rect(_drag_start, (gx, gy))
-                
-                demolished_count = 0
-                for tx, ty in tiles:
-                    if demolish_tile(grid, tx, ty, current_z):
-                        demolished_count += 1
-                
-                if demolished_count > 0:
-                    z_info = f" on Z={current_z}" if current_z > 0 else ""
-                    print(f"[Demolish] Removed {demolished_count} structure(s){z_info}")
-            
-            elif _drag_mode == "salvage":
-                # Salvage tool - designate salvage objects for dismantling
-                from resources import designate_salvage, get_salvage_object_at, get_salvage_work_time
-                tiles = get_drag_rect(_drag_start, (gx, gy))
-                
+            elif self.drag_mode == "salvage":
+                # Salvage mode - rectangle drag for salvage objects
+                from resources import designate_salvage, get_salvage_work_time
+                tiles = self._get_drag_rect((start_x, start_y), (end_x, end_y))
                 designated_count = 0
+                
                 for tx, ty in tiles:
-                    tile = grid.get_tile(tx, ty, 0)
+                    tile = self.grid.get_tile(tx, ty, 0)  # Salvage only on ground level
                     if tile == "salvage_object":
                         if designate_salvage(tx, ty):
                             # Create salvage job
@@ -645,730 +1681,428 @@ def handle_mouse_up(grid: Grid, event: pygame.event.Event) -> None:
                                 category="salvage",
                                 z=0,
                             )
-                            # Add designation for persistent highlighting
                             jobs_module.add_designation(tx, ty, 0, "salvage", "salvage")
                             designated_count += 1
                 
                 if designated_count > 0:
                     print(f"[Salvage] Designated {designated_count} object(s) for salvage")
             
-            _drag_start = None
-            _drag_mode = None
-
-
-def get_hovered_tile(grid: Grid) -> tuple[int, int] | None:
-    """Return grid coords of tile under mouse, or None if out of bounds.
-    
-    Args:
-        grid: Grid object for screen-to-world coordinate conversion
-    """
-    mx, my = pygame.mouse.get_pos()
-    gx, gy = grid.screen_to_world(mx, my)
-    if 0 <= gx < GRID_W and 0 <= gy < GRID_H:
-        return (gx, gy)
-    return None
-
-
-def get_drag_preview_tiles(grid: Grid) -> list[tuple[int, int]]:
-    """Return list of tiles in current drag selection, or empty if not dragging.
-    
-    Args:
-        grid: Grid object for screen-to-world coordinate conversion
-    """
-    if _drag_start is None:
-        return []
-    
-    hovered = get_hovered_tile(grid)
-    if hovered is None:
-        return [_drag_start]
-    
-    # Use line for walls/doors/bar counters, rectangle for floors/harvest/stockpile/haul
-    if _drag_mode in ("wall", "wall_advanced", "door", "bar_door", "scrap_bar_counter"):
-        return get_drag_line(_drag_start, hovered)
-    else:
-        return get_drag_rect(_drag_start, hovered)
-
-
-def draw_drag_preview(surface: pygame.Surface, grid: Grid, camera_x: int = 0, camera_y: int = 0) -> None:
-    """Draw semi-transparent preview of drag selection.
-    
-    Args:
-        surface: Pygame surface to draw on
-        grid: Grid object for coordinate conversion
-        camera_x, camera_y: Camera offset for viewport rendering
-    """
-    tiles = get_drag_preview_tiles(grid)
-    if not tiles:
-        return
-    
-    import config
-    tile_size = config.TILE_SIZE
-    
-    # Create a semi-transparent surface for the preview
-    for tx, ty in tiles:
-        # World position in pixels
-        world_x = tx * tile_size
-        world_y = ty * tile_size
-        
-        # Screen position (apply camera offset)
-        screen_x = world_x - camera_x
-        screen_y = world_y - camera_y
-        
-        rect = pygame.Rect(screen_x, screen_y, tile_size, tile_size)
-        # Draw filled rectangle with alpha
-        preview_surface = pygame.Surface((tile_size, tile_size), pygame.SRCALPHA)
-        preview_surface.fill(COLOR_DRAG_PREVIEW)
-        surface.blit(preview_surface, rect.topleft)
-
-
-def draw_stockpile_ui(surface: pygame.Surface) -> None:
-    """Draw stockpiled resources in the top-left corner.
-    
-    Shows resources actually stored in stockpile zones (usable for construction).
-    """
-    font = pygame.font.Font(None, 24)
-    
-    y_offset = 10
-    x_offset = 10
-    line_height = 20
-    
-    # Resource colors matching node types
-    resource_colors = {
-        "wood": (139, 90, 43),    # brown
-        "scrap": (120, 120, 120), # gray
-        "metal": (180, 180, 200), # silver-blue
-        "mineral": (80, 200, 200), # teal
-        "power": (255, 220, 80),  # yellow
-        "raw_food": (180, 220, 100),  # light green
-        "cooked_meal": (220, 160, 80),  # orange
-    }
-    
-    # Display names for resources
-    display_names = {
-        "raw_food": "Raw Food",
-        "cooked_meal": "Meals",
-    }
-    
-    # Show stockpiled amounts from zones
-    for resource_type in ["wood", "mineral", "scrap", "metal", "power", "raw_food", "cooked_meal"]:
-        stored = zones_module.get_total_stored(resource_type)
-        color = resource_colors.get(resource_type, (200, 200, 200))
-        name = display_names.get(resource_type, resource_type.capitalize())
-        text = f"{name}: {stored}"
-        text_surface = font.render(text, True, color)
-        surface.blit(text_surface, (x_offset, y_offset))
-        y_offset += line_height
-
-
-def main() -> None:
-    """Run the main game loop."""
-    from save_system import quicksave, quickload
-    from audio import init_audio, get_audio_manager
-
-    pygame.init()
-    screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
-    pygame.display.set_caption("Colony Prototype")
-    clock = pygame.time.Clock()
-    
-    # Initialize audio system
-    init_audio()
-
-    grid = Grid()
-    # Generate world (streets, lots, ruins) and get colonist spawn location
-    spawn_x, spawn_y = spawn_resource_nodes(grid)
-    
-    # Create colonists at the spawn location
-    colonists = create_colonists(COLONIST_COUNT, spawn_x, spawn_y)
-    
-    # Center camera on colonist spawn location
-    spawn_center_x = spawn_x * TILE_SIZE
-    spawn_center_y = spawn_y * TILE_SIZE
-    # Initialize camera position
-    grid.camera_x = spawn_center_x - SCREEN_W // 2
-    grid.camera_y = spawn_center_y - SCREEN_H // 2
-    # Clamp to valid range
-    grid.pan_camera(0, 0)
-    
-    ether_mode = False
-    paused = False
-    game_speed = 1  # 1-5, controls simulation speed
-    tick_count = 0
-
-    running = True
-    while running:
-        tick_count += 1
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            
-            # Mouse wheel zoom
-            if event.type == pygame.MOUSEWHEEL:
-                import config
-                import sprites
+            elif self.drag_mode.startswith("room_"):
+                # Room designation - rectangle drag
+                import room_system
+                tiles = self._get_drag_rect((start_x, start_y), (end_x, end_y))
+                room_type_raw = self.drag_mode[5:]  # Remove "room_" prefix
                 
-                # Get mouse position
-                mouse_x, mouse_y = pygame.mouse.get_pos()
+                # Map tool names to room_system names
+                room_type_map = {
+                    "bedroom": "Bedroom",
+                    "kitchen": "Kitchen",
+                    "workshop": "Workshop",
+                    "barracks": "Barracks",
+                    "prison": "Prison",
+                    "hospital": "Hospital",
+                    "social_venue": "Social Venue",
+                    "dining_hall": "Dining Hall",
+                }
+                room_type = room_type_map.get(room_type_raw, room_type_raw.title())
                 
-                # Calculate world position under cursor BEFORE zoom
-                old_tile_size = config.TILE_SIZE
-                world_x_before = mouse_x + grid.camera_x
-                world_y_before = mouse_y + grid.camera_y
-                
-                # Zoom in/out with mouse wheel
-                zoom_factor = 1.2 if event.y > 0 else 0.8
-                new_tile_size = int(config.TILE_SIZE * zoom_factor)
-                
-                # Clamp zoom between 16 and 128 pixels
-                new_tile_size = max(16, min(128, new_tile_size))
-                
-                if new_tile_size != config.TILE_SIZE:
-                    # Apply new tile size
-                    config.TILE_SIZE = new_tile_size
-                    sprites.clear_scaled_cache()
-                    
-                    # Calculate world position under cursor AFTER zoom
-                    # Adjust camera so the same world point stays under the cursor
-                    scale_ratio = new_tile_size / old_tile_size
-                    world_x_after = world_x_before * scale_ratio
-                    world_y_after = world_y_before * scale_ratio
-                    
-                    # Adjust camera to keep cursor on same world position
-                    grid.camera_x = world_x_after - mouse_x
-                    grid.camera_y = world_y_after - mouse_y
-
-            if event.type == pygame.KEYDOWN:
-                # Let lists panel handle keys first
-                from lists_ui import get_lists_panel
-                lists_panel = get_lists_panel()
-                if lists_panel.handle_event(event):
-                    continue  # Lists panel consumed the event
-                
-                # Let management panel handle keys first (for arrow navigation)
-                from ui import get_colonist_management_panel
-                mgmt_panel = get_colonist_management_panel()
-                if mgmt_panel.handle_key(event.key):
-                    pass  # Management panel consumed the key
-                # Let UI handle keybinds
-                elif get_construction_ui().handle_key(event.key):
-                    pass  # UI consumed the key
-                elif event.key == pygame.K_e:
-                    ether_mode = not ether_mode
-                elif event.key == pygame.K_i:
-                    toggle_debug()
-                elif event.key == pygame.K_SPACE:
-                    # Toggle pause
-                    paused = not paused
-                    print(f"[Game] {'PAUSED' if paused else 'RESUMED'}")
-                elif event.key == pygame.K_1:
-                    game_speed = 1
-                    print(f"[Game] Speed: 1x (Normal)")
-                elif event.key == pygame.K_2:
-                    game_speed = 2
-                    print(f"[Game] Speed: 2x")
-                elif event.key == pygame.K_3:
-                    game_speed = 3
-                    print(f"[Game] Speed: 3x")
-                elif event.key == pygame.K_4:
-                    game_speed = 4
-                    print(f"[Game] Speed: 4x")
-                elif event.key == pygame.K_5:
-                    game_speed = 5
-                    print(f"[Game] Speed: 5x (Max)")
-                elif event.key == pygame.K_F6:
-                    # Quick save
-                    quicksave(grid, colonists, zones_module, buildings_module, resources_module, jobs_module)
-                elif event.key == pygame.K_F9:
-                    # Quick load
-                    if quickload(grid, colonists, zones_module, buildings_module, resources_module, jobs_module):
-                        print("[Load] Game state restored")
-                # Z-level switching with PageUp/PageDown or +/-
-                elif event.key in (pygame.K_PAGEUP, pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                    new_z = min(grid.current_z + 1, grid.depth - 1)
-                    if new_z != grid.current_z:
-                        grid.set_current_z(new_z)
-                        print(f"[View] Switched to Z-level {new_z}")
-                elif event.key in (pygame.K_PAGEDOWN, pygame.K_MINUS, pygame.K_KP_MINUS):
-                    new_z = max(grid.current_z - 1, 0)
-                    if new_z != grid.current_z:
-                        grid.set_current_z(new_z)
-                        print(f"[View] Switched to Z-level {new_z}")
-                elif event.key == pygame.K_F5:
-                    # Hard restart - re-run the game
-                    print("[Restart] Restarting game...")
-                    pygame.quit()
-                    script_path = os.path.abspath(__file__)
-                    subprocess.Popen([sys.executable, script_path])
-                    sys.exit(0)
-                elif event.key == pygame.K_F7:
-                    # Debug: Spawn wanderers (refugees) and fixer (trader)
-                    from wanderers import _pick_group_spawn_location, _create_wanderer_at, _wanderers, _create_fixer, _fixers
-                    from resources import get_colonist_spawn_location
-                    from notifications import add_notification, NotificationType
-                    import random
-                    
-                    colony_center = get_colonist_spawn_location()
-                    
-                    # Pick ONE spawn location for the group
-                    group_spawn = _pick_group_spawn_location(grid)
-                    if group_spawn:
-                        # Spawn 1-3 wanderers around that point
-                        num_wanderers = random.randint(1, 3)
-                        spawned_names = []
-                        for i in range(num_wanderers):
-                            offset_x = (i % 3) - 1
-                            offset_y = (i // 3) - 1
-                            spawn_x = group_spawn[0] + offset_x
-                            spawn_y = group_spawn[1] + offset_y
-                            if not grid.is_walkable(spawn_x, spawn_y, 0):
-                                spawn_x, spawn_y = group_spawn
-                            
-                            wanderer = _create_wanderer_at(spawn_x, spawn_y, colony_center, grid)
-                            if wanderer:
-                                _wanderers.append(wanderer)
-                                spawned_names.append(wanderer["name"])
-                        
-                        if spawned_names:
-                            print(f"[Debug] Spawned {len(spawned_names)} wanderer(s): {', '.join(spawned_names)}")
-                            add_notification(NotificationType.ARRIVAL,
-                                           f"// {len(spawned_names)} SIGNAL(S) DETECTED //",
-                                           ", ".join(spawned_names),
-                                           duration=480,
-                                           click_location=group_spawn)
-                            # Jump camera to them
-                            grid.center_camera_on(group_spawn[0], group_spawn[1])
-                    
-                    # Also spawn a fixer if none exists
-                    if len(_fixers) == 0:
-                        fixer = _create_fixer(colony_center, grid)
-                        if fixer:
-                            _fixers.append(fixer)
-                            print(f"[Debug] Spawned fixer: {fixer['name']} from {fixer['origin'].name}")
-                            fixer_loc = (fixer["x"], fixer["y"])
-                            add_notification(NotificationType.INFO,
-                                           "// FIXER INBOUND //",
-                                           f"{fixer['name']} wants to trade",
-                                           duration=480,
-                                           click_location=fixer_loc)
-                    else:
-                        print("[Debug] Fixer already present, skipping")
-                elif event.key == pygame.K_F4:
-                    # Debug: Toggle free build mode (no material requirements)
-                    from buildings import toggle_free_build_mode
-                    new_state = toggle_free_build_mode()
-                    status = "ENABLED" if new_state else "DISABLED"
-                    print(f"[Debug] FREE BUILD MODE: {status}")
-                    from notifications import add_notification, NotificationType
-                    add_notification(NotificationType.INFO, 
-                                   f"FREE BUILD MODE: {status}",
-                                   "No material requirements" if new_state else "Normal building rules",
-                                   duration=180)
-                elif event.key == pygame.K_F8:
-                    # Debug: Print construction site status
-                    from buildings import get_all_construction_sites, get_missing_materials
-                    sites = get_all_construction_sites()
-                    print(f"[Debug] Construction sites: {len(sites)}")
-                    for (x, y, z), site in sites.items():
-                        missing = get_missing_materials(x, y, z)
-                        print(f"  ({x},{y},z={z}) type={site.get('type')} needed={site.get('materials_needed')} delivered={site.get('materials_delivered')} missing={missing}")
-                    # Also print stockpile contents
-                    print("[Debug] Stockpile contents:")
-                    for res_type in ["wood", "scrap", "metal", "mineral", "power"]:
-                        total = zones_module.get_total_stored(res_type)
-                        print(f"  {res_type}: {total}")
-                elif event.key == pygame.K_F10:
-                    # Debug: Spawn test item at first colonist's location
-                    from items import spawn_world_item, get_all_world_items
-                    if colonists:
-                        c = colonists[0]
-                        spawn_world_item(c.x, c.y, c.z, "work_gloves")
-                        print(f"[Debug] Spawned work_gloves at ({c.x},{c.y},z={c.z})")
-                        print(f"[Debug] World items: {get_all_world_items()}")
-                elif event.key == pygame.K_F11:
-                    # Debug: Spawn a raider
-                    from wanderers import spawn_raider
-                    raider = spawn_raider(grid)
-                    if raider:
-                        colonists.append(raider)
-                        from notifications import add_notification, NotificationType
-                        add_notification(NotificationType.FIGHT_START, f"Raider: {raider.name}", duration=180)
-                        print(f"[Debug] Spawned raider: {raider.name} at ({raider.x}, {raider.y})")
-                elif event.key == pygame.K_F12:
-                    # Debug: Toggle BERSERK MODE - everyone fights everyone
-                    from combat import CombatStance
-                    alive = [c for c in colonists if not c.is_dead]
-                    if alive:
-                        # Check if already berserk (toggle off)
-                        if getattr(alive[0], '_debug_berserk', False):
-                            # Turn off berserk
-                            for c in alive:
-                                c._debug_berserk = False
-                                c.is_hostile = False
-                                c.in_combat = False
-                                c.combat_target = None
-                            print("[Debug] BERSERK MODE OFF - peace restored")
-                            from notifications import add_notification, NotificationType
-                            add_notification(NotificationType.INFO,
-                                           "// PEACE PROTOCOL //",
-                                           "Combat systems disengaged",
-                                           duration=180)
-                        else:
-                            # UNLEASH HELL
-                            for c in alive:
-                                c._debug_berserk = True
-                                c.is_hostile = True
-                                c.state = "idle"
-                                c.current_job = None
-                            print(f"[Debug] BERSERK MODE ON - {len(alive)} colonists going wild!")
-                            from notifications import add_notification, NotificationType
-                            add_notification(NotificationType.FIGHT_START,
-                                           "// BERSERK PROTOCOL //",
-                                           f"All {len(alive)} colonists hostile!",
-                                           duration=300)
-                elif event.key == pygame.K_TAB:
-                    # TAB cycles to next colonist in right panel
-                    from ui import get_colonist_management_panel
-                    mgmt_panel = get_colonist_management_panel()
-                    mgmt_panel._next_colonist()
-                elif event.key == pygame.K_l:
-                    # L key switches to COLONISTS tab in sidebar
-                    ui_layout.left_sidebar.current_tab = 0  # COLONISTS is now tab 0
-                elif event.key == pygame.K_ESCAPE:
-                    # ESC clears current tool/action
-                    ui.action_bar.current_tool = None
-                    ui.action_bar._close_all_menus()
-                    ui.clear_build_mode()
-
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                # Ignore scroll wheel (4, 5) and middle mouse (2) - not used
-                if event.button in (2, 4, 5):
-                    continue
-                
-                # Check top bar speed controls first
-                from ui_layout import get_ui_layout
-                ui_layout = get_ui_layout()
-                mx, my = pygame.mouse.get_pos()
-                consumed, speed_val = ui_layout.top_bar.handle_click((mx, my), {"paused": paused, "game_speed": game_speed})
-                if consumed:
-                    if speed_val == -1:  # Toggle pause
-                        paused = not paused
-                        print(f"[Game] {'PAUSED' if paused else 'RESUMED'}")
-                    elif speed_val > 0:  # Set speed
-                        game_speed = speed_val
-                        print(f"[Game] Speed: {game_speed}x")
-                    continue
-                
-                handle_mouse_down(grid, event, colonists)
-            
-            if event.type == pygame.MOUSEBUTTONUP:
-                # Ignore scroll wheel and middle mouse
-                if event.button in (2, 4, 5):
-                    continue
-                handle_mouse_up(grid, event)
-            
-        # Camera controls (WASD or Arrow keys)
-        keys = pygame.key.get_pressed()
-        camera_speed = 20  # pixels per frame
-        if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
-            camera_speed = 40  # Faster with Shift
-        
-        if keys[pygame.K_w] or keys[pygame.K_UP]:
-            grid.pan_camera(0, -camera_speed)
-        if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-            grid.pan_camera(0, camera_speed)
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-            grid.pan_camera(-camera_speed, 0)
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-            grid.pan_camera(camera_speed, 0)
-
-        # Update notifications (even when paused so they fade)
-        from notifications import update_notifications
-        update_notifications()
-        
-        # Only update simulation when not paused
-        if not paused:
-          for _ in range(game_speed):  # Run multiple ticks based on speed
-            # Advance game time
-            from time_system import tick_time
-            tick_time()
-            
-            update_colonists(colonists, grid, tick_count)
-            update_resource_nodes(grid)
-            update_doors()  # Auto-close doors after delay
-            update_windows()  # Auto-close windows after delay
-            tick_count += 1  # Increment game tick
-            
-            # Process batched room updates (dirty tiles from construction)
-            rooms_module.process_dirty_rooms(grid)
-            
-            jobs_module.update_job_timers()  # Tick down job wait timers
-            
-            # Process auto-haul jobs for harvested resources
-            process_auto_haul_jobs(jobs_module, zones_module)
-            
-            # Process supply jobs for construction sites
-            process_supply_jobs(jobs_module, zones_module)
-            
-            # Process crafting jobs for workstations
-            from buildings import process_crafting_jobs
-            process_crafting_jobs(jobs_module, zones_module)
-            
-            # Process equipment haul jobs (crafted items on ground) - throttled to every 10 ticks
-            from items import process_equipment_haul_jobs, process_auto_equip
-            if tick_count % 10 == 0:
-                process_equipment_haul_jobs(jobs_module, zones_module)
-            
-            # Process auto-equip (colonists claim items matching preferences) - throttled to once per second
-            if tick_count % 60 == 0:
-                process_auto_equip(colonists, zones_module, jobs_module)
-            
-            # Spawn recreation jobs during recreation hours - throttled to once per second
-            from recreation import spawn_recreation_jobs
-            if tick_count % 60 == 0:
-                spawn_recreation_jobs(colonists, grid, tick_count)
-            
-            # Spawn training jobs during morning drill hours - throttled to once per second
-            from training import spawn_training_jobs
-            if tick_count % 60 == 0:
-                spawn_training_jobs(colonists, grid, tick_count)
-            
-            # Process stockpile relocation (items from zones being removed) - throttled to every 10 ticks
-            if tick_count % 10 == 0:
-                zones_module.process_stockpile_relocation(jobs_module)
-            
-            # Process filter mismatch relocation (resources on stockpiles that no longer allow them) - throttled to every 10 ticks
-            if tick_count % 10 == 0:
-                zones_module.process_filter_mismatch_relocation(jobs_module)
-            
-            # Update audio system (check if track finished, play next)
-            audio_manager = get_audio_manager()
-            audio_manager.update()
-            
-            # Update wanderers (potential recruits) and fixers (traders)
-            from wanderers import spawn_wanderer_check, update_wanderers, spawn_fixer_check, update_fixers
-            from time_system import get_game_time
-            from resources import get_colonist_spawn_location
-            colony_center = get_colonist_spawn_location()
-            current_day = get_game_time().day
-            new_wanderers = spawn_wanderer_check(current_day, colony_center, grid)
-            
-            # Notify player of new visitors (clickable to jump camera)
-            if new_wanderers:
-                from notifications import add_notification, NotificationType
-                count = len(new_wanderers)
-                group_spawn = new_wanderers[0].get("group_spawn")
-                
-                if count == 1:
-                    name = new_wanderers[0]["name"]
-                    add_notification(NotificationType.ARRIVAL, 
-                                   f"// SIGNAL DETECTED //",
-                                   f"{name} approaches the colony",
-                                   duration=480,
-                                   click_location=group_spawn)
+                success, room_id, errors = room_system.create_room(self.grid, tiles, current_z, room_type)
+                if success:
+                    room_data = room_system.get_room_data(room_id)
+                    quality = room_data.get("quality", 0)
+                    display_name = room_data.get("display_name", room_type)
+                    print(f"[Room] Created {display_name} (ID {room_id}) with {len(tiles)} tiles, quality {quality}")
                 else:
-                    names = ", ".join(w["name"] for w in new_wanderers[:3])
-                    if count > 3:
-                        names += f" +{count - 3} more"
-                    add_notification(NotificationType.ARRIVAL,
-                                   f"// {count} SIGNALS DETECTED //",
-                                   names,
-                                   duration=480,
-                                   click_location=group_spawn)
+                    print(f"[Room] Cannot create {room_type}:")
+                    for error in errors:
+                        print(f"  - {error}")
+            
+            elif self.drag_mode.startswith("furn_"):
+                # Furniture placement - single click
+                from buildings import request_furniture_install
+                item_id = self.drag_mode[5:]  # Remove "furn_" prefix
+                if request_furniture_install(self.grid, end_x, end_y, current_z, item_id):
+                    print(f"[Furniture] Requested install: {item_id} at ({end_x}, {end_y})")
+                else:
+                    print(f"[Furniture] Cannot install {item_id} at ({end_x}, {end_y})")
+            
+            else:
+                # Build mode - structures and workstations
+                # Determine drag type based on building
+                if self.drag_mode in ("wall", "wall_advanced", "door", "bar_door", "window", "scrap_bar_counter"):
+                    # Line drag for walls/doors/windows
+                    tiles = self._get_drag_line((start_x, start_y), (end_x, end_y))
+                elif self.drag_mode in ("floor", "stage"):
+                    # Rectangle drag for floors
+                    tiles = self._get_drag_rect((start_x, start_y), (end_x, end_y))
+                else:
+                    # Single click for workstations and special structures
+                    tiles = [(end_x, end_y)]
                 
-                # Auto-jump camera to group spawn location
-                if group_spawn:
-                    grid.center_camera_on(group_spawn[0], group_spawn[1])
+                # Call existing place_* functions
+                from buildings import (
+                    place_wall, place_floor, place_door, place_stage, place_stage_stairs,
+                    place_fire_escape, place_bridge, place_workstation_generic, BUILDING_TYPES
+                )
+                
+                placed_count = 0
+                
+                for tx, ty in tiles:
+                    success = False
+                    
+                    # Structures
+                    if self.drag_mode == "wall":
+                        success = place_wall(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "wall_advanced":
+                        from buildings import place_wall_advanced
+                        success = place_wall_advanced(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "floor":
+                        success = place_floor(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "stage":
+                        success = place_stage(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "stage_stairs":
+                        success = place_stage_stairs(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "door":
+                        success = place_door(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "bar_door":
+                        from buildings import place_bar_door
+                        success = place_bar_door(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "window":
+                        from buildings import place_window
+                        success = place_window(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "fire_escape":
+                        success = place_fire_escape(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "bridge":
+                        success = place_bridge(self.grid, tx, ty, current_z)
+                    elif self.drag_mode == "scrap_bar_counter":
+                        from buildings import place_scrap_bar_counter
+                        success = place_scrap_bar_counter(self.grid, tx, ty, current_z)
+                    
+                    # Workstations - use generic placement
+                    elif self.drag_mode in BUILDING_TYPES and BUILDING_TYPES[self.drag_mode].get("workstation"):
+                        success = place_workstation_generic(self.grid, tx, ty, self.drag_mode, current_z)
+                    
+                    if success:
+                        placed_count += 1
+                
+                if placed_count > 0:
+                    building_name = self.drag_mode.replace("_", " ").title()
+                    print(f"[Build] Placed {placed_count} {building_name}(s) - colonists will construct them")
             
-            update_wanderers(grid, colony_center, tick_count)
-            spawn_fixer_check(current_day, colony_center, grid)
-            update_fixers(grid, colony_center, tick_count)
+            # Clear drag state
+            self.drag_start = None
+            self.drag_end = None
+            self.drag_mode = None
+    
+    def _get_drag_line(self, start, end):
+        """Get all tiles in a line from start to end (for walls/doors)."""
+        tiles = []
+        x0, y0 = start
+        x1, y1 = end
+        
+        dx = abs(x1 - x0)
+        dy = abs(y1 - y0)
+        sx = 1 if x0 < x1 else -1
+        sy = 1 if y0 < y1 else -1
+        err = dx - dy
+        
+        x, y = x0, y0
+        while True:
+            tiles.append((x, y))
+            if x == x1 and y == y1:
+                break
+            e2 = 2 * err
+            if e2 > -dy:
+                err -= dy
+                x += sx
+            if e2 < dx:
+                err += dx
+                y += sy
+        
+        return tiles
+    
+    def _get_drag_rect(self, start, end):
+        """Get all tiles in a rectangle from start to end (for floors/zones)."""
+        x0, y0 = start
+        x1, y1 = end
+        
+        min_x = min(x0, x1)
+        max_x = max(x0, x1)
+        min_y = min(y0, y1)
+        max_y = max(y0, y1)
+        
+        tiles = []
+        for x in range(min_x, max_x + 1):
+            for y in range(min_y, max_y + 1):
+                tiles.append((x, y))
+        
+        return tiles
+    
+    def _locate_colonist(self, x: int, y: int, z: int):
+        """Move camera to colonist location."""
+        # Center camera on colonist
+        cam_x = x * TILE_SIZE - SCREEN_W // 2
+        cam_y = y * TILE_SIZE - SCREEN_H // 2
+        
+        # Clamp to world bounds
+        max_x = max(0, GRID_W * TILE_SIZE - SCREEN_W / self.zoom_level)
+        max_y = max(0, GRID_H * TILE_SIZE - SCREEN_H / self.zoom_level)
+        cam_x = max(0, min(cam_x, max_x))
+        cam_y = max(0, min(cam_y, max_y))
+        
+        self.camera.position = (cam_x, cam_y)
+    
+    def _draw_bed_covers(self, current_z: int):
+        """Draw bed cover sprites over sleeping colonists.
+        
+        Only draws covers when colonists are actually sleeping in beds.
+        Handles both single and shared beds (2 colonists).
+        """
+        from beds import get_all_beds, get_bed_occupants
+        
+        # Get all beds
+        all_beds = get_all_beds()
+        
+        for bed_pos, bed_data in all_beds:
+            bx, by, bz = bed_pos
             
-            # Process trade jobs (colonists physically exchange goods with fixers)
-            from wanderers import process_trade_jobs
-            process_trade_jobs(jobs_module, zones_module)
-        
-        # Update UI
-        ui = get_construction_ui()
-        ui.update(pygame.mouse.get_pos())
-
-        if ether_mode:
-            screen.fill(COLOR_BG_ETHER)
-        else:
-            screen.fill(COLOR_BG_NORMAL)
-
-        grid.draw(screen, hovered_tile=None)
-        
-        draw_colonists(screen, colonists, ether_mode=ether_mode, current_z=grid.current_z, camera_x=grid.camera_x, camera_y=grid.camera_y)
-        
-        # Draw wanderers (potential recruits)
-        from wanderers import draw_wanderers
-        draw_wanderers(screen, current_z=grid.current_z, camera_x=grid.camera_x, camera_y=grid.camera_y)
-        
-        # Draw day/night tint overlay
-        from time_system import get_screen_tint, get_display_string
-        tint = get_screen_tint()
-        if tint[3] > 0:  # Only draw if alpha > 0
-            tint_overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-            tint_overlay.fill(tint)
-            screen.blit(tint_overlay, (0, 0))
-        
-        # Draw new UI layout (top bar, left sidebar, bottom bar)
-        from ui_layout import get_ui_layout, LEFT_SIDEBAR_WIDTH, TOP_BAR_HEIGHT, BOTTOM_BAR_HEIGHT
-        ui_layout = get_ui_layout()
-        
-        # Gather game data for UI
-        game_data = {
-            "time_str": get_display_string(),
-            "z_level": grid.current_z,
-            "paused": paused,
-            "game_speed": game_speed,
-            "resources": {
-                "wood": zones_module.get_total_stored("wood"),
-                "scrap": zones_module.get_total_stored("scrap"),
-                "metal": zones_module.get_total_stored("metal"),
-                "mineral": zones_module.get_total_stored("mineral"),
-                "power": zones_module.get_total_stored("power"),
-                "raw_food": zones_module.get_total_stored("raw_food"),
-                "cooked_meal": zones_module.get_total_stored("cooked_meal"),
-            },
-            "colonists": [{"name": c.name, "status": c.current_job.type if c.current_job else "Idle"} 
-                         for c in colonists if not c.is_dead and getattr(c, 'faction', 'colony') == 'colony'],
-            "colonist_objects": [c for c in colonists if not c.is_dead and getattr(c, 'faction', 'colony') == 'colony'],  # Colony members only
-            "current_tool": ui.get_build_mode(),
-            "job_count": len(jobs_module.get_all_available_jobs()),
-            "jobs_module": jobs_module,
-        }
-        
-        # Wire up sidebar callbacks for colonist clicks
-        from ui import get_colonist_management_panel
-        _mgmt_panel = get_colonist_management_panel()
-        ui_layout.left_sidebar.on_colonist_locate = lambda x, y, z: grid.center_camera_on(x, y)
-        ui_layout.left_sidebar.on_colonist_click = lambda c: _mgmt_panel.open_for_colonist(colonists, c)
-        
-        # Wire up colonist panel prev/next to center camera
-        _mgmt_panel.on_colonist_changed = lambda c: grid.center_camera_on(c.x, c.y) if hasattr(c, 'x') else None
-        
-        ui_layout.update(pygame.mouse.get_pos())
-        ui_layout.draw(screen, game_data)
-        
-        # Draw notifications (adjusted position for new layout - offset for sidebar)
-        from notifications import draw_notifications
-        draw_notifications(screen, x_offset=LEFT_SIDEBAR_WIDTH + 10, y_offset=TOP_BAR_HEIGHT + 10)
-        
-        # Old bottom bar removed - now using sidebar UI
-        # ui.draw(screen)
-        
-        # Draw colonist management panel first (always visible in right panel)
-        from ui import get_colonist_management_panel
-        mgmt_panel = get_colonist_management_panel()
-        # Always keep colonists list updated and panel visible
-        if not mgmt_panel.visible or not mgmt_panel.colonists:
-            mgmt_panel.open(colonists, 0)
-        mgmt_panel.update(pygame.mouse.get_pos())  # Update tooltip
-        mgmt_panel.draw(screen)
-        
-        # Draw stockpile filter panel (if open)
-        from ui import get_stockpile_filter_panel
-        filter_panel = get_stockpile_filter_panel()
-        filter_panel.draw(screen)
-        
-        # Draw bed assignment panel (if open)
-        from ui import get_bed_assignment_panel
-        bed_panel = get_bed_assignment_panel()
-        bed_panel.draw(screen, colonists)
-        
-        # Draw fixer trade panel (if open)
-        from ui import get_fixer_trade_panel
-        trade_panel = get_fixer_trade_panel()
-        trade_panel.draw(screen, zones_module)
-        
-        # Draw visitor panel (if open)
-        from ui import get_visitor_panel
-        visitor_panel = get_visitor_panel()
-        visitor_panel.draw(screen)
-        
-        # Draw colonist job tags panel (if open)
-        from ui import get_colonist_panel
-        colonist_panel = get_colonist_panel()
-        colonist_panel.draw(screen)
-        
-        # Draw workstation panel LAST (on top of everything else)
-        from ui_workstation_new import get_workstation_order_panel
-        ws_panel = get_workstation_order_panel()
-        ws_panel.draw(screen)
-        
-        # Draw lists panel (if open)
-        from lists_ui import get_lists_panel
-        lists_panel = get_lists_panel()
-        if lists_panel.visible:
+            # Only draw on current Z-level
+            if bz != current_z:
+                continue
+            
+            # Check if any colonists are sleeping in this bed
+            occupant_ids = bed_data.get("assigned", [])
+            if not occupant_ids:
+                continue
+            
+            # Check if any occupants are currently sleeping at this bed
+            # Colonists sleep on bottom tile (by) of the 1x2 vertical bed
+            sleep_y = by
+            sleeping_count = 0
+            for colonist in self.colonists:
+                if id(colonist) in occupant_ids:
+                    if colonist.is_sleeping and colonist.x == bx and colonist.y == sleep_y and colonist.z == bz:
+                        sleeping_count += 1
+            
+            # Only draw covers if someone is sleeping
+            if sleeping_count == 0:
+                continue
+            
+            # Bed is 1x2 vertical - draw covers on BOTH tiles
+            # Bottom tile cover
             try:
-                lists_panel.update_data(colonists, grid)
-                lists_panel.draw(screen)
+                bottom_cover = arcade.load_texture("assets/furniture/crash_bed_cover.png")
+                sprite = arcade.Sprite()
+                sprite.texture = bottom_cover
+                sprite.center_x = bx * TILE_SIZE + TILE_SIZE // 2
+                sprite.center_y = by * TILE_SIZE + TILE_SIZE // 2  # Bottom tile
+                sprite.width = TILE_SIZE
+                sprite.height = TILE_SIZE
+                arcade.draw_sprite(sprite)
             except Exception as e:
-                print(f"[Lists] Error: {e}")
-                lists_panel.visible = False
-        
-        # Draw debug overlay (toggle with 'I' key)
-        draw_debug(screen, grid, colonists, jobs_module, resources_module, zones_module, buildings_module, rooms_module)
-        
-        # Draw free build mode indicator
-        from buildings import FREE_BUILD_MODE
-        if FREE_BUILD_MODE:
-            font_medium = pygame.font.Font(None, 32)
-            free_build_text = font_medium.render("FREE BUILD MODE", True, (100, 255, 100))
-            free_build_rect = free_build_text.get_rect(center=(SCREEN_W // 2, 30))
-            # Draw background
-            bg_rect = free_build_rect.inflate(20, 10)
-            pygame.draw.rect(screen, (20, 40, 20), bg_rect)
-            pygame.draw.rect(screen, (100, 255, 100), bg_rect, 2)
-            screen.blit(free_build_text, free_build_rect)
-        
-        # Draw pause indicator (centered in viewport area)
-        if paused:
-            font_pause = pygame.font.Font(None, 48)
-            pause_text = font_pause.render("PAUSED", True, (255, 255, 100))
-            # Center in viewport area (accounting for sidebars and bars)
-            from ui_layout import RIGHT_PANEL_WIDTH, BOTTOM_BAR_HEIGHT
-            viewport_center_x = LEFT_SIDEBAR_WIDTH + (SCREEN_W - LEFT_SIDEBAR_WIDTH - RIGHT_PANEL_WIDTH) // 2
-            pause_x = viewport_center_x
-            pause_y = TOP_BAR_HEIGHT + 40
-            pause_rect = pause_text.get_rect(center=(pause_x, pause_y))
-            # Draw background for visibility
-            bg_rect = pause_rect.inflate(20, 10)
-            pygame.draw.rect(screen, (40, 40, 40), bg_rect)
-            pygame.draw.rect(screen, (255, 255, 100), bg_rect, 2)
-            screen.blit(pause_text, pause_rect)
-        
-        # Check for colony lost (all colony members dead)
-        alive_colonists = [c for c in colonists if not c.is_dead and getattr(c, 'faction', 'colony') == 'colony']
-        if len(alive_colonists) == 0:
-            # Draw "Colony Lost" overlay
-            overlay = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-            overlay.fill((0, 0, 0, 180))
-            screen.blit(overlay, (0, 0))
+                if not hasattr(self, '_bed_cover_bottom_error_logged'):
+                    self._bed_cover_bottom_error_logged = True
+                    print(f"[BedCovers] Failed to load bottom cover: {e}")
             
-            font_large = pygame.font.Font(None, 72)
-            font_small = pygame.font.Font(None, 32)
-            
-            lost_text = font_large.render("COLONY LOST", True, (255, 80, 80))
-            lost_rect = lost_text.get_rect(center=(SCREEN_W // 2, SCREEN_H // 2 - 30))
-            screen.blit(lost_text, lost_rect)
-            
-            reason_text = font_small.render("All colonists have perished.", True, (200, 200, 200))
-            reason_rect = reason_text.get_rect(center=(SCREEN_W // 2, SCREEN_H // 2 + 20))
-            screen.blit(reason_text, reason_rect)
-            
-            hint_text = font_small.render("Press ESC to quit", True, (150, 150, 150))
-            hint_rect = hint_text.get_rect(center=(SCREEN_W // 2, SCREEN_H // 2 + 60))
-            screen.blit(hint_text, hint_rect)
+            # Top tile cover
+            try:
+                top_cover = arcade.load_texture("assets/furniture/crash_bed_top_cover.png")
+                sprite = arcade.Sprite()
+                sprite.texture = top_cover
+                sprite.center_x = bx * TILE_SIZE + TILE_SIZE // 2
+                sprite.center_y = sleep_y * TILE_SIZE + TILE_SIZE // 2  # Top tile (by+1)
+                sprite.width = TILE_SIZE
+                sprite.height = TILE_SIZE
+                arcade.draw_sprite(sprite)
+            except Exception as e:
+                if not hasattr(self, '_bed_cover_top_error_logged'):
+                    self._bed_cover_top_error_logged = True
+                    print(f"[BedCovers] Failed to load top cover: {e}")
+    
+    def _draw_construction_overlays(self):
+        """Draw material icons and progress bars for all construction sites.
         
-        # Draw drag preview LAST so it's always on top
-        if _drag_start is not None and pygame.mouse.get_pressed()[0]:
-            draw_drag_preview(screen, grid, camera_x=grid.camera_x, camera_y=grid.camera_y)
+        Shows visual feedback:
+        - Small colored squares for materials (dim if waiting, bright if delivered)
+        - Green progress bar at bottom during construction
+        """
+        from buildings import get_construction_site
+        from jobs import get_job_at
+        
+        z = self.grid.current_z
+        
+        # Calculate visible tile range
+        # Camera position is viewport CENTER, need to calculate top-left corner
+        cam_x, cam_y = self.camera.position
+        viewport_width = SCREEN_W / self.zoom_level
+        viewport_height = SCREEN_H / self.zoom_level
+        
+        # Top-left corner of viewport in world coordinates
+        view_left = cam_x - viewport_width / 2
+        view_bottom = cam_y - viewport_height / 2
+        
+        start_tile_x = max(0, int(view_left // TILE_SIZE) - 1)
+        start_tile_y = max(0, int(view_bottom // TILE_SIZE) - 1)
+        end_tile_x = min(GRID_W, int((view_left + viewport_width) // TILE_SIZE) + 2)
+        end_tile_y = min(GRID_H, int((view_bottom + viewport_height) // TILE_SIZE) + 2)
+        
+        # Material colors (from config.py)
+        MATERIAL_COLORS = {
+            "wood": {"bright": (101, 67, 33), "dim": (60, 40, 20)},
+            "mineral": {"bright": (64, 164, 164), "dim": (30, 60, 60)},
+            "scrap": {"bright": (120, 120, 120), "dim": (40, 40, 40)},
+            "metal": {"bright": (180, 180, 200), "dim": (60, 60, 70)},
+            "power": {"bright": (255, 220, 80), "dim": (80, 70, 30)},
+        }
+        DEFAULT_COLOR = {"bright": (100, 100, 100), "dim": (40, 40, 40)}
+        PROGRESS_BAR_COLOR = (60, 220, 120)  # Green
+        
+        for y in range(start_tile_y, end_tile_y):
+            for x in range(start_tile_x, end_tile_x):
+                tile = self.grid.tiles[z][y][x]
+                
+                # Only draw overlays for construction tiles (not finished)
+                if not tile or tile.startswith("finished_"):
+                    continue
+                
+                # Check if this is a construction site
+                site = get_construction_site(x, y, z)
+                if site is None:
+                    continue
+                
+                # World position
+                world_x = x * TILE_SIZE
+                world_y = y * TILE_SIZE
+                
+                # Draw material icons
+                delivered = site.get("materials_delivered", {})
+                needed = site.get("materials_needed", {})
+                icon_x = world_x + 2
+                icon_y = world_y + TILE_SIZE - 8  # Top of tile
+                
+                for res_type in needed.keys():
+                    has_it = delivered.get(res_type, 0) >= needed.get(res_type, 0)
+                    colors = MATERIAL_COLORS.get(res_type, DEFAULT_COLOR)
+                    icon_color = colors["bright"] if has_it else colors["dim"]
+                    
+                    # Draw 6x6 square
+                    arcade.draw_lrbt_rectangle_filled(
+                        left=icon_x,
+                        right=icon_x + 6,
+                        bottom=icon_y,
+                        top=icon_y + 6,
+                        color=icon_color
+                    )
+                    icon_x += 8  # Space icons 8px apart
+                
+                # Draw progress bar
+                job = get_job_at(x, y)
+                if job is not None and job.required > 0:
+                    progress_ratio = max(0.0, min(1.0, job.progress / job.required))
+                    bar_margin = 4
+                    bar_height = 4
+                    bar_width = int((TILE_SIZE - 2 * bar_margin) * progress_ratio)
+                    
+                    if bar_width > 0:
+                        # Draw progress bar at bottom of tile
+                        bar_x = world_x + bar_margin
+                        bar_y = world_y + bar_margin
+                        
+                        arcade.draw_lrbt_rectangle_filled(
+                            left=bar_x,
+                            right=bar_x + bar_width,
+                            bottom=bar_y,
+                            top=bar_y + bar_height,
+                            color=PROGRESS_BAR_COLOR
+                        )
+    
+    def _draw_zones_and_designations(self):
+        """Draw stockpile zones and harvest/haul designations.
+        
+        Shows visual feedback:
+        - Semi-transparent green overlay for stockpile zones
+        - Green border for harvest designations
+        - Purple border for haul designations
+        """
+        import zones as zones_module
+        from jobs import get_designation_category
+        
+        z = self.grid.current_z
+        
+        # Calculate visible tile range
+        # Camera position is viewport CENTER, need to calculate top-left corner
+        cam_x, cam_y = self.camera.position
+        viewport_width = SCREEN_W / self.zoom_level
+        viewport_height = SCREEN_H / self.zoom_level
+        
+        # Top-left corner of viewport in world coordinates
+        view_left = cam_x - viewport_width / 2
+        view_bottom = cam_y - viewport_height / 2
+        
+        start_tile_x = max(0, int(view_left // TILE_SIZE) - 1)
+        start_tile_y = max(0, int(view_bottom // TILE_SIZE) - 1)
+        end_tile_x = min(GRID_W, int((view_left + viewport_width) // TILE_SIZE) + 2)
+        end_tile_y = min(GRID_H, int((view_bottom + viewport_height) // TILE_SIZE) + 2)
+        
+        # Colors from config.py
+        COLOR_ZONE_STOCKPILE = (60, 120, 60, 100)  # Semi-transparent green
+        COLOR_JOB_CATEGORY_HARVEST = (50, 220, 80)  # Green
+        COLOR_JOB_CATEGORY_HAUL = (180, 80, 255)  # Purple
+        
+        for y in range(start_tile_y, end_tile_y):
+            for x in range(start_tile_x, end_tile_x):
+                # World position
+                world_x = x * TILE_SIZE
+                world_y = y * TILE_SIZE
+                
+                # Draw stockpile zone overlay
+                if zones_module.is_stockpile_zone(x, y, z):
+                    # Semi-transparent green overlay
+                    arcade.draw_lrbt_rectangle_filled(
+                        left=world_x,
+                        right=world_x + TILE_SIZE,
+                        bottom=world_y,
+                        top=world_y + TILE_SIZE,
+                        color=COLOR_ZONE_STOCKPILE
+                    )
+                
+                # Draw designation borders (harvest, haul, salvage)
+                designation_cat = get_designation_category(x, y, z)
+                if designation_cat:
+                    if designation_cat in ("harvest", "salvage"):
+                        border_color = COLOR_JOB_CATEGORY_HARVEST
+                    elif designation_cat == "haul":
+                        border_color = COLOR_JOB_CATEGORY_HAUL
+                    else:
+                        border_color = None
+                    
+                    if border_color:
+                        # Draw thick border (2px)
+                        arcade.draw_lrbt_rectangle_outline(
+                            left=world_x,
+                            right=world_x + TILE_SIZE,
+                            bottom=world_y,
+                            top=world_y + TILE_SIZE,
+                            color=border_color,
+                            border_width=2
+                        )
+    
+    def on_resize(self, width, height):
+        """Handle window resize."""
+        super().on_resize(width, height)
+        # Camera2D handles resize automatically
 
-        pygame.display.flip()
-        clock.tick(60)
 
-    pygame.quit()
+def main():
+    """Entry point for Arcade version."""
+    print("="*60)
+    print("FRACTURED CITY - ARCADE VERSION")
+    print("="*60)
+    print("\nStarting GPU-accelerated renderer...")
+    
+    window = FracturedCityWindow()
+    window.setup()
+    arcade.run()
 
 
 if __name__ == "__main__":

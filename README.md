@@ -24,11 +24,11 @@ A colony survival simulation set in a post-collapse urban environment. Manage co
 
 ### Requirements
 - Python 3.10+
-- Pygame 2.x
+- Python Arcade 2.6+
 
 ### Installation
 ```bash
-pip install pygame
+pip install arcade
 python main.py
 ```
 
@@ -433,23 +433,28 @@ Shows:
 
 ```
 Fractured City/
-├── main.py              # Game entry point, main loop
+├── main.py              # Arcade game loop (entry point)
 ├── grid.py              # Tile grid and world data
+├── grid_arcade.py       # Arcade tile renderer (GPU batched)
 ├── colonist.py          # Colonist class and behavior
+├── colonist_arcade.py   # Colonist renderer
 ├── buildings.py         # Construction and structures
-├── rooms.py             # Room detection and management
+├── rooms.py + room_system.py  # Room detection and management
 ├── jobs.py              # Job system and priorities
 ├── pathfinding.py       # A* pathfinding
 ├── resources.py         # Resource definitions
-├── items.py             # Static item definitions
+├── items.py             # Item definitions and systems
 ├── item_generator.py    # Procedural item generation
 ├── traits.py            # Trait definitions and generation
 ├── conversations.py     # Colonist dialogue system
 ├── relationships.py     # Relationship tracking
-├── ui.py                # User interface rendering
-├── debug_overlay.py     # Debug visualization
-├── worldgen.py          # Procedural world generation
-├── environment_stats.py # Environment tracking
+├── body.py              # Body part tracking (DF-style)
+├── animals.py           # Animal entities
+├── hunting.py           # Hunt job logic
+├── ui_arcade*.py        # Arcade UI panels (native)
+├── city_generator.py    # Procedural city generation
+├── autotiling.py        # Autotiling logic
+├── save_system.py       # Save/load
 └── README.md            # This file
 ```
 

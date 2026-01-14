@@ -195,7 +195,7 @@ register_item(ItemDef(
 register_item(ItemDef(
     id="salvage_tool",
     name="Salvage Tool",
-    slot="hands",
+    slot="weapon",
     tags=["tool", "work"],
     work_bonus=0.15,
     icon_color=(120, 130, 140),
@@ -694,25 +694,25 @@ register_item(ItemDef(
     volume=0.3,
 ))
 
-# --- Weapons (Hands slot) ---
+# --- Weapons (Weapon slot) ---
 register_item(ItemDef(
     id="pipe_weapon",
     name="Pipe Weapon",
-    slot="hands",
+    slot="weapon",
     tags=["weapon", "melee"],
     work_bonus=-0.05,
     icon_color=(120, 110, 100),
-    description="Heavy metal pipe, effective as a club."
+    description="Improvised melee weapon from scrap pipes."
 ))
 
 register_item(ItemDef(
     id="scrap_blade",
     name="Scrap Blade",
-    slot="hands",
+    slot="weapon",
     tags=["weapon", "melee"],
     work_bonus=-0.1,
     icon_color=(140, 130, 120),
-    description="Sharpened metal blade fashioned from salvage."
+    description="Sharpened metal blade, better than a pipe."
 ))
 
 # --- Armor (Body slot) ---

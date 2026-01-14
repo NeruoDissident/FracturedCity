@@ -16,8 +16,6 @@ import random
 from typing import Iterable
 from enum import Enum
 
-import pygame
-import sprites
 import config
 
 from config import (
@@ -808,7 +806,8 @@ class Colonist:
         self.equipment: dict[str, dict | None] = {
             "head": None,
             "body": None,
-            "hands": None,
+            "hands": None,      # Gloves, gauntlets, work tools
+            "weapon": None,     # Weapons for combat
             "feet": None,
             "implant": None,
             "charm": None,
@@ -4079,7 +4078,17 @@ class Colonist:
                 # Produce outputs from 'output' dict (can be items or resources)
                 outputs = recipe.get("output", {})
                 
+                # === TYPE 2 CRAFTING: DYNAMIC BUTCHERING ===
                 # For butcher recipes with empty outputs, look up outputs from species data
+                # This allows different animals to produce different yields without hardcoding
+                # each species as a separate recipe.
+                # 
+                # Flow:
+                #   1. Corpse item has source_species metadata (set when animal dies)
+                #   2. Workstation stores corpse_metadata when colonist delivers corpse
+                #   3. Look up species in animals.py::AnimalSpecies
+                #   4. Generate outputs based on species.meat_yield and species.materials
+                #   5. Spawn items with metadata preserved (source_species, harvested_by)
                 if not outputs and recipe.get("id") == "butcher":
                     # Get species from the workstation's stored corpse metadata
                     ws = buildings.get_workstation(job.x, job.y, job.z)
@@ -4962,7 +4971,7 @@ class Colonist:
         else:
             print(f"ERROR: Colonist in unknown state: {self.state}")
 
-    def draw(self, surface: pygame.Surface, ether_mode: bool = False, camera_x: int = 0, camera_y: int = 0) -> None:
+    def draw(self, surface, ether_mode: bool = False, camera_x: int = 0, camera_y: int = 0) -> None:
         """Render the colonist as a sprite-person with job state indicator.
         
         Args:
@@ -5167,7 +5176,7 @@ def update_colonists(colonists: Iterable[Colonist], grid: Grid, game_tick: int =
 
 
 def draw_colonists(
-    surface: pygame.Surface, colonists: Iterable[Colonist], ether_mode: bool = False, current_z: int = 0, camera_x: int = 0, camera_y: int = 0
+    surface, colonists: Iterable[Colonist], ether_mode: bool = False, current_z: int = 0, camera_x: int = 0, camera_y: int = 0
 ) -> None:
     """Draw all colonists to the given surface.
     

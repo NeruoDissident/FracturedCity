@@ -29,6 +29,23 @@ def toggle_free_build_mode() -> bool:
 
 # Building type definitions
 # Each type specifies: name, materials needed, work to construct, drag constraints
+#
+# === CRAFTING SYSTEM TYPES ===
+# Type 1: STATIC RECIPES (most workstations)
+#   - Recipes defined in "recipes" list with explicit inputs/outputs
+#   - "input": {} = fungible resources (wood, metal, power, raw_food)
+#   - "input_items": {} = items with metadata (corpse, meat, components)
+#   - "output": {} = resource outputs (power, cooked_meal)
+#   - "output_item": str = single item output (work_gloves, hard_hat)
+#   - Execution: colonist.py::_crafting_work_at_bench() lines 4016-4075
+#
+# Type 2: DYNAMIC RECIPES (bio_matter_salvage_station)
+#   - Recipe has empty "output": {} (dynamic generation)
+#   - Actual outputs determined by input metadata (corpse species)
+#   - Species data in animals.py::AnimalSpecies (meat_yield, materials)
+#   - Execution: colonist.py::_crafting_work_at_bench() lines 4080-4130
+#   - Metadata preserved: source_species, harvested_by
+#
 BUILDING_TYPES = {
     "wall": {
         "name": "Wall",
@@ -191,10 +208,11 @@ BUILDING_TYPES = {
         "multi_recipe": True,  # Supports multiple recipes
         "size": (2, 1),  # 2x1 tiles (width, height) - horizontal
         "recipes": [
-            # Resource-based recipe (raw_food harvested from plants)
+            # TYPE 1 RECIPE: Resource-based (raw_food is fungible resource)
             {"id": "simple_meal", "name": "Simple Meal", "input": {"raw_food": 2, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
             
-            # Meat-based recipes (from hunting/butchering)
+            # TYPE 1 RECIPES: Item-based (meat items have source_species metadata)
+            # Note: Metadata is currently NOT propagated to cooked_meal (future feature)
             {"id": "grilled_scraps", "name": "Grilled Scraps", "input_items": {"scrap_meat": 1}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 50},
             {"id": "meat_stew", "name": "Meat Stew", "input_items": {"scrap_meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 80},
             {"id": "hearty_roast", "name": "Hearty Roast", "input_items": {"scrap_meat": 3}, "input": {"power": 2}, "output": {"cooked_meal": 1}, "work_time": 100},
@@ -212,15 +230,20 @@ BUILDING_TYPES = {
         "multi_recipe": True,  # Supports multiple recipes
         "size": (3, 3),  # 3x3 tiles (width, height)
         "recipes": [
+            # Tools & Gloves
             {"id": "salvage_tool", "name": "Salvage Tool", "input": {"metal": 2, "scrap": 1}, "output_item": "salvage_tool", "work_time": 80},
             {"id": "work_gloves", "name": "Work Gloves", "input": {"scrap": 2}, "output_item": "work_gloves", "work_time": 60},
             {"id": "signal_gauntlet", "name": "Signal Gauntlet", "input": {"metal": 2, "power": 1}, "output_item": "signal_gauntlet", "work_time": 100},
-            {"id": "gutter_slab", "name": "Gutter Slab", "input": {"wood": 4, "mineral": 2}, "output_item": "gutter_slab", "work_time": 90},
+            # Wearable Armor & Clothing
+            {"id": "hard_hat", "name": "Hard Hat", "input": {"scrap": 2}, "output_item": "hard_hat", "work_time": 60},
+            {"id": "work_vest", "name": "Work Vest", "input": {"scrap": 2, "wood": 1}, "output_item": "work_vest", "work_time": 70},
+            {"id": "padded_jacket", "name": "Padded Jacket", "input": {"scrap": 3}, "output_item": "padded_jacket", "work_time": 90},
+            {"id": "work_boots", "name": "Work Boots", "input": {"scrap": 2}, "output_item": "work_boots", "work_time": 60},
+            {"id": "scrap_armor", "name": "Scrap Armor", "input": {"metal": 3, "scrap": 2}, "output_item": "scrap_armor", "work_time": 120},
+            {"id": "armor_plate", "name": "Armor Plate", "input": {"metal": 3}, "output_item": "armor_plate", "work_time": 70},
+            # Weapons
             {"id": "pipe_weapon", "name": "Pipe Weapon", "input": {"metal": 3, "scrap": 1}, "output_item": "pipe_weapon", "work_time": 100},
             {"id": "scrap_blade", "name": "Scrap Blade", "input": {"metal": 2, "scrap": 2}, "output_item": "scrap_blade", "work_time": 90},
-            {"id": "reinforced_door", "name": "Reinforced Door", "input": {"metal": 4, "wood": 2}, "output_item": "reinforced_door", "work_time": 120},
-            {"id": "weapon_rack", "name": "Weapon Rack", "input": {"metal": 2, "wood": 3}, "output_item": "weapon_rack", "work_time": 80},
-            {"id": "armor_plate", "name": "Armor Plate", "input": {"metal": 3}, "output_item": "armor_plate", "work_time": 70},
         ],
     },
     "skinshop_loom": {
@@ -232,11 +255,7 @@ BUILDING_TYPES = {
         "workstation": True,
         "multi_recipe": True,
         "recipes": [
-            {"id": "hard_hat", "name": "Hard Hat", "input": {"scrap": 2}, "output_item": "hard_hat", "work_time": 60},
-            {"id": "work_vest", "name": "Work Vest", "input": {"scrap": 2, "wood": 1}, "output_item": "work_vest", "work_time": 70},
-            {"id": "padded_jacket", "name": "Padded Jacket", "input": {"scrap": 3}, "output_item": "padded_jacket", "work_time": 90},
-            {"id": "work_boots", "name": "Work Boots", "input": {"scrap": 2}, "output_item": "work_boots", "work_time": 60},
-            {"id": "scrap_armor", "name": "Scrap Armor", "input": {"metal": 3, "scrap": 2}, "output_item": "scrap_armor", "work_time": 120},
+            # Furniture Only
             {"id": "crash_bed", "name": "Crash Bed", "input": {"scrap": 2, "wood": 2}, "output_item": "crash_bed", "work_time": 90},
             {"id": "comfort_chair", "name": "Comfort Chair", "input": {"wood": 2, "scrap": 1}, "output_item": "comfort_chair", "work_time": 80},
             {"id": "bar_stool", "name": "Bar Stool", "input": {"scrap": 1, "wood": 1}, "output_item": "bar_stool", "work_time": 60},
@@ -255,6 +274,14 @@ BUILDING_TYPES = {
         "workstation": True,
         "multi_recipe": False,
         "size": (2, 1),  # 2x1 horizontal like stove
+        # TYPE 2 RECIPE: Dynamic butchering (empty output = dynamic generation)
+        # Actual outputs determined by corpse metadata (source_species)
+        # See: animals.py::AnimalSpecies for meat_yield and materials
+        # Execution: colonist.py::_crafting_work_at_bench() lines 4080-4130
+        # Example outputs:
+        #   Rat corpse → 1-2 scrap_meat, 1 rat_pelt
+        #   Bird corpse → 2-3 poultry_meat, 1-2 feathers
+        #   Cat corpse → 2-3 scrap_meat, 1 cat_pelt
         "recipe": {"id": "butcher", "name": "Butcher Corpse", "input_items": {"corpse": 1}, "output": {}, "work_time": 60},
         "description": "Cuts up rats and pigeons and shit.",
     },

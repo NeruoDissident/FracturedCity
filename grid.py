@@ -9,8 +9,6 @@ The tile representation is intentionally simple (string markers) so it can be
 extended later to richer objects (rooms, zones, buildings, etc.).
 """
 
-import pygame
-import sprites
 import config
 
 from config import (
@@ -356,7 +354,7 @@ class Grid:
         """Generate a deterministic seed for tile variation based on position."""
         return (x * 7919 + y * 6547 + z * 4973) & 0xFFFFFFFF
     
-    def _try_draw_tile_sprite(self, surface: pygame.Surface, tile_type: str, rect: pygame.Rect, x: int, y: int, z: int, use_construction_tint: bool = False) -> bool:
+    def _try_draw_tile_sprite(self, surface, tile_type: str, rect, x: int, y: int, z: int, use_construction_tint: bool = False) -> bool:
         """Try to draw a tile sprite. Returns True if sprite was drawn, False if should use procedural.
         
         Args:
@@ -429,7 +427,7 @@ class Grid:
         """Get floor pattern variant (0-2) for this tile position."""
         return self._get_tile_variant(x, y, z, 3, salt=0xF10A4)
     
-    def _draw_mineral_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
+    def _draw_mineral_node(self, surface, rect, x: int, y: int, z: int, depleted: bool) -> None:
         """Render a mineral resource node with one of several rock variants."""
         # Try to load sprite first (mineral_node_0 through mineral_node_7)
         if self._try_draw_tile_sprite(surface, "mineral_node", rect, x, y, z, use_construction_tint=depleted):
@@ -507,7 +505,7 @@ class Grid:
             glint_center = (rect.right - 6, rect.top + 6)
             pygame.draw.circle(surface, highlight, glint_center, 2)
     
-    def _draw_wood_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
+    def _draw_wood_node(self, surface, rect, x: int, y: int, z: int, depleted: bool) -> None:
         """Render a wood resource node with tree/lumber variants."""
         # Try to load sprite first (wood_node_0 through wood_node_5)
         if self._try_draw_tile_sprite(surface, "wood_node", rect, x, y, z, use_construction_tint=depleted):
@@ -585,7 +583,7 @@ class Grid:
                 py = rect.top + 4 + rng.randint(0, 8)
                 pygame.draw.rect(surface, highlight, (px, py, 6, 2))
     
-    def _draw_scrap_node(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, depleted: bool) -> None:
+    def _draw_scrap_node(self, surface, rect, x: int, y: int, z: int, depleted: bool) -> None:
         """Render a scrap resource node with junk pile variants."""
         import random
         
@@ -646,7 +644,7 @@ class Grid:
             # Metallic glint
             pygame.draw.circle(surface, (200, 200, 210), (rect.right - 5, rect.top + 5), 2)
     
-    def _draw_stockpile_resource(self, surface: pygame.Surface, rect: pygame.Rect, 
+    def _draw_stockpile_resource(self, surface, rect, 
                                   res_type: str, amount: int, x: int, y: int, z: int) -> None:
         """Draw a resource stack on a stockpile tile matching the map node style."""
         import random
@@ -727,7 +725,7 @@ class Grid:
             pygame.draw.rect(surface, (150, 150, 150), stack_rect)
             pygame.draw.rect(surface, (200, 200, 200), stack_rect, 1)
     
-    def _draw_street_tile(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, tile_type: str) -> None:
+    def _draw_street_tile(self, surface, rect, x: int, y: int, z: int, tile_type: str) -> None:
         """Render street tiles with cobblestone pattern and damage variations."""
         import random
         
@@ -819,7 +817,7 @@ class Grid:
                 cy = rect.top + rng.randint(3, rect.height - 4)
                 pygame.draw.circle(surface, COLOR_RESOURCE_NODE_MINERAL, (cx, cy), 2)
     
-    def _draw_sidewalk_tile(self, surface: pygame.Surface, rect: pygame.Rect, x: int, y: int, z: int, designated: bool = False) -> None:
+    def _draw_sidewalk_tile(self, surface, rect, x: int, y: int, z: int, designated: bool = False) -> None:
         """Render sidewalk tiles with brick pattern."""
         import random
         
@@ -917,7 +915,7 @@ class Grid:
         screen_y = world_y - self.camera_y
         return (screen_x, screen_y)
     
-    def _draw_layer_below(self, surface: pygame.Surface, below_z: int, cam_x: int, cam_y: int,
+    def _draw_layer_below(self, surface, below_z: int, cam_x: int, cam_y: int,
                           start_x: int, start_y: int, end_x: int, end_y: int) -> None:
         """Draw the Z-level below with transparency for context.
         
@@ -1013,7 +1011,7 @@ class Grid:
         temp_surface.set_alpha(100)  # 100/255 ≈ 40% opacity
         surface.blit(temp_surface, (start_x * tile_size - cam_x, start_y * tile_size - cam_y))
 
-    def draw(self, surface: pygame.Surface, hovered_tile: tuple[int, int] | None = None) -> None:
+    def draw(self, surface, hovered_tile: tuple[int, int] | None = None) -> None:
         """Render the grid and its tiles to the given surface.
         
         If hovered_tile is provided, that tile will be highlighted momentarily.

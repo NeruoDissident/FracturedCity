@@ -55,6 +55,9 @@ class ColonistSprite(arcade.Sprite):
             print(f"[ColonistSprite] Failed to load hair: {hair_path}, error: {e}")
             self.layer_textures['hair'] = None
         
+        # Load equipment layers from colonist.equipment
+        self._load_equipment_textures()
+        
         # Use body texture as main texture for sprite list compatibility
         self.texture = self.layer_textures.get('body')
         
@@ -64,6 +67,39 @@ class ColonistSprite(arcade.Sprite):
         
         # Initial position
         self.update_position()
+    
+    def _load_equipment_textures(self):
+        """Load equipment sprite textures from colonist.equipment."""
+        equipment = getattr(self.colonist, 'equipment', {})
+        
+        # Equipment slots to check (in order they'll be drawn)
+        equipment_slots = ['feet', 'body', 'hands', 'weapon', 'head', 'implant', 'charm']
+        
+        for slot in equipment_slots:
+            item_data = equipment.get(slot)
+            if item_data is None:
+                self.layer_textures[f'equipment_{slot}'] = None
+                continue
+            
+            # Get item ID from item data
+            item_id = item_data.get('id', '')
+            if not item_id:
+                self.layer_textures[f'equipment_{slot}'] = None
+                continue
+            
+            # Try to load equipment sprite
+            equipment_path = f"assets/equipment/{slot}/{item_id}.png"
+            try:
+                self.layer_textures[f'equipment_{slot}'] = arcade.load_texture(equipment_path)
+                print(f"[ColonistSprite] Loaded equipment: {equipment_path}")
+            except Exception as e:
+                # Equipment sprites are optional - print debug info
+                print(f"[ColonistSprite] No sprite for {slot}/{item_id} (expected at: {equipment_path})")
+                self.layer_textures[f'equipment_{slot}'] = None
+    
+    def update_equipment(self):
+        """Reload equipment textures when equipment changes."""
+        self._load_equipment_textures()
     
     def update_position(self):
         """Update sprite position from colonist data with smooth interpolation."""
@@ -178,8 +214,28 @@ class ColonistRenderer:
         debug_draw_count = 0
         for sprite, colonist in sprites_on_z:
             # Draw each layer in order (back to front)
-            layers = ['body', 'head', 'hair']
+            # Equipment layers are interleaved with body parts for proper depth
+            layers = [
+                'equipment_feet',    # Boots under body
+                'body',              # Colonist body
+                'equipment_body',    # Vest/armor over body
+                'equipment_hands',   # Gloves on hands
+                'head',              # Colonist head
+                'hair',              # Colonist hair (only if no head equipment)
+                'equipment_head',    # Hat/helmet (replaces hair)
+                'equipment_weapon',  # Weapon held/holstered
+                'equipment_implant', # Implants (optional visual)
+                'equipment_charm',   # Charms (optional visual)
+            ]
+            
+            # Check if head equipment exists to skip hair
+            has_head_equipment = sprite.layer_textures.get('equipment_head') is not None
+            
             for layer_name in layers:
+                # Skip hair if wearing head equipment
+                if layer_name == 'hair' and has_head_equipment:
+                    continue
+                
                 texture = sprite.layer_textures.get(layer_name)
                 if texture:
                     # Create temporary sprite for this layer
