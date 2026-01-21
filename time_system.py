@@ -79,7 +79,7 @@ class GameTime:
     def is_sleep_time(self) -> bool:
         """Check if colonists should want to sleep (night or late evening)."""
         h = self.hour
-        return h >= 21 or h < 6
+        return h >= 2 and h < 6
     
     def get_time_string(self) -> str:
         """Get formatted time string like '14:30'."""

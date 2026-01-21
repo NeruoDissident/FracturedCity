@@ -36,9 +36,9 @@ def spawn_recreation_jobs(colonists: List, grid, game_tick: int) -> None:
     from time_system import get_game_time
     hour = get_game_time().hour
     
-    # Recreation hours are typically 18-22 (6pm-10pm)
+    # Recreation hours: 01:00-02:00 (1 hour before bed at 02:00)
     # Check if we're in recreation time for default schedule
-    is_recreation_time = 18 <= hour < 22
+    is_recreation_time = hour == 1
     
     if not is_recreation_time:
         return

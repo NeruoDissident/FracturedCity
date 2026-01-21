@@ -313,7 +313,6 @@ class FracturedCityWindow(arcade.Window):
             # Draw animal shadows
             for sprite in self.animal_renderer.sprite_list:
                 if sprite.animal.z == current_z:
-                    from config import TILE_SIZE
                     shadow_offset_y = -6
                     shadow_width = TILE_SIZE * 0.5
                     shadow_height = TILE_SIZE * 0.2
@@ -1077,7 +1076,68 @@ class FracturedCityWindow(arcade.Window):
                 print(f"[Z-Level] Moved down to Z={self.grid.current_z}")
         
         if key == arcade.key.ESCAPE:
-            arcade.close_window()
+            # Close open UI panels instead of closing the game
+            try:
+                from ui_arcade_workstation import get_workstation_panel
+                from ui_arcade_visitor import get_visitor_panel
+                from ui_arcade_trader import get_trader_panel
+                from ui_arcade_bed import get_bed_assignment_panel
+                from ui_arcade_stockpile import get_stockpile_panel
+                from ui_arcade_colonist_popup import get_colonist_popup
+                from ui_arcade_animal_popup import get_animal_popup
+                
+                # Check if any panels are open and close them
+                panels_closed = False
+                
+                ws_panel = get_workstation_panel()
+                if ws_panel.visible:
+                    ws_panel.close()
+                    panels_closed = True
+                    print("[ESC] Closed workstation panel")
+                
+                visitor_panel = get_visitor_panel()
+                if visitor_panel.visible:
+                    visitor_panel.close()
+                    panels_closed = True
+                    print("[ESC] Closed visitor panel")
+                
+                trader_panel = get_trader_panel()
+                if trader_panel.visible:
+                    trader_panel.close()
+                    panels_closed = True
+                    print("[ESC] Closed trader panel")
+                
+                bed_panel = get_bed_assignment_panel()
+                if bed_panel.visible:
+                    bed_panel.close()
+                    panels_closed = True
+                    print("[ESC] Closed bed assignment panel")
+                
+                stockpile_panel = get_stockpile_panel()
+                if stockpile_panel.visible:
+                    stockpile_panel.close()
+                    panels_closed = True
+                    print("[ESC] Closed stockpile panel")
+                
+                colonist_popup = get_colonist_popup()
+                if colonist_popup.visible:
+                    colonist_popup.close()
+                    panels_closed = True
+                    print("[ESC] Closed colonist popup")
+                
+                animal_popup = get_animal_popup()
+                if animal_popup.visible:
+                    animal_popup.close()
+                    panels_closed = True
+                    print("[ESC] Closed animal popup")
+                
+                # ESC only closes panels, never closes the game
+                if not panels_closed:
+                    print("[ESC] No panels open to close")
+            except Exception as e:
+                print(f"[ESC ERROR] {e}")
+                import traceback
+                traceback.print_exc()
         
         # Debug keys
         elif key == arcade.key.F4:
