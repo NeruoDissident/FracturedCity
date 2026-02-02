@@ -1555,6 +1555,13 @@ def _create_starter_stockpile(grid, colonist_spawn: tuple[int, int]) -> None:
             if stored > 0:
                 tile_index += 1  # Move to next tile for variety
     
+    # Add starter items (tomato seeds for farming)
+    from items import spawn_world_item
+    if tile_index < len(tiles):
+        tx, ty, tz = tiles[tile_index]
+        spawn_world_item(tx, ty, tz, "tomato_seed", count=10)
+        print(f"[WorldGen] Added 10 tomato seeds to starter stockpile")
+    
     print(f"[WorldGen] ★ Starter stockpile created at ({stockpile_x}, {stockpile_y}) with resources")
 
 

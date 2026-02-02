@@ -81,6 +81,7 @@ class ColonistPopup:
     
     def __init__(self):
         self.visible = False
+        self.is_embedded = False  # New flag for embedded mode
         self.colonist = None
         self.colonists_list = []  # For relationship lookups
         self.current_index = 0  # Index in colonists_list
@@ -122,8 +123,13 @@ class ColonistPopup:
             self.current_index = self.colonists_list.index(colonist)
         else:
             self.current_index = 0
-        self.current_tab = 0
-        self.scroll_offset = 0
+        
+        # Only reset tab if it's a different colonist or not embedded
+        # In embedded mode, we might want to preserve the tab selection when switching rows
+        if not self.is_embedded:
+            self.current_tab = 0
+            self.scroll_offset = 0
+            
         # Expand all categories by default for now
         self.expanded_categories = set(EQUIPMENT_CATEGORIES.keys())
     
@@ -151,31 +157,40 @@ class ColonistPopup:
         if not self.visible:
             return False
         
-        # Check close button
-        if self.close_button_rect:
-            if (self.close_button_rect[0] <= x <= self.close_button_rect[1] and
-                self.close_button_rect[2] <= y <= self.close_button_rect[3]):
+        # === Window Chrome Interactions (Only if not embedded) ===
+        if not self.is_embedded:
+            # Check close button
+            if self.close_button_rect:
+                if (self.close_button_rect[0] <= x <= self.close_button_rect[1] and
+                    self.close_button_rect[2] <= y <= self.close_button_rect[3]):
+                    self.close()
+                    return True
+            
+            # Check prev/next buttons (before outside panel check)
+            btn_y = self.panel_y + self.panel_height - 35
+            prev_x = self.panel_x + self.panel_width - 100
+            next_x = self.panel_x + self.panel_width - 55
+            
+            if prev_x <= x <= prev_x + 35 and btn_y <= y <= btn_y + 25:
+                self.prev_colonist()
+                return True
+            
+            if next_x <= x <= next_x + 35 and btn_y <= y <= btn_y + 25:
+                self.next_colonist()
+                return True
+            
+            # Check if click is outside panel (close on outside click)
+            if not (self.panel_x <= x <= self.panel_x + self.panel_width and
+                    self.panel_y <= y <= self.panel_y + self.panel_height):
                 self.close()
                 return True
-        
-        # Check prev/next buttons (before outside panel check)
-        btn_y = self.panel_y + self.panel_height - 35
-        prev_x = self.panel_x + self.panel_width - 100
-        next_x = self.panel_x + self.panel_width - 55
-        
-        if prev_x <= x <= prev_x + 35 and btn_y <= y <= btn_y + 25:
-            self.prev_colonist()
-            return True
-        
-        if next_x <= x <= next_x + 35 and btn_y <= y <= btn_y + 25:
-            self.next_colonist()
-            return True
-        
-        # Check if click is outside panel (close on outside click)
-        if not (self.panel_x <= x <= self.panel_x + self.panel_width and
-                self.panel_y <= y <= self.panel_y + self.panel_height):
-            self.close()
-            return True
+        else:
+            # Embedded mode: Bounds check is handled by parent, but we double check
+            if not (self.panel_x <= x <= self.panel_x + self.panel_width and
+                    self.panel_y <= y <= self.panel_y + self.panel_height):
+                return False
+
+        # === Content Interactions (Tabs, Scroll, Buttons) ===
         
         # Check tab clicks
         for i, rect in enumerate(self.tab_rects):
@@ -241,16 +256,35 @@ class ColonistPopup:
         self.scroll_offset = max(0, min(self.scroll_offset, self.max_scroll))
         
         return True
-    
+        
+    def draw_embedded(self, x: int, y: int, width: int, height: int, mouse_x: int, mouse_y: int):
+        """Draw the panel embedded within another view (e.g. Dashboard).
+        
+        Args:
+            x, y, width, height: Geometry to draw into (y is bottom)
+            mouse_x, mouse_y: Current mouse position for hover effects
+        """
+        self.is_embedded = True
+        self.visible = True
+        
+        # Update geometry
+        self.panel_x = x
+        self.panel_y = y
+        self.panel_width = width
+        self.panel_height = height
+        
+        # Recalculate tab width for new size
+        self.tab_width = self.panel_width // len(self.TABS)
+        
+        # Draw content (skipping overlay and frame)
+        self._draw_content(mouse_x, mouse_y)
+
     def draw(self, mouse_x: int, mouse_y: int):
-        """Draw the popup panel."""
+        """Draw the popup panel as a standalone modal."""
         if not self.visible or self.colonist is None:
             return
-        
-        # Reset clickable areas
-        self.tab_rects = []
-        self.category_rects = {}
-        self.equipment_rects = []
+            
+        self.is_embedded = False
         
         # Draw semi-transparent overlay
         arcade.draw_lrbt_rectangle_filled(
@@ -258,7 +292,7 @@ class ColonistPopup:
             (0, 0, 0, 180)
         )
         
-        # Draw panel background
+        # Draw panel background/frame
         arcade.draw_lrbt_rectangle_filled(
             self.panel_x, self.panel_x + self.panel_width,
             self.panel_y, self.panel_y + self.panel_height,
@@ -270,6 +304,14 @@ class ColonistPopup:
             COLOR_BORDER_BRIGHT, 2
         )
         
+        # Draw Window Chrome (Title, Buttons)
+        self._draw_chrome()
+        
+        # Draw Content
+        self._draw_content(mouse_x, mouse_y)
+
+    def _draw_chrome(self):
+        """Draw window chrome (Title bar, close button, nav buttons)."""
         # Draw title bar
         title_height = 50
         arcade.draw_lrbt_rectangle_filled(
@@ -368,9 +410,26 @@ class ColonistPopup:
             font_name=UI_FONT,
             bold=True
         )
+
+    def _draw_content(self, mouse_x, mouse_y):
+        """Draw the main content (Tabs + Tab Content)."""
+        # Reset clickable areas
+        self.tab_rects = []
+        self.category_rects = {}
+        self.equipment_rects = []
         
+        # Adjust layout based on mode
+        if self.is_embedded:
+            # Embedded: Tabs start at top of panel
+            title_height = 0 
+            top_y = self.panel_y + self.panel_height
+        else:
+            # Standalone: Tabs start below title bar
+            title_height = 50
+            top_y = self.panel_y + self.panel_height - title_height
+
         # Draw tabs
-        tab_y = self.panel_y + self.panel_height - title_height
+        tab_y = top_y
         for i, tab_name in enumerate(self.TABS):
             tab_x = self.panel_x + i * self.tab_width
             
@@ -393,12 +452,15 @@ class ColonistPopup:
             
             # Tab text
             text_color = COLOR_TEXT_BRIGHT if is_active else COLOR_TEXT_DIM
+            # Font size adjustments for narrow tabs in embedded mode
+            font_size = 10 if self.is_embedded and self.tab_width < 60 else 12
+            
             arcade.draw_text(
-                tab_name,
+                tab_name[:3] if self.is_embedded and self.tab_width < 40 else tab_name, # Truncate if very small
                 tab_x + self.tab_width // 2,
                 tab_y - self.tab_height // 2 - 5,
                 text_color,
-                font_size=12,
+                font_size=font_size,
                 font_name=UI_FONT,
                 anchor_x="center",
                 bold=is_active

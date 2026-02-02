@@ -322,6 +322,7 @@ class ActionBar:
             {"label": "Rooms", "x": btn_start_x + (self.button_width + self.button_spacing) * 6, "y": btn_y, "mode": "rooms"},
             {"label": "Harvest", "x": btn_start_x + (self.button_width + self.button_spacing) * 7, "y": btn_y, "mode": "harvest"},
             {"label": "Salvage", "x": btn_start_x + (self.button_width + self.button_spacing) * 8, "y": btn_y, "mode": "salvage"},
+            {"label": "Farming", "x": btn_start_x + (self.button_width + self.button_spacing) * 9, "y": btn_y, "mode": "farming"},
         ]
         
         # Active mode tracking
@@ -397,6 +398,10 @@ class ActionBar:
             {"label": "Hospital", "tool": "room_hospital"},
             {"label": "Social Venue", "tool": "room_social_venue"},
             {"label": "Dining Hall", "tool": "room_dining_hall"},
+        ]
+        
+        self.farming_submenu = [
+            {"label": "Plant Bed", "tool": "plant_bed", "cost": "2 wood, 1 scrap"},
         ]
         
         # Submenu display state
@@ -800,6 +805,9 @@ class ActionBar:
                         self.active_tool = "salvage"
                         self.submenu_visible = False
                         self.submenu_items = []
+                    elif button["mode"] == "farming":
+                        self.submenu_visible = True
+                        self.submenu_items = self.farming_submenu
                 
                 print(f"[ActionBar] Mode: {self.active_mode}, Tool: {self.active_tool}")
                 return True

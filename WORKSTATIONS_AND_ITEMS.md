@@ -113,11 +113,14 @@ Complete list of all crafting stations, what they produce, and item stats.
 **Purpose:** Cooking food
 
 ### Recipes
+**Note:** Recipes use tag-based ingredient matching. `@meat` accepts any meat (scrap_meat, poultry_meat, etc.), `@vegetable` accepts any vegetable (tomato, carrot, etc.)
+
 - **Simple Meal**: 2 Raw Food + 1 Power → 1 Cooked Meal
-- **Grilled Scraps**: 1 Scrap Meat + 1 Power → 1 Cooked Meal
-- **Meat Stew**: 2 Scrap Meat + 1 Power → 1 Cooked Meal
-- **Hearty Roast**: 3 Scrap Meat + 2 Power → 1 Cooked Meal
-- **Poultry Roast**: 2 Poultry Meat + 1 Power → 1 Cooked Meal
+- **Grilled Scraps**: 1 @meat + 1 Power → 1 Cooked Meal
+- **Meat Stew**: 2 @meat + 1 Power → 1 Cooked Meal
+- **Hearty Roast**: 2 @meat + 1 @vegetable + 2 Power → 1 Cooked Meal
+- **Poultry Roast**: 2 @meat + 1 Power → 1 Cooked Meal
+- **Vegetable Stew**: 2 @vegetable + 1 Power → 1 Cooked Meal
 
 ---
 
@@ -134,6 +137,34 @@ Complete list of all crafting stations, what they produce, and item stats.
 - **Dog**: 3-5 Scrap Meat, 1-2 Dog Pelt
 - **Raccoon**: 3-4 Scrap Meat, 1 Raccoon Pelt
 - **Opossum**: 2-3 Scrap Meat, 1 Opossum Pelt
+
+---
+
+## PLANT BED
+**Purpose:** Rooftop farming (2x1 horizontal workstation)
+
+### Placement
+- **Rooftop Only** (Z=1+) - Ground is contaminated, rooftops have sun/rain/clean air
+
+### Crops
+- **Tomato**: 1 Tomato Seed → 2 Tomatoes (9 in-game hours growth time)
+  - Category: Vegetable
+  - Harvested crops carry metadata (crop type, harvest time, harvested by)
+  - Display: "Tomato (Tomato)" (similar to "Scrap Meat (Rat)")
+
+### Mechanics
+1. Queue planting job (requires seeds in stockpile)
+2. Colonist plants seed (instant)
+3. Crop grows through 3 stages (seedling → growing → mature)
+4. Harvest job auto-created when mature
+5. Colonist harvests, items spawn adjacent to plant bed
+6. Items auto-hauled to stockpile
+7. Next planting job starts (if queued)
+
+### Future Crops
+- Carrots, potatoes, herbs, mushrooms, medicinal plants
+- Each crop will have category tag (vegetable, fruit, grain, herb)
+- Tag system allows recipes to accept any crop in category
 
 ---
 

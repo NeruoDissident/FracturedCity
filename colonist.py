@@ -1993,6 +1993,14 @@ class Colonist:
         Returns:
             True if job matches current schedule period
         """
+        # DEBUG MODE: Skip recreation time restrictions
+        import main
+        if hasattr(main, 'DEBUG_SKIP_SLEEP') and main.DEBUG_SKIP_SLEEP:
+            # Allow work jobs anytime, skip recreation jobs entirely
+            if job_category == "recreation":
+                return False  # Don't do recreation in debug mode
+            return True  # Allow all other jobs anytime
+        
         # Training jobs during training time
         if job_category == "training":
             return self.is_training_time()
@@ -2806,7 +2814,13 @@ class Colonist:
         target_z = self.current_job.z  # Use job's z-level
 
         # Already at target (including z-level)
-        if self.x == target_x and self.y == target_y and self.z == target_z:
+        # For harvest_crop jobs, allow adjacent position (like crafting jobs)
+        if self.current_job and self.current_job.type == "harvest_crop":
+            at_target = (abs(self.x - target_x) <= 1 and abs(self.y - target_y) <= 1 and self.z == target_z)
+        else:
+            at_target = (self.x == target_x and self.y == target_y and self.z == target_z)
+        
+        if at_target:
             self.state = "working"
             self.current_path = []
             self.stuck_timer = 0
@@ -2823,7 +2837,18 @@ class Colonist:
         
         # Calculate path if we don't have one
         if not self.current_path:
-            self.current_path = self._calculate_path(grid, target_x, target_y, target_z, game_tick)
+            # For harvest_crop jobs, path to adjacent walkable tile (plant bed is unwalkable)
+            if self.current_job and self.current_job.type == "harvest_crop":
+                # Find adjacent walkable tile to path to
+                for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+                    adj_x, adj_y = target_x + dx, target_y + dy
+                    if grid.is_walkable(adj_x, adj_y, target_z):
+                        self.current_path = self._calculate_path(grid, adj_x, adj_y, target_z, game_tick)
+                        if self.current_path:
+                            break
+            else:
+                self.current_path = self._calculate_path(grid, target_x, target_y, target_z, game_tick)
+            
             self.stuck_timer = 0
             
             if not self.current_path:
@@ -3092,6 +3117,14 @@ class Colonist:
                 elif current_tile == "tinker_station":
                     grid.set_tile(job.x, job.y, "finished_tinker_station", z=job.z)
                     buildings.register_workstation(job.x, job.y, job.z, "tinker_station")
+                elif current_tile == "plant_bed":
+                    grid.set_tile(job.x, job.y, "finished_plant_bed", z=job.z)
+                    # Mark multi-tile footprint as unwalkable
+                    width, height = buildings.get_building_size("plant_bed")
+                    for dy in range(height):
+                        for dx in range(width):
+                            grid.walkable[job.z][job.y + dy][job.x + dx] = False
+                    buildings.register_workstation(job.x, job.y, job.z, "plant_bed")
                 elif current_tile == "scrap_bar_counter":
                     grid.set_tile(job.x, job.y, "finished_scrap_bar_counter", z=job.z)
                 elif current_tile == "stage":
@@ -3147,6 +3180,43 @@ class Colonist:
                     0.1,  # Small mood bonus
                     game_tick=self._game_tick
                 )
+                
+                remove_job(job)
+                self.current_job = None
+                self.state = "idle"
+            elif job.type == "harvest_crop":
+                # Harvest mature crop
+                from crops import harvest_crop
+                from items import spawn_world_item, add_item_metadata, get_world_items_at
+                
+                result = harvest_crop(job.x, job.y, job.z)
+                if result:
+                    item_id, quantity, crop_type = result
+                    # Spawn harvested items adjacent to plant bed
+                    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
+                        drop_x, drop_y = job.x + dx, job.y + dy
+                        if grid.is_walkable(drop_x, drop_y, job.z):
+                            for _ in range(quantity):
+                                spawn_world_item(drop_x, drop_y, job.z, item_id)
+                                
+                                # Add metadata to harvested crop (replicates butchering pattern)
+                                items_at_loc = get_world_items_at(drop_x, drop_y, job.z)
+                                if items_at_loc:
+                                    latest_item = items_at_loc[-1]
+                                    add_item_metadata(
+                                        latest_item,
+                                        source_species=crop_type,
+                                        harvest_tick=self._game_tick,
+                                        harvested_by=self.uid
+                                    )
+                            
+                            print(f"[Farming] {self.name} harvested {quantity}x {item_id} ({crop_type}) at ({job.x}, {job.y}, {job.z})")
+                            break
+                    
+                    # Generate work thought
+                    self.add_thought("work", "Harvested fresh crops.", 0.1, game_tick=self._game_tick)
+                else:
+                    print(f"[Farming] {self.name} found no mature crop at ({job.x}, {job.y}, {job.z})")
                 
                 remove_job(job)
                 self.current_job = None
@@ -3770,7 +3840,23 @@ class Colonist:
                 
                 # Check if this is an item input (corpse, meat, etc.) or regular resource
                 recipe = buildings.get_workstation_recipe(job.x, job.y, job.z)
-                is_item_input = recipe and res_type in recipe.get("input_items", {})
+                is_item_input = False
+                
+                if recipe:
+                    # Check for exact match
+                    if res_type in recipe.get("input_items", {}):
+                        is_item_input = True
+                    else:
+                        # Check for tag-based match (e.g., tomato matches @vegetable)
+                        from items import get_item_def
+                        item_def = get_item_def(res_type)
+                        if item_def:
+                            for recipe_input in recipe.get("input_items", {}):
+                                if recipe_input.startswith("@"):
+                                    tag_to_match = recipe_input[1:]
+                                    if tag_to_match in item_def.tags:
+                                        is_item_input = True
+                                        break
                 
                 if is_item_input:
                     # Store in equipment_items for item inputs
@@ -3933,15 +4019,35 @@ class Colonist:
                 if self.x == source_x and self.y == source_y and self.z == source_z:
                     # Pick up from equipment storage (corpses, components, etc.)
                     equipment_items = zones.get_equipment_at_tile(source_x, source_y, source_z)
+                    
+                    # Check if this is a tag-based search
+                    search_by_tag = item_type.startswith("@")
+                    tag_to_find = item_type[1:] if search_by_tag else None
+                    
                     for eq_item in equipment_items:
-                        if eq_item.get("id") == item_type:
+                        item_matches = False
+                        
+                        if search_by_tag:
+                            # Tag-based matching - check if item has the tag
+                            from items import get_item_def
+                            item_def = get_item_def(eq_item.get("id", ""))
+                            if item_def and tag_to_find in item_def.tags:
+                                item_matches = True
+                        else:
+                            # Exact ID matching
+                            if eq_item.get("id") == item_type:
+                                item_matches = True
+                        
+                        if item_matches:
                             # Remove this item
                             item = zones.remove_equipment_from_tile(source_x, source_y, source_z)
                             if item:
                                 # Convert to carrying format
-                                self.carrying = {"type": item_type, "amount": 1, "item": item}
+                                # Use actual item ID, not the tag
+                                actual_item_id = item.get("id", item_type)
+                                self.carrying = {"type": actual_item_id, "amount": 1, "item": item}
                                 self.pick_up_item(self.carrying)
-                                spend_from_stockpile(item_type, 1)
+                                spend_from_stockpile(actual_item_id, 1)
                                 self.current_path = []
                             return
                     return
@@ -4015,6 +4121,56 @@ class Colonist:
         work_time = recipe.get("work_time", 60)
         
         if ws["progress"] >= work_time:
+            # === SPECIAL CASE: PLANT BED FARMING ===
+            # For plant beds, planting completes quickly but crop grows over time
+            ws_type = ws.get("type", "")
+            if ws_type == "plant_bed":
+                from crops import plant_crop, CROPS
+                
+                # Determine crop type from recipe
+                recipe_id = recipe.get("id", "")
+                crop_type = None
+                if recipe_id == "grow_tomato":
+                    crop_type = "tomato"
+                
+                if crop_type and crop_type in CROPS:
+                    # Plant the crop
+                    from crops import get_crop_at
+                    existing_crop = get_crop_at(job.x, job.y, job.z)
+                    if existing_crop:
+                        print(f"[Farming] ERROR: Trying to plant but crop already exists at ({job.x}, {job.y}, {job.z}): {existing_crop}")
+                    
+                    if plant_crop(job.x, job.y, job.z, crop_type, game_tick):
+                        # Consume seed input
+                        buildings.consume_workstation_inputs(job.x, job.y, job.z)
+                        
+                        # Update order progress for queue system
+                        orders = ws.get("orders", [])
+                        if orders:
+                            # Increment completed count for first order
+                            orders[0]["completed"] = orders[0].get("completed", 0) + 1
+                            orders[0]["in_progress"] = False
+                            print(f"[Farming] Order progress: {orders[0]['completed']}/{orders[0].get('target', 1)}")
+                        
+                        # Complete job
+                        ws["progress"] = 0
+                        buildings.release_workstation(job.x, job.y, job.z)
+                        buildings.mark_crafting_job_completed(job.x, job.y, job.z)
+                        remove_job(job)
+                        self.current_job = None
+                        self.state = "idle"
+                        
+                        print(f"[Farming] {self.name} planted {crop_type} at ({job.x}, {job.y}, {job.z})")
+                        return
+                    else:
+                        print(f"[Farming] Failed to plant {crop_type} - position occupied at ({job.x}, {job.y}, {job.z})")
+                        ws["progress"] = 0
+                        buildings.mark_crafting_job_completed(job.x, job.y, job.z)
+                        remove_job(job)
+                        self.current_job = None
+                        self.state = "idle"
+                        return
+            
             # Check if this produces an item or a resource
             output_item_id = recipe.get("output_item")
             
@@ -4344,6 +4500,16 @@ class Colonist:
         from time_system import get_game_time
         
         if self.is_dead:
+            return
+        
+        # DEBUG MODE: Skip sleep entirely if debug flag is set
+        import main
+        if hasattr(main, 'DEBUG_SKIP_SLEEP') and main.DEBUG_SKIP_SLEEP:
+            self.tiredness = 0  # Reset tiredness
+            if self.is_sleeping:
+                self.is_sleeping = False
+                self.sleep_target = None
+                self.state = "idle"
             return
         
         game_time = get_game_time()

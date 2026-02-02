@@ -26,6 +26,7 @@ class AnimalPopup:
     
     def __init__(self):
         self.visible = False
+        self.is_embedded = False  # New flag for embedded mode
         self.animals = []
         self.current_index = 0
         self.current_tab = 0
@@ -54,8 +55,11 @@ class AnimalPopup:
         self.visible = True
         self.animals = animals
         self.current_index = animal_index
-        self.current_tab = 0
-        self.scroll_offset = 0
+        
+        # Only reset tab if not embedded
+        if not self.is_embedded:
+            self.current_tab = 0
+            self.scroll_offset = 0
         
     def close(self):
         """Close the popup."""
@@ -77,31 +81,40 @@ class AnimalPopup:
         if not self.visible:
             return False
         
-        # Check if click is outside panel - close popup
-        if not (self.panel_x <= x <= self.panel_x + self.panel_width and
-                self.panel_y <= y <= self.panel_y + self.panel_height):
-            self.close()
-            return True  # Consume the click to prevent world interaction
-        
-        # Check close button
-        if self.close_button_rect:
-            left, right, bottom, top = self.close_button_rect
-            if left <= x <= right and bottom <= y <= top:
+        # === Window Chrome Interactions (Only if not embedded) ===
+        if not self.is_embedded:
+            # Check if click is outside panel - close popup
+            if not (self.panel_x <= x <= self.panel_x + self.panel_width and
+                    self.panel_y <= y <= self.panel_y + self.panel_height):
                 self.close()
+                return True  # Consume the click to prevent world interaction
+            
+            # Check close button
+            if self.close_button_rect:
+                left, right, bottom, top = self.close_button_rect
+                if left <= x <= right and bottom <= y <= top:
+                    self.close()
+                    return True
+            
+            # Check prev/next buttons
+            btn_y = self.panel_y + self.panel_height - 35
+            prev_x = self.panel_x + self.panel_width - 100
+            next_x = self.panel_x + self.panel_width - 55
+            
+            if prev_x <= x <= prev_x + 35 and btn_y <= y <= btn_y + 25:
+                self.prev_animal()
                 return True
+            
+            if next_x <= x <= next_x + 35 and btn_y <= y <= btn_y + 25:
+                self.next_animal()
+                return True
+        else:
+            # Embedded mode: Bounds check is handled by parent, but we double check
+            if not (self.panel_x <= x <= self.panel_x + self.panel_width and
+                    self.panel_y <= y <= self.panel_y + self.panel_height):
+                return False
         
-        # Check prev/next buttons
-        btn_y = self.panel_y + self.panel_height - 35
-        prev_x = self.panel_x + self.panel_width - 100
-        next_x = self.panel_x + self.panel_width - 55
-        
-        if prev_x <= x <= prev_x + 35 and btn_y <= y <= btn_y + 25:
-            self.prev_animal()
-            return True
-        
-        if next_x <= x <= next_x + 35 and btn_y <= y <= btn_y + 25:
-            self.next_animal()
-            return True
+        # === Content Interactions ===
         
         # Check tabs
         for i, rect in enumerate(self.tab_rects):
@@ -141,11 +154,35 @@ class AnimalPopup:
         self.scroll_offset = max(0, min(self.scroll_offset, self.max_scroll))
         
         return True
+        
+    def draw_embedded(self, x: int, y: int, width: int, height: int, mouse_x: int, mouse_y: int):
+        """Draw the panel embedded within another view (e.g. Dashboard).
+        
+        Args:
+            x, y, width, height: Geometry to draw into (y is bottom)
+            mouse_x, mouse_y: Current mouse position for hover effects
+        """
+        self.is_embedded = True
+        self.visible = True
+        
+        # Update geometry
+        self.panel_x = x
+        self.panel_y = y
+        self.panel_width = width
+        self.panel_height = height
+        
+        # Recalculate tab width for new size
+        self.tab_width = self.panel_width // len(self.TABS)
+        
+        # Draw content (skipping overlay and frame)
+        self._draw_content(mouse_x, mouse_y)
     
     def draw(self, mouse_x: int, mouse_y: int):
-        """Draw the popup panel."""
+        """Draw the popup panel as a standalone modal."""
         if not self.visible or not self.animals:
             return
+            
+        self.is_embedded = False
         
         if self.current_index >= len(self.animals):
             self.current_index = 0
@@ -179,6 +216,14 @@ class AnimalPopup:
             COLOR_NEON_MAGENTA, 2
         )
         
+        # Draw Window Chrome
+        self._draw_chrome(animal)
+        
+        # Draw Content
+        self._draw_content(mouse_x, mouse_y)
+
+    def _draw_chrome(self, animal):
+        """Draw window chrome (Title bar, close button, nav buttons)."""
         # Draw title bar
         title_height = 50
         arcade.draw_lrbt_rectangle_filled(
@@ -257,9 +302,6 @@ class AnimalPopup:
             bold=True
         )
         
-        # Store button rects for click detection
-        # (Note: prev/next handled by checking coordinates directly in handle_click if needed)
-        
         # Draw close button
         close_size = 30
         close_x = self.panel_x + self.panel_width - close_size - 10
@@ -280,9 +322,33 @@ class AnimalPopup:
             font_name=UI_FONT,
             bold=True
         )
+
+    def _draw_content(self, mouse_x, mouse_y):
+        """Draw the main content (Tabs + Tab Content)."""
+        if not self.animals:
+            return
+            
+        if self.current_index >= len(self.animals):
+            self.current_index = 0
         
+        animal = self.animals[self.current_index]
+        
+        # Reset clickable areas
+        self.tab_rects = []
+        self.hunt_button_rect = None
+        
+        # Adjust layout based on mode
+        if self.is_embedded:
+            # Embedded: Tabs start at top of panel
+            title_height = 0 
+            top_y = self.panel_y + self.panel_height
+        else:
+            # Standalone: Tabs start below title bar
+            title_height = 50
+            top_y = self.panel_y + self.panel_height - title_height
+
         # Draw tabs
-        tab_y = self.panel_y + self.panel_height - title_height
+        tab_y = top_y
         for i, tab_name in enumerate(self.TABS):
             tab_x = self.panel_x + i * self.tab_width
             
@@ -305,12 +371,15 @@ class AnimalPopup:
             
             # Tab text
             text_color = COLOR_TEXT_BRIGHT if is_active else COLOR_TEXT_DIM
+            # Font size adjustments for narrow tabs in embedded mode
+            font_size = 10 if self.is_embedded and self.tab_width < 60 else 12
+            
             arcade.draw_text(
-                tab_name,
+                tab_name[:3] if self.is_embedded and self.tab_width < 40 else tab_name,
                 tab_x + self.tab_width // 2,
                 tab_y - self.tab_height // 2 - 5,
                 text_color,
-                font_size=12,
+                font_size=font_size,
                 font_name=UI_FONT,
                 anchor_x="center",
                 bold=is_active

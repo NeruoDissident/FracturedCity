@@ -325,6 +325,33 @@ register_item(ItemDef(
     description="A small seed. Could be planted."
 ))
 
+# --- Farming Items ---
+register_item(ItemDef(
+    id="tomato_seed",
+    name="Tomato Seed",
+    slot=None,
+    tags=["organic", "seed", "farming"],
+    icon_color=(180, 50, 50),
+    description="Seeds scavenged from old food stores. Can be planted in a plant bed.",
+    stack_size=10,
+    weight=0.1,
+    volume=0.1
+))
+
+register_item(ItemDef(
+    id="tomato",
+    name="Tomato",
+    slot=None,
+    tags=["organic", "food", "raw_food", "vegetable"],
+    material_type="food",
+    icon_color=(220, 60, 60),
+    description="A fresh tomato. Can be eaten raw or cooked.",
+    stack_size=20,
+    weight=0.5,
+    volume=0.5,
+    spoilage_rate=0.1  # Spoils in ~10 days
+))
+
 # --- Furniture / World Objects ---
 register_item(ItemDef(
     id="gutter_slab",

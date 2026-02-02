@@ -529,8 +529,11 @@ def find_stockpile_with_resource(resource_type: str, z: int = None, required_spe
     Used for construction supply - colonists need to fetch materials.
     Also checks equipment storage for component items (wire, chip, etc.)
     
+    If resource_type starts with '@', search by tag instead of exact ID.
+    Example: '@meat' finds any item with 'meat' tag (scrap_meat, poultry_meat, etc.)
+    
     Args:
-        resource_type: Type of resource to find (e.g., 'wood', 'wire', 'chip', 'corpse')
+        resource_type: Type of resource to find (e.g., 'wood', 'wire', 'chip', 'corpse', '@meat', '@vegetable')
         z: If specified, prefer tiles on this Z-level
         required_species: For corpses, filter by source_species metadata
     
@@ -539,32 +542,54 @@ def find_stockpile_with_resource(resource_type: str, z: int = None, required_spe
     preferred = None
     fallback = None
     
-    # First check regular tile storage (raw resources)
-    for coord, storage in _TILE_STORAGE.items():
-        if storage.get("type") == resource_type and storage.get("amount", 0) > 0:
-            if z is not None and coord[2] == z:
-                preferred = coord
-            elif fallback is None:
-                fallback = coord
+    # Check if this is a tag-based search
+    search_by_tag = resource_type.startswith("@")
+    if search_by_tag:
+        tag_to_find = resource_type[1:]  # Remove '@' prefix
     
-    if preferred or fallback:
-        return preferred or fallback
+    # First check regular tile storage (raw resources)
+    # Tag-based search doesn't apply to raw resources (wood, metal, etc.)
+    if not search_by_tag:
+        for coord, storage in _TILE_STORAGE.items():
+            if storage.get("type") == resource_type and storage.get("amount", 0) > 0:
+                if z is not None and coord[2] == z:
+                    preferred = coord
+                elif fallback is None:
+                    fallback = coord
+        
+        if preferred or fallback:
+            return preferred or fallback
     
     # If not found in tile storage, check equipment storage for component items
     # Components like wire, chip, resistor, etc. are stored as item objects
     for coord, items in _EQUIPMENT_STORAGE.items():
         for item in items:
-            # Match by item ID
-            if item.get("id") == resource_type:
-                # If species filter specified (for corpses), check metadata
-                if required_species and item.get("source_species") != required_species:
-                    continue
-                
-                if z is not None and coord[2] == z:
-                    preferred = coord
-                elif fallback is None:
-                    fallback = coord
-                break  # Found at this coord, check next coord
+            if search_by_tag:
+                # Tag-based search - check if item has the tag
+                from items import get_item_def
+                item_def = get_item_def(item.get("id", ""))
+                if item_def and tag_to_find in item_def.tags:
+                    # If species filter specified, check metadata
+                    if required_species and item.get("source_species") != required_species:
+                        continue
+                    
+                    if z is not None and coord[2] == z:
+                        preferred = coord
+                    elif fallback is None:
+                        fallback = coord
+                    break  # Found at this coord, check next coord
+            else:
+                # Exact ID match
+                if item.get("id") == resource_type:
+                    # If species filter specified (for corpses), check metadata
+                    if required_species and item.get("source_species") != required_species:
+                        continue
+                    
+                    if z is not None and coord[2] == z:
+                        preferred = coord
+                    elif fallback is None:
+                        fallback = coord
+                    break  # Found at this coord, check next coord
     
     return preferred or fallback
 

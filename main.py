@@ -7,6 +7,9 @@ Game logic from the original main.py will be integrated here.
 
 import arcade
 from config import SCREEN_W, SCREEN_H, TILE_SIZE, GRID_W, GRID_H, COLONIST_COUNT
+
+# Global debug flag for skipping sleep/recreation
+DEBUG_SKIP_SLEEP = False
 from grid import Grid
 from grid_arcade import GridRenderer
 from colonist_arcade import ColonistRenderer
@@ -62,6 +65,9 @@ class FracturedCityWindow(arcade.Window):
         # Game speed
         self.game_speed = 3  # Default to 3x speed (1-5 range)
         self.paused = False  # Pause state
+        
+        # Debug mode - skip sleep/recreation time
+        self.debug_skip_sleep = False
         
         # Pygame surface for UI rendering (reuse existing UI code)
         self.ui_surface = None
@@ -221,6 +227,10 @@ class FracturedCityWindow(arcade.Window):
         self.grid_renderer = GridRenderer(self.grid)
         self.grid_renderer.build_tile_sprites(z_level=0)
         
+        # Set global reference for dirty tile marking from external modules
+        import grid_arcade
+        grid_arcade._GRID_RENDERER = self.grid_renderer
+        
         # Wire grid tile changes to renderer updates (for construction, demolition, etc.)
         self.grid.on_tile_change = self.grid_renderer.update_tile
         
@@ -271,6 +281,11 @@ class FracturedCityWindow(arcade.Window):
         # Initialize stockpile filter panel
         from ui_arcade_stockpile import get_stockpile_panel
         self.stockpile_panel = get_stockpile_panel()
+        
+        # Initialize Net-Log Dashboard
+        from ui_arcade_dashboard import Dashboard
+        self.dashboard = Dashboard(self.current_width, self.current_height)
+        self.dashboard.colonist_popup.set_colonists_list(self.colonists) # Set colonist list for relationships
         
         # Right panel removed - using center popups now
         
@@ -530,6 +545,10 @@ class FracturedCityWindow(arcade.Window):
         
         # Draw notification panel (top-right, above everything)
         self.notification_panel.draw()
+        
+        # Draw Net-Log Dashboard (modal, covers everything)
+        if hasattr(self, 'dashboard') and self.dashboard.visible:
+            self.dashboard.draw(game_data, self.mouse_x, self.mouse_y)
         
         # Draw tile info panel (bottom-right)
         if self.tile_info_panel and self.hovered_tile:
@@ -969,6 +988,10 @@ class FracturedCityWindow(arcade.Window):
         from animals import update_animals
         update_animals(self.grid, self.tick_count)
         
+        # Update crops
+        from crops import tick_crop_growth
+        tick_crop_growth(self.tick_count)
+        
         # Update resource nodes
         update_resource_nodes(self.grid)
         
@@ -1035,9 +1058,18 @@ class FracturedCityWindow(arcade.Window):
     
     def on_key_press(self, key, modifiers):
         """Handle key press."""
+        # Check dashboard input first
+        if hasattr(self, 'dashboard') and self.dashboard.visible:
+            if self.dashboard.handle_input(key, modifiers):
+                return
+        
         self.keys_pressed.add(key)
         
-        # Pause toggle with SPACE
+        # Dashboard toggle with TAB
+        if key == arcade.key.TAB:
+            if hasattr(self, 'dashboard'):
+                self.dashboard.toggle()
+                return
         if key == arcade.key.SPACE:
             self.paused = not self.paused
             if self.paused:
@@ -1131,7 +1163,6 @@ class FracturedCityWindow(arcade.Window):
                     panels_closed = True
                     print("[ESC] Closed animal popup")
                 
-                # ESC only closes panels, never closes the game
                 if not panels_closed:
                     print("[ESC] No panels open to close")
             except Exception as e:
@@ -1203,6 +1234,27 @@ class FracturedCityWindow(arcade.Window):
             else:
                 print("[Debug] Fixer already present, skipping")
         
+        elif key == arcade.key.F6:
+            # F6: Toggle debug mode - skip sleep/recreation time
+            import main as main_module
+            main_module.DEBUG_SKIP_SLEEP = not main_module.DEBUG_SKIP_SLEEP
+            self.debug_skip_sleep = main_module.DEBUG_SKIP_SLEEP
+            status = "ENABLED" if self.debug_skip_sleep else "DISABLED"
+            print(f"\n{'='*60}")
+            print(f"[F6] DEBUG MODE: {status}")
+            if self.debug_skip_sleep:
+                print("[F6] Colonists will work 24/7 - no sleep or recreation")
+            else:
+                print("[F6] Normal schedule restored - colonists will sleep/recreate")
+            print(f"{'='*60}\n")
+            from notifications import add_notification, NotificationType
+            add_notification(
+                NotificationType.INFO,
+                f"DEBUG MODE: {status}",
+                "Sleep and recreation time skipped" if self.debug_skip_sleep else "Normal schedule restored",
+                duration=180
+            )
+        
         elif key == arcade.key.F8:
             # Debug: Print construction site status
             from buildings import get_all_construction_sites, get_missing_materials
@@ -1235,44 +1287,22 @@ class FracturedCityWindow(arcade.Window):
                 "charm": [item.id for item in get_items_for_slot("charm")]
             }
             
-            # Create pools for each slot ensuring each item appears at least once
-            alive_colonists = [c for c in self.colonists if not c.is_dead]
-            equipment_pools = {}
-            
-            for slot, items in available_items.items():
-                if not items:
-                    equipment_pools[slot] = []
-                    continue
-                
-                # Start with one of each item
-                pool = items.copy()
-                
-                # Fill remaining slots with random items
-                while len(pool) < len(alive_colonists):
-                    pool.append(random.choice(items))
-                
-                # Shuffle the pool
-                random.shuffle(pool)
-                equipment_pools[slot] = pool
-            
-            # Equip colonists
+            # Equip all colonists with random items
             equipped_count = 0
-            for idx, colonist in enumerate(alive_colonists):
-                for slot, pool in equipment_pools.items():
-                    if pool and idx < len(pool):
-                        item_id = pool[idx]
+            for colonist in self.colonists:
+                if colonist.is_dead:
+                    continue
+                for slot, items in available_items.items():
+                    if items:
+                        item_id = random.choice(items)
                         colonist.equipment[slot] = create_item_instance(item_id)
-                
                 equipped_count += 1
-                
-                # Reload equipment sprites if colonist has arcade sprite
-                if hasattr(colonist, '_arcade_sprite') and colonist._arcade_sprite:
-                    colonist._arcade_sprite.update_equipment()
             
             add_notification(NotificationType.INFO,
+                           "DEBUG: Equipment Randomized",
                            f"Equipped {equipped_count} colonists with random equipment",
                            duration=180)
-            print(f"[Debug] Equipped {equipped_count} colonists with randomized equipment (all items used at least once)")
+            print(f"[Debug] Equipped {equipped_count} colonists with randomized equipment")
         
         elif key == arcade.key.F11:
             # Debug: Spawn a raider
@@ -1328,23 +1358,21 @@ class FracturedCityWindow(arcade.Window):
         # Update tracked dimensions
         self.current_width = width
         self.current_height = height
+        super().on_resize(width, height)
         
-        print(f"[Window] Resized to {width}x{height}")
-        print(f"[Window] Window dimensions: {self.width}x{self.height}")
-        print(f"[Window] Updating UI components to new dimensions...")
-        
-        # Camera2D automatically handles viewport on resize in Arcade 3.0
-        # Just need to update UI component dimensions
-        
-        # Update UI components with new dimensions
+        # Resize UI components
         if hasattr(self, 'ui'):
             self.ui.on_resize(width, height)
         if hasattr(self, 'left_sidebar'):
             self.left_sidebar.on_resize(width, height)
-        # Colonist detail panel removed (using center popup)
-        # Animal popup doesn't need resize (centered)
         if hasattr(self, 'notification_panel'):
             self.notification_panel.on_resize(width, height)
+        if hasattr(self, 'dashboard'):
+            self.dashboard.on_resize(width, height)
+            
+        # Center tile info panel at bottom
+        if self.tile_info_panel:
+            self.tile_info_panel.on_resize(width, height)
     
     def on_mouse_scroll(self, x, y, scroll_x, scroll_y):
         """Handle mouse wheel for zoom and UI scrolling."""
@@ -1397,10 +1425,15 @@ class FracturedCityWindow(arcade.Window):
         
         self.camera.zoom = self.zoom_level
     
-    def on_mouse_motion(self, x, y, dx, dy):
+    def on_mouse_motion(self, x: int, y: int, dx: int, dy: int):
         """Handle mouse movement."""
         self.mouse_x = x
         self.mouse_y = y
+        
+        # Dashboard input
+        if hasattr(self, 'dashboard') and self.dashboard.visible:
+            self.dashboard.handle_mouse_motion(x, y, dx, dy)
+            return
         
         # Update action bar tooltip hover
         self.ui.action_bar.update_hover(x, y)
@@ -1443,6 +1476,11 @@ class FracturedCityWindow(arcade.Window):
     
     def on_mouse_press(self, x, y, button, modifiers):
         """Handle mouse clicks - wire to existing game functions."""
+        # Dashboard input (HIGHEST PRIORITY - modal overlay)
+        if hasattr(self, 'dashboard') and self.dashboard.visible:
+            if self.dashboard.handle_mouse_press(x, y, button, modifiers):
+                return
+        
         if button == arcade.MOUSE_BUTTON_LEFT:
             # Check notification panel first (click-to-snap)
             click_location = self.notification_panel.handle_click(x, y)

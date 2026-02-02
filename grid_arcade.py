@@ -11,6 +11,15 @@ from grid import Grid
 from autotiling import get_autotile_variant, get_connection_set, should_autotile
 from tileset_loader import get_tile_texture as get_tileset_texture
 
+# Global reference to grid renderer for dirty tile marking
+_GRID_RENDERER = None
+
+def mark_tile_dirty_global(x: int, y: int, z: int):
+    """Mark a tile as dirty for re-rendering. Called from external modules."""
+    global _GRID_RENDERER
+    if _GRID_RENDERER:
+        _GRID_RENDERER.update_tile(x, y, z)
+
 
 class GridRenderer:
     """Handles rendering Grid tiles using Arcade sprites."""
@@ -131,6 +140,7 @@ class GridRenderer:
             "skinshop_loom": "finished_skinshop_loom",
             "cortex_spindle": "finished_cortex_spindle",
             "barracks": "finished_barracks",
+            "plant_bed": "finished_plant_bed",
             # Furniture
             "scrap_bar_counter": "finished_scrap_bar_counter",
             "crash_bed": "finished_crash_bed",
@@ -267,7 +277,7 @@ class GridRenderer:
             "finished_stove", "finished_generator", "finished_gutter_forge",
             "finished_salvagers_bench", "finished_spark_bench", "finished_tinker_station",
             "finished_gutter_still", "finished_skinshop_loom", "finished_cortex_spindle",
-            "finished_barracks"
+            "finished_barracks", "finished_plant_bed", "finished_bio_matter_salvage_station"
         ]
         
         if tile_type in workstation_types:
@@ -935,7 +945,8 @@ class GridRenderer:
             "wall", "wall_advanced", "floor", "door", "window", "bridge",
             "fire_escape", "building", "salvagers_bench", "generator",
             "stove", "gutter_forge", "skinshop_loom", "cortex_spindle",
-            "barracks", "scrap_bar_counter", "crash_bed", "gutter_slab"
+            "barracks", "scrap_bar_counter", "crash_bed", "gutter_slab",
+            "plant_bed", "bio_matter_salvage_station"
         }
         return tile_type in construction_types
     
@@ -1185,6 +1196,30 @@ class GridRenderer:
                         sprite.color = (153, 153, 153)
                     
                     target_list.append(sprite)
+            
+            # === CROP OVERLAY RENDERING ===
+            # If this is a plant_bed (construction or finished), check for crops and render overlay
+            base_type = tile_type.replace("finished_", "")
+            if base_type == "plant_bed":
+                from crops import get_crop_sprite
+                crop_sprite_name = get_crop_sprite(origin_x, origin_y, z)
+                print(f"[Crop Render] Checking plant_bed at ({origin_x},{origin_y}) tile_type={tile_type} crop_sprite={crop_sprite_name}")
+                
+                if crop_sprite_name:
+                    # Load crop overlay texture
+                    crop_texture = self._get_crop_texture(crop_sprite_name)
+                    
+                    if crop_texture:
+                        # Render crop overlay on the left tile (origin) of the 2x1 plant bed
+                        crop_sprite = arcade.Sprite()
+                        crop_sprite.texture = crop_texture
+                        crop_sprite.center_x = origin_x * TILE_SIZE + TILE_SIZE // 2
+                        crop_sprite.center_y = origin_y * TILE_SIZE + TILE_SIZE // 2
+                        crop_sprite.alpha = opacity
+                        target_list.append(crop_sprite)
+                        print(f"[Crop Render] Drew {crop_sprite_name} at ({origin_x},{origin_y})")
+                    else:
+                        print(f"[Crop Render] Failed to load texture for {crop_sprite_name}")
     
     def _get_multi_tile_suffix(self, dx: int, dy: int, width: int, height: int) -> str:
         """Get the sprite suffix for a tile in a multi-tile structure.
@@ -1229,6 +1264,22 @@ class GridRenderer:
         
         # Fallback for other sizes
         return f"_{dx}_{dy}"
+    
+    def _get_crop_texture(self, crop_sprite_name: str):
+        """Load texture for crop overlay."""
+        cache_key = (crop_sprite_name, "crop")
+        if cache_key in self.texture_cache:
+            return self.texture_cache[cache_key]
+        
+        sprite_path = f"assets/crops/{crop_sprite_name}.png"
+        
+        try:
+            texture = arcade.load_texture(sprite_path)
+            self.texture_cache[cache_key] = texture
+            return texture
+        except Exception as e:
+            print(f"[GridRenderer] Failed to load crop texture: {sprite_path}, error: {e}")
+            return None
     
     def _get_multi_tile_texture(self, sprite_name: str, is_furniture: bool):
         """Load texture for multi-tile structure part."""

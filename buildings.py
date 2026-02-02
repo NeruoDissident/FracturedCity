@@ -209,14 +209,17 @@ BUILDING_TYPES = {
         "size": (2, 1),  # 2x1 tiles (width, height) - horizontal
         "recipes": [
             # TYPE 1 RECIPE: Resource-based (raw_food is fungible resource)
-            {"id": "simple_meal", "name": "Simple Meal", "input": {"raw_food": 2, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
+            {"id": "simple_meal", "name": "Simple Meal", "input": {"raw_food": 2, "power": 1}, "output": {"cooked_meal": 1}, "work_time": 40},
             
-            # TYPE 1 RECIPES: Item-based (meat items have source_species metadata)
+            # TYPE 1 RECIPES: Item-based with tag matching (@ prefix = any item with that tag)
+            # @meat matches: scrap_meat, poultry_meat, high_quality_meat, etc.
+            # @vegetable matches: tomato, carrot, potato, etc.
             # Note: Metadata is currently NOT propagated to cooked_meal (future feature)
-            {"id": "grilled_scraps", "name": "Grilled Scraps", "input_items": {"scrap_meat": 1}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 50},
-            {"id": "meat_stew", "name": "Meat Stew", "input_items": {"scrap_meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 80},
-            {"id": "hearty_roast", "name": "Hearty Roast", "input_items": {"scrap_meat": 3}, "input": {"power": 2}, "output": {"cooked_meal": 1}, "work_time": 100},
-            {"id": "poultry_roast", "name": "Poultry Roast", "input_items": {"poultry_meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 70},
+            {"id": "grilled_scraps", "name": "Grilled Scraps", "input_items": {"@meat": 1}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 50},
+            {"id": "meat_stew", "name": "Meat Stew", "input_items": {"@meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 80},
+            {"id": "hearty_roast", "name": "Hearty Roast", "input_items": {"@meat": 2, "@vegetable": 1}, "input": {"power": 2}, "output": {"cooked_meal": 1}, "work_time": 100},
+            {"id": "poultry_roast", "name": "Poultry Roast", "input_items": {"@meat": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 70},
+            {"id": "vegetable_stew", "name": "Vegetable Stew", "input_items": {"@vegetable": 2}, "input": {"power": 1}, "output": {"cooked_meal": 1}, "work_time": 60},
         ],
     },
     # === Item Crafting Stations ===
@@ -331,6 +334,21 @@ BUILDING_TYPES = {
             {"id": "butcher_bird", "name": "Butcher Bird", "input": {"bird_corpse": 1}, "output": {"poultry_meat": 3, "feathers": 2}, "work_time": 70},
         ],
     },
+    # === Farming ===
+    "plant_bed": {
+        "name": "Plant Bed",
+        "tile_type": "plant_bed",
+        "materials": {"wood": 2, "scrap": 1},
+        "construction_work": 60,
+        "walkable": False,
+        "workstation": True,
+        "multi_recipe": True,
+        "size": (2, 1),  # 2x1 horizontal
+        "placement_rule": "rooftop_only",
+        "recipes": [
+            {"id": "grow_tomato", "name": "Plant Tomato", "input_items": {"tomato_seed": 1}, "work_time": 1},
+        ],
+    },
 }
 
 # Track door states (open/closed)
@@ -429,9 +447,25 @@ def workstation_has_inputs(x: int, y: int, z: int = 0) -> bool:
     item_inputs_needed = recipe.get("input_items", {})
     equipment_have = ws.get("equipment_items", {})
     
-    for item_tag, amount in item_inputs_needed.items():
-        if equipment_have.get(item_tag, 0) < amount:
-            return False
+    for item_requirement, amount_needed in item_inputs_needed.items():
+        # Check if this is a tag-based requirement (e.g., @vegetable)
+        if item_requirement.startswith("@"):
+            # Tag-based matching - sum up all items with this tag
+            tag_to_find = item_requirement[1:]
+            total_with_tag = 0
+            
+            from items import get_item_def
+            for item_id, item_count in equipment_have.items():
+                item_def = get_item_def(item_id)
+                if item_def and tag_to_find in item_def.tags:
+                    total_with_tag += item_count
+            
+            if total_with_tag < amount_needed:
+                return False
+        else:
+            # Exact ID matching
+            if equipment_have.get(item_requirement, 0) < amount_needed:
+                return False
     
     return True
 
@@ -460,8 +494,28 @@ def consume_workstation_inputs(x: int, y: int, z: int = 0) -> bool:
     if "equipment_items" not in ws:
         ws["equipment_items"] = {}
     
-    for item_tag, amount in item_inputs_needed.items():
-        ws["equipment_items"][item_tag] = ws["equipment_items"].get(item_tag, 0) - amount
+    for item_requirement, amount_needed in item_inputs_needed.items():
+        # Check if this is a tag-based requirement (e.g., @vegetable)
+        if item_requirement.startswith("@"):
+            # Tag-based consumption - consume items that have this tag
+            tag_to_find = item_requirement[1:]
+            remaining_to_consume = amount_needed
+            
+            from items import get_item_def
+            # Consume items with this tag until we've consumed enough
+            for item_id in list(ws["equipment_items"].keys()):
+                if remaining_to_consume <= 0:
+                    break
+                
+                item_def = get_item_def(item_id)
+                if item_def and tag_to_find in item_def.tags:
+                    available = ws["equipment_items"][item_id]
+                    to_consume = min(available, remaining_to_consume)
+                    ws["equipment_items"][item_id] -= to_consume
+                    remaining_to_consume -= to_consume
+        else:
+            # Exact ID consumption
+            ws["equipment_items"][item_requirement] = ws["equipment_items"].get(item_requirement, 0) - amount_needed
     
     # Clear empty equipment entries
     ws["equipment_items"] = {k: v for k, v in ws["equipment_items"].items() if v > 0}
@@ -1711,16 +1765,25 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
             orders.pop(0)
             continue
         
-        # Check if stockpile has required inputs
+        # Check if stockpile has required inputs (both regular and item inputs)
         inputs_needed = recipe.get("input", {})
+        item_inputs_needed = recipe.get("input_items", {})
         can_craft = True
         missing = []
         
+        # Check regular resource inputs
         for res_type, amount in inputs_needed.items():
             source = zones_module.find_stockpile_with_resource(res_type, z=z)
             if source is None:
                 can_craft = False
                 missing.append(res_type)
+        
+        # Check item inputs (seeds, corpses, etc.)
+        for item_type, amount in item_inputs_needed.items():
+            source = zones_module.find_stockpile_with_resource(item_type, z=z)
+            if source is None:
+                can_craft = False
+                missing.append(item_type)
         
         if not can_craft:
             # Log once per order to avoid spam
@@ -1737,6 +1800,15 @@ def process_crafting_jobs(jobs_module, zones_module) -> int:
         # Create crafting job at workstation location
         # Determine job category based on workstation type
         workstation_type = ws.get("type", "")
+        
+        # For plant_bed, check if crop already exists (don't create job until harvested)
+        if workstation_type == "plant_bed":
+            from crops import get_crop_at
+            existing_crop = get_crop_at(x, y, z)
+            if existing_crop:
+                # Crop still growing/mature - wait for harvest
+                continue
+        
         if workstation_type == "stove":
             job_category = "cooking"
         else:
